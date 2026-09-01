@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Suivi Trains — Tableau de bord temps réel</title>
+  <meta name="description" content="Suivi en temps réel de plusieurs trains : heures théoriques, heures réelles, écarts, cause principale de retard et graphiques d'évolution.">
+
+  <meta name="theme-color" content="#0f1b33">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="assets/icons/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Suivi Trains">
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Aller au contenu</a>
+
+  <header class="app-header">
+    <div class="app-header-left">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🚄</span>
+        <span class="brand-name">Suivi&nbsp;Trains</span>
+      </div>
+      <div class="date-clock">
+        <span id="currentDateLabel" class="current-date"></span>
+        <span id="clock" class="clock" aria-label="Heure actuelle">--:--:--</span>
+      </div>
+    </div>
+
+    <div class="app-header-right">
+      <div class="sync-indicator" title="État de la synchronisation Google Sheets">
+        <button type="button" id="btnSyncHeader" class="icon-btn" aria-label="Synchroniser maintenant">
+          <span id="syncDot" class="sync-dot sync-none" aria-hidden="true"></span>
+        </button>
+        <span id="syncLabel" class="sync-label">Google Sheets non configuré</span>
+      </div>
+      <button type="button" id="btnInstall" class="btn btn-outline" hidden>Installer l'app</button>
+      <button type="button" id="btnHistory" class="btn btn-ghost">Historique</button>
+      <button type="button" id="btnSettings" class="icon-btn" aria-label="Réglages">⚙</button>
+      <button type="button" id="btnAddTrain" class="btn btn-primary">+ Ajouter un train</button>
+    </div>
+  </header>
+
+  <main id="mainContent" class="app-main">
+    <div id="trainsGrid" class="trains-grid" aria-live="polite"></div>
+  </main>
+
+  <footer class="app-footer">
+    <span>Suivi Trains — tableau de bord de suivi ferroviaire, fonctionne hors-ligne (PWA).</span>
+  </footer>
+
+  <div id="modalRoot" class="modal-root" aria-hidden="true"></div>
+  <div id="toastContainer" class="toast-container" aria-live="assertive"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

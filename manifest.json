@@ -1,0 +1,18 @@
+{
+  "name": "Suivi Trains — Tableau de bord temps réel",
+  "short_name": "Suivi Trains",
+  "description": "Suivi en temps réel de plusieurs trains : heures théoriques, heures réelles, écarts, cause principale de retard et graphiques d'évolution.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1220",
+  "theme_color": "#0f1b33",
+  "lang": "fr",
+  "dir": "ltr",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
