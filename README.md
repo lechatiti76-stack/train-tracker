@@ -47,7 +47,10 @@ graphique d'évolution, et installation en PWA sur mobile.
 ├── assets/
 │   └── icons/                    Icônes PWA (générées, voir tools/generate-icons.js)
 ├── tools/
-│   └── generate-icons.js         Script Node pour régénérer les icônes (aucune dépendance)
+│   ├── generate-icons.js         Script Node pour régénérer les icônes (aucune dépendance)
+│   ├── dev-server.js              Petit serveur statique pour tester en local sans rien installer
+│   └── build-demo.js              Assemble une démo mono-fichier (js/* fusionnés, sans Chart.js/PWA)
+│                                   pratique pour un aperçu rapide en dehors du dépôt
 └── README.md
 ```
 
