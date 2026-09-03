@@ -170,6 +170,32 @@ Script dépassé...), l'application affiche un indicateur d'erreur discret
 dans l'en-tête et continue de fonctionner avec les données déjà en local —
 elle ne plante jamais.
 
+### 6.4. Retrouver un sillon par son heure d'arrivée
+
+Chaque vignette a un champ **"Heure d'arrivée du sillon"** juste sous son
+en-tête. C'est un raccourci qui évite de ressaisir les 7 horaires à la
+main :
+
+1. Tapez l'heure d'arrivée théorique du sillon (celle de la dernière étape,
+   `Arrivée`) et cliquez sur **🔍 Retrouver** (ou appuyez sur Entrée).
+2. L'application interroge le Web App Google Apps Script pour la **date du
+   train affiché sur la vignette**, et cherche, parmi tous les sillons de ce
+   jour-là, celui dont l'heure d'arrivée correspond exactement.
+3. Si un sillon correspond : les 7 horaires théoriques et les causes du
+   Sheet sont copiés sur la vignette, son numéro de train est mis à jour
+   avec celui du Sheet, et le badge **⇄ Sheet** apparaît. Les heures
+   **réelles déjà enregistrées ne sont jamais touchées** — seul le
+   théorique change, donc les écarts et le graphique se recalculent en
+   conséquence.
+4. Si aucun sillon ne correspond à cette heure pour cette date, un message
+   explicite s'affiche sous le champ ("Aucun sillon trouvé...") — rien
+   n'est modifié.
+
+Cette recherche se fait par l'heure elle-même (l'heure d'arrivée la plus
+tardive du groupe de lignes partageant un même numéro de train dans le
+Sheet, pour la date donnée), pas par numéro de train : vous n'avez donc pas
+besoin de connaître le numéro du sillon à l'avance.
+
 ## 7. Installer la PWA sur smartphone
 
 ### Android (Chrome)
@@ -236,6 +262,8 @@ le menu de partage.
   simplement sans écart calculable ("—").
 - Google Sheet inaccessible ou mal configuré → indicateur d'erreur discret,
   aucune donnée locale perdue, aucun plantage.
+- Recherche de sillon par heure d'arrivée sans correspondance dans le Sheet
+  → message explicite sous le champ, rien n'est modifié sur la vignette.
 
 ## 11. Limites connues
 

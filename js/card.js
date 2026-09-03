@@ -73,16 +73,25 @@ function summaryRowHTML(train) {
 export function trainCardTemplate(train, { readOnly = false } = {}) {
   const status = computeTrainStatus(train);
   const stepsHTML = train.steps.map((_, i) => stepRowHTML(train, i, readOnly)).join('');
-  const sourceBadge = train.source === 'sheet' ? '<span class="source-badge" title="Synchronisé depuis Google Sheets">⇄ Sheet</span>' : '';
 
   return `
     <article class="train-card" data-train-id="${train.id}" data-readonly="${readOnly}">
       <header class="card-header">
         ${readOnly ? '' : '<button type="button" class="card-handle" draggable="true" data-action="drag-handle" aria-label="Glisser pour réorganiser">⠿</button>'}
-        <h3 class="card-title">TRAIN <span>${escapeHtml(train.number)}</span></h3>
-        ${sourceBadge}
+        <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span></h3>
+        <span class="source-badge" data-role="source-badge" title="Synchronisé depuis Google Sheets" ${train.source === 'sheet' ? '' : 'hidden'}>⇄ Sheet</span>
         <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
       </header>
+
+      ${readOnly ? '' : `
+        <div class="sillon-lookup">
+          <label class="sillon-lookup-label" for="arrival-${train.id}">Heure d'arrivée du sillon (Google Sheets)</label>
+          <div class="sillon-lookup-row">
+            <input type="time" id="arrival-${train.id}" class="sillon-lookup-input" data-role="arrival-lookup" value="${train.targetArrival || ''}">
+            <button type="button" class="btn btn-outline btn-sm" data-action="lookup-sillon">🔍 Retrouver</button>
+          </div>
+          <p class="sillon-lookup-status" data-role="sillon-status"></p>
+        </div>`}
 
       <div class="cause-panel">
         <div class="cause-panel-title">Cause principale</div>
@@ -117,6 +126,12 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
 }
 
 export function updateCardDynamicParts(cardEl, train) {
+  const numberEl = cardEl.querySelector('[data-role="train-number"]');
+  if (numberEl) numberEl.textContent = train.number;
+
+  const badgeEl = cardEl.querySelector('[data-role="source-badge"]');
+  if (badgeEl) badgeEl.hidden = train.source !== 'sheet';
+
   const status = computeTrainStatus(train);
   const statusEl = cardEl.querySelector('[data-role="status"]');
   if (statusEl) {

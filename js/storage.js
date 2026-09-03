@@ -57,6 +57,7 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     date, // 'YYYY-MM-DD'
     order,
     source, // 'manual' | 'sheet'
+    targetArrival: null, // 'HH:MM' saisie pour retrouver le sillon dans Google Sheets
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,

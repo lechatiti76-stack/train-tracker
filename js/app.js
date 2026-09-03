@@ -7,7 +7,7 @@ import { DELAY_THRESHOLDS } from './config.js';
 import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains } from './storage.js';
 import { computeAllStepDelays, computeMainCause, computeTrainStatus } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds } from './time-utils.js';
-import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains } from './sheets-sync.js';
+import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, findSillonByArrivalTime, applySillonRowsToTrain } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml } from './card.js';
@@ -287,8 +287,82 @@ function onGridClick(e) {
     case 'delete-train': deleteTrain(train); break;
     case 'move-left': moveTrain(train, -1); break;
     case 'move-right': moveTrain(train, 1); break;
+    case 'lookup-sillon': {
+      const input = cardEl.querySelector('[data-role="arrival-lookup"]');
+      lookupSillonByArrival(train, input?.value);
+      break;
+    }
     default: break;
   }
+}
+
+function wireSillonInputs(grid) {
+  grid.addEventListener('change', (e) => {
+    const input = e.target.closest('[data-role="arrival-lookup"]');
+    if (!input) return;
+    const cardEl = input.closest('.train-card');
+    const train = findTrain(cardEl?.dataset.trainId);
+    if (!train) return;
+    train.targetArrival = input.value || null;
+    persist();
+  });
+  grid.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const input = e.target.closest('[data-role="arrival-lookup"]');
+    if (!input) return;
+    e.preventDefault();
+    const cardEl = input.closest('.train-card');
+    const train = findTrain(cardEl?.dataset.trainId);
+    if (train) lookupSillonByArrival(train, input.value);
+  });
+}
+
+function setSillonStatus(trainId, state, extra) {
+  const cardEl = grid_cardEl(trainId);
+  const el = cardEl?.querySelector('[data-role="sillon-status"]');
+  if (!el) return;
+  const messages = {
+    loading: 'Recherche du sillon…',
+    ok: `Sillon ${extra} appliqué`,
+    'not-found': "Aucun sillon trouvé dans le Sheet pour cette heure d'arrivée à cette date.",
+    error: `Google Sheets indisponible${extra ? ' (' + extra + ')' : ''}.`,
+  };
+  el.textContent = messages[state] || '';
+  el.className = `sillon-lookup-status status-${state}`;
+}
+
+async function lookupSillonByArrival(train, timeValue) {
+  if (!timeValue) return;
+  if (!settings.sheetsWebAppUrl) {
+    showToast("Configurez d'abord l'URL Google Sheets dans les Réglages", 'error');
+    setSillonStatus(train.id, 'error', 'non configuré');
+    return;
+  }
+  setSillonStatus(train.id, 'loading');
+  const res = await fetchTheoreticalFromSheet(settings.sheetsWebAppUrl, train.date);
+  if (!res.ok) {
+    const detail = SYNC_ERROR_LABELS[res.reason] || res.reason;
+    setSillonStatus(train.id, 'error', detail);
+    showToast('Google Sheets indisponible', 'error');
+    return;
+  }
+
+  const match = findSillonByArrivalTime(res.rows, train.date, timeValue);
+  if (!match) {
+    setSillonStatus(train.id, 'not-found');
+    showToast("Aucun sillon trouvé pour cette heure d'arrivée", 'error');
+    return;
+  }
+
+  applySillonRowsToTrain(train, match.rows);
+  train.number = match.trainNumber || train.number;
+  train.targetArrival = timeValue;
+  train.source = 'sheet';
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+  setSillonStatus(train.id, 'ok', match.trainNumber);
+  showToast(`Sillon ${match.trainNumber} appliqué (${match.rows.length} horaires)`);
 }
 
 function wireDragAndDrop(grid) {
@@ -691,6 +765,7 @@ function init() {
   const grid = el('trainsGrid');
   grid.addEventListener('click', onGridClick);
   wireDragAndDrop(grid);
+  wireSillonInputs(grid);
 
   wireHeaderButtons();
   wireInstallPrompt();

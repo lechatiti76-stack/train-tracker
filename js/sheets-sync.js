@@ -37,6 +37,36 @@ function normalizeLabel(str) {
     .toLowerCase();
 }
 
+// Applique un jeu de lignes Sheet (un seul sillon) sur les 7 étapes d'un
+// train, en faisant correspondre chaque ligne à une étape par libellé
+// (insensible à la casse/aux accents). Ne touche jamais aux heures réelles.
+export function applySillonRowsToTrain(train, rows) {
+  for (const row of rows) {
+    const etapeLabel = row.etape ?? row.Etape ?? row['Étape'] ?? '';
+    const heureTheorique = row.heureTheorique ?? row['Heure théorique'] ?? row.heure ?? '';
+    const cause = row.cause ?? row.Cause ?? '';
+    const norm = normalizeLabel(etapeLabel);
+    const step = train.steps.find((s) => normalizeLabel(s.label) === norm);
+    if (step) {
+      if (heureTheorique) step.theoretical = normalizeSheetTime(heureTheorique);
+      if (cause && cause !== '-') step.cause = cause;
+    }
+  }
+}
+
+function groupRowsByTrainForDate(rows, dateISO) {
+  const byTrainNumber = new Map();
+  for (const row of rows) {
+    const dateStr = normalizeSheetDate(row.date ?? row.Date);
+    if (dateStr !== dateISO) continue;
+    const number = String(row.train ?? row.Train ?? '').trim();
+    if (!number) continue;
+    if (!byTrainNumber.has(number)) byTrainNumber.set(number, []);
+    byTrainNumber.get(number).push(row);
+  }
+  return byTrainNumber;
+}
+
 // Fusionne les lignes issues du Sheet dans la liste de trains existante.
 // - Ne touche JAMAIS aux heures réelles déjà enregistrées.
 // - Met à jour l'heure théorique + la cause d'une étape existante.
@@ -44,17 +74,7 @@ function normalizeLabel(str) {
 export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabels) {
   const result = trains.map((t) => ({ ...t, steps: t.steps.map((s) => ({ ...s })) }));
   const touchedNumbers = new Set();
-
-  const byTrainNumber = new Map();
-  for (const row of rows) {
-    const dateStr = normalizeSheetDate(row.date || row.Date);
-    if (dateStr !== dateISO) continue;
-    const number = String(row.train ?? row.Train ?? '').trim();
-    if (!number) continue;
-    if (!byTrainNumber.has(number)) byTrainNumber.set(number, []);
-    byTrainNumber.get(number).push(row);
-  }
-
+  const byTrainNumber = groupRowsByTrainForDate(rows, dateISO);
   let maxOrder = result.reduce((m, t) => Math.max(m, t.order || 0), -1);
 
   for (const [number, sheetRows] of byTrainNumber) {
@@ -64,21 +84,32 @@ export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabel
       train = createEmptyTrain({ number, date: dateISO, stepLabels: defaultStepLabels, order: ++maxOrder, source: 'sheet' });
       result.push(train);
     }
-    for (const row of sheetRows) {
-      const etapeLabel = row.etape ?? row.Etape ?? row['Étape'] ?? '';
-      const heureTheorique = row.heureTheorique ?? row['Heure théorique'] ?? row.heure ?? '';
-      const cause = row.cause ?? row.Cause ?? '';
-      const norm = normalizeLabel(etapeLabel);
-      const step = train.steps.find((s) => normalizeLabel(s.label) === norm);
-      if (step) {
-        if (heureTheorique) step.theoretical = normalizeSheetTime(heureTheorique);
-        if (cause && cause !== '-') step.cause = cause;
-      }
-    }
+    applySillonRowsToTrain(train, sheetRows);
     train.updatedAt = new Date().toISOString();
   }
 
   return { trains: result, touchedNumbers };
+}
+
+// Recherche, parmi tous les sillons connus pour une date, celui dont l'heure
+// d'arrivée théorique (la plus tardive des heures du groupe) correspond à
+// l'heure donnée. Ne dépend pas du numéro de train : c'est l'heure elle-même
+// qui identifie le sillon, comme demandé.
+export function findSillonByArrivalTime(rows, dateISO, arrivalHHMM) {
+  const targetTime = normalizeSheetTime(arrivalHHMM);
+  if (!targetTime) return null;
+
+  const byTrainNumber = groupRowsByTrainForDate(rows, dateISO);
+  const matches = [];
+  for (const [number, groupRows] of byTrainNumber) {
+    let latest = null;
+    for (const row of groupRows) {
+      const t = normalizeSheetTime(row.heureTheorique ?? row['Heure théorique'] ?? row.heure ?? '');
+      if (t && (!latest || t > latest)) latest = t;
+    }
+    if (latest === targetTime) matches.push({ trainNumber: number, rows: groupRows });
+  }
+  return matches[0] || null;
 }
 
 function normalizeSheetDate(value) {

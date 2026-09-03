@@ -250,6 +250,35 @@ body {
 .status-pill.tone-early { background: var(--early-bg); color: var(--early); }
 .status-pill.tone-neutral { background: var(--neutral-bg); color: var(--text-muted); }
 
+/* ---------- Recherche de sillon par heure d'arrivée ---------- */
+.sillon-lookup {
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.sillon-lookup-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sillon-lookup-row { display: flex; gap: 0.5rem; }
+.sillon-lookup-input { flex: 1 1 auto; min-width: 0; }
+.btn-sm { min-height: 40px; padding: 0.45rem 0.7rem; font-size: 0.8rem; flex: 0 0 auto; }
+.sillon-lookup-status {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  min-height: 1em;
+}
+.sillon-lookup-status.status-ok { color: var(--success); }
+.sillon-lookup-status.status-error, .sillon-lookup-status.status-not-found { color: var(--danger); }
+.sillon-lookup-status.status-loading { color: var(--text-muted); }
+
 /* ---------- Panneau "cause principale" façon split-flap ---------- */
 .cause-panel {
   background: #0a0f1c;
