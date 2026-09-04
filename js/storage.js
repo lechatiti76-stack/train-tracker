@@ -64,6 +64,7 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
       theoretical: null, // 'HH:MM'
       real: null, // ISO string complet (avec secondes)
       cause: '',
+      offsetMinutes: null, // décalage (min, +/-) vs l'étape Départ ; recalcule l'heure théorique automatiquement si défini
     })),
     createdAt: now,
     updatedAt: now,

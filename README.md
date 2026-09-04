@@ -242,6 +242,29 @@ le menu de partage.
   (la comparaison ignore la casse et les accents, mais pas les libellés
   complètement différents).
 
+### 9.1. Étapes de préparation avant le départ (décalage automatique)
+
+Certaines étapes se déroulent **avant** le départ commercial (préparation
+du train, essais, formation...) et ont des horaires théoriques fixes par
+rapport à celui-ci, plutôt que des horaires qui viennent du Sheet. Pour ça,
+dans le formulaire "Modifier" de chaque étape (sauf la 1ʳᵉ, "Départ", qui
+sert de référence), un champ **"Décalage / Départ (min)"** est disponible :
+
+- Renseignez un nombre de minutes **négatif** pour une étape avant le
+  départ (ex : `-91` pour une étape 1h31 avant), ou **positif** pour une
+  étape après.
+- Dès que ce décalage est renseigné, l'heure théorique de cette étape est
+  **calculée automatiquement** à partir de celle du Départ — inutile de la
+  ressaisir, et le champ "Heure théorique" de cette étape est alors ignoré.
+- Le recalcul se refait à chaque fois que l'heure théorique du Départ
+  change : en la modifiant à la main, ou automatiquement via la recherche
+  de sillon (section 6.4) ou la synchronisation Google Sheets.
+- L'écart (retard/avance) de ces étapes de préparation se calcule et
+  s'affiche exactement comme pour les autres : heure réelle enregistrée
+  comparée à l'heure théorique (ici, dérivée du Départ).
+- Laissez le champ vide pour une étape dont l'heure théorique doit rester
+  saisie manuellement ou venir du Sheet (comportement par défaut, inchangé).
+
 ## 10. Cas particuliers gérés
 
 - Aucune heure réelle enregistrée → statut **"EN ATTENTE"**, étape affichée

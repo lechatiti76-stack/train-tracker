@@ -5,7 +5,7 @@
 // d'orchestre.
 import { DELAY_THRESHOLDS } from './config.js';
 import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains } from './storage.js';
-import { computeAllStepDelays, computeMainCause, computeTrainStatus } from './delay-calc.js';
+import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds } from './time-utils.js';
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, findSillonByArrivalTime, applySillonRowsToTrain } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
@@ -355,6 +355,7 @@ async function lookupSillonByArrival(train, timeValue) {
   }
 
   applySillonRowsToTrain(train, match.rows);
+  applyOffsetSteps(train);
   train.number = match.trainNumber || train.number;
   train.targetArrival = timeValue;
   train.source = 'sheet';
@@ -428,6 +429,7 @@ function trainFormBodyHTML(train) {
   const stepLabels = train ? train.steps.map((s) => s.label) : settings.defaultStepLabels;
   const stepTheo = train ? train.steps.map((s) => s.theoretical || '') : Array(stepLabels.length).fill('');
   const stepCause = train ? train.steps.map((s) => s.cause || '') : Array(stepLabels.length).fill('');
+  const stepOffset = train ? train.steps.map((s) => (s.offsetMinutes ?? '')) : Array(stepLabels.length).fill('');
 
   return `
     <form id="trainForm" class="stacked-form">
@@ -439,15 +441,25 @@ function trainFormBodyHTML(train) {
           <input type="date" id="fDate" required value="${train?.date || currentDate}">
         </label>
       </div>
+      <p class="help-text">
+        "Décalage / Départ (min)" est optionnel : si renseigné pour une
+        étape, son heure théorique est calculée automatiquement à partir de
+        celle du Départ (négatif pour une étape de préparation avant le
+        départ, positif pour une étape après) et le champ "Heure théorique"
+        de cette étape est ignoré.
+      </p>
       <div class="steps-form-list">
         ${stepLabels.map((label, i) => `
           <fieldset class="step-form-row">
-            <legend>Étape ${i + 1}</legend>
+            <legend>Étape ${i + 1}${i === 0 ? ' (référence)' : ''}</legend>
             <label>Libellé
               <input type="text" class="fStepLabel" data-i="${i}" value="${escapeHtml(label)}" required>
             </label>
             <label>Heure théorique
               <input type="time" class="fStepTheo" data-i="${i}" value="${stepTheo[i]}">
+            </label>
+            <label>Décalage / Départ (min)
+              <input type="number" class="fStepOffset" data-i="${i}" value="${stepOffset[i]}" placeholder="ex : -91" ${i === 0 ? 'disabled' : ''}>
             </label>
             <label>Cause (si retard)
               <input type="text" class="fStepCause" data-i="${i}" value="${escapeHtml(stepCause[i])}" placeholder="ex : Signalisation">
@@ -486,23 +498,30 @@ function saveTrainForm(panel, existingTrain) {
   const labels = sortedByIndex([...panel.querySelectorAll('.fStepLabel')]).map((i) => i.value.trim());
   const theos = sortedByIndex([...panel.querySelectorAll('.fStepTheo')]).map((i) => i.value);
   const causes = sortedByIndex([...panel.querySelectorAll('.fStepCause')]).map((i) => i.value.trim());
+  const offsets = sortedByIndex([...panel.querySelectorAll('.fStepOffset')]).map((i) => (i.value.trim() === '' ? null : Number(i.value)));
+
+  const applyStepFields = (train) => {
+    train.steps.forEach((step, i) => {
+      step.cause = causes[i] || '';
+      step.offsetMinutes = i === 0 ? null : offsets[i];
+      // Une étape avec décalage voit son heure théorique recalculée depuis
+      // le Départ (via applyOffsetSteps ci-dessous) : le champ saisi ici
+      // n'est utilisé que si aucun décalage n'est défini.
+      if (step.offsetMinutes === null) step.theoretical = theos[i] || null;
+    });
+    applyOffsetSteps(train);
+  };
 
   if (existingTrain) {
     existingTrain.number = number;
     existingTrain.date = date;
-    existingTrain.steps.forEach((step, i) => {
-      step.label = labels[i] || step.label;
-      step.theoretical = theos[i] || null;
-      step.cause = causes[i] || '';
-    });
+    existingTrain.steps.forEach((step, i) => { step.label = labels[i] || step.label; });
+    applyStepFields(existingTrain);
     existingTrain.updatedAt = new Date().toISOString();
   } else {
     const maxOrder = trains.reduce((m, t) => Math.max(m, t.order || 0), -1);
     const newTrain = createEmptyTrain({ number, date, stepLabels: labels, order: maxOrder + 1, source: 'manual' });
-    newTrain.steps.forEach((step, i) => {
-      step.theoretical = theos[i] || null;
-      step.cause = causes[i] || '';
-    });
+    applyStepFields(newTrain);
     trains.push(newTrain);
   }
 

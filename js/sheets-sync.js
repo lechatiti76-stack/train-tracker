@@ -8,6 +8,7 @@
 // il suffit de réécrire `fetchTheoreticalFromSheet` en gardant la même
 // forme de retour : { ok: true, rows: [...] } ou { ok: false, reason }.
 import { createEmptyTrain } from './storage.js';
+import { applyOffsetSteps } from './delay-calc.js';
 
 export async function fetchTheoreticalFromSheet(webAppUrl, dateISO, { timeoutMs = 8000 } = {}) {
   if (!webAppUrl) return { ok: false, reason: 'not_configured' };
@@ -85,6 +86,7 @@ export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabel
       result.push(train);
     }
     applySillonRowsToTrain(train, sheetRows);
+    applyOffsetSteps(train);
     train.updatedAt = new Date().toISOString();
   }
 

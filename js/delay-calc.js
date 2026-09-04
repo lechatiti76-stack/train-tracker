@@ -1,8 +1,30 @@
 // Logique métier : calcul des écarts, du statut global et de la cause
 // principale de retard. Fonctions pures (aucun accès au DOM ni au stockage)
 // pour rester faciles à faire évoluer.
-import { combineDateAndTime, diffMinutes, formatDelayLabel, delayTone } from './time-utils.js';
+import { combineDateAndTime, diffMinutes, formatDelayLabel, delayTone, formatHHMM } from './time-utils.js';
 import { DELAY_THRESHOLDS } from './config.js';
+
+// Calcule automatiquement l'heure théorique des étapes qui ont un décalage
+// (en minutes, positif ou négatif) défini par rapport à l'étape de référence
+// (la première, "Départ" par convention). Utile pour les étapes de
+// préparation avant le départ commercial (décalage négatif) : leur horaire
+// théorique se déduit de celui du Départ plutôt que d'être ressaisi à la
+// main à chaque fois. N'a aucun effet sur une étape sans décalage défini.
+export function applyOffsetSteps(train) {
+  const anchor = train.steps[0];
+  if (!anchor || !anchor.theoretical) return;
+  const anchorDate = combineDateAndTime(train.date, anchor.theoretical);
+  if (!anchorDate) return;
+
+  train.steps.forEach((step, i) => {
+    if (i === 0) return;
+    if (step.offsetMinutes === null || step.offsetMinutes === undefined || step.offsetMinutes === '') return;
+    const offset = Number(step.offsetMinutes);
+    if (!Number.isFinite(offset)) return;
+    const computed = new Date(anchorDate.getTime() + offset * 60000);
+    step.theoretical = formatHHMM(computed);
+  });
+}
 
 export function computeStepDelay(train, stepIndex) {
   const step = train.steps[stepIndex];
