@@ -2,7 +2,12 @@
 // hors-ligne (PWA). Les appels vers Google Apps Script (horaires théoriques)
 // sont volontairement exclus du cache pour ne jamais servir des horaires
 // périmés — sheets-sync.js gère déjà lui-même les échecs réseau.
-const CACHE_NAME = 'traintrack-cache-v1';
+// IMPORTANT : incrémentez ce numéro à CHAQUE modification d'un fichier de
+// APP_SHELL (js/*.js, css/style.css, index.html...). C'est ce qui force les
+// appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
+// retélécharger les fichiers à jour — sans ça, le Service Worker sert
+// indéfiniment l'ancienne version même après un nouveau déploiement.
+const CACHE_NAME = 'traintrack-cache-v3';
 
 const APP_SHELL = [
   './',
