@@ -44,12 +44,25 @@ app = app.replace(/wireInstallPrompt\(\);\n/, '');
 
 const chartsDemo = `
 // Mini graphique SVG (remplace Chart.js pour cet aperçu autonome, qui ne
-// peut pas charger de script externe).
+// peut pas charger de script externe). Deux lignes en heure absolue
+// (théorique / réel), comme la version Chart.js du vrai projet.
+function minutesOfDaySvg(hhmm) {
+  const parsed = parseHHMM(hhmm);
+  return parsed ? parsed.h * 60 + parsed.m : null;
+}
+function formatMinutesOfDaySvg(v) {
+  const total = Math.round(v);
+  const h = Math.floor(total / 60) % 24;
+  const m = ((total % 60) + 60) % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
 function buildChartData(train) {
   const delays = computeAllStepDelays(train);
   const labels = train.steps.map((s) => s.label);
-  const data = delays.map((d) => (d.status === 'recorded' ? d.diffMin : null));
-  return { labels, data };
+  const theoretical = train.steps.map((s) => minutesOfDaySvg(s.theoretical));
+  const real = delays.map((d) => (d.realDate ? d.realDate.getHours() * 60 + d.realDate.getMinutes() : null));
+  const diffs = delays.map((d) => (d.status === 'recorded' ? d.diffMin : null));
+  return { labels, theoretical, real, diffs };
 }
 function toneColorSvg(diffMin) {
   if (diffMin === null || diffMin === undefined) return '#94a3b8';
@@ -62,35 +75,53 @@ function toneColorSvg(diffMin) {
 function escapeXml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+function pathFor(values, xScale, yScale) {
+  let d = '';
+  values.forEach((v, i) => {
+    if (v === null || v === undefined) return;
+    const x = xScale(i), y = yScale(v);
+    d += (d === '' ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+  });
+  return d;
+}
 function drawSvgChart(svgEl, train) {
-  const { labels, data } = buildChartData(train);
-  const w = 300, h = 140, padL = 26, padR = 8, padT = 10, padB = 18;
-  const values = data.filter((v) => v !== null && v !== undefined);
-  const maxAbs = Math.max(5, ...values.map((v) => Math.abs(v)), 0);
-  const yMax = Math.ceil(maxAbs / 5) * 5 || 5;
-  const yMin = -yMax;
+  const { labels, theoretical, real, diffs } = buildChartData(train);
+  const w = 300, h = 150, padL = 30, padR = 8, padT = 10, padB = 18;
+  const allValues = [...theoretical, ...real].filter((v) => v !== null && v !== undefined);
+  const yMin = allValues.length ? Math.min(...allValues) - 10 : 0;
+  const yMax = allValues.length ? Math.max(...allValues) + 10 : 1440;
   const xStep = labels.length > 1 ? (w - padL - padR) / (labels.length - 1) : 0;
   const xScale = (i) => padL + i * xStep;
-  const yScale = (v) => padT + (h - padT - padB) * (1 - (v - yMin) / (yMax - yMin));
-  const zeroY = yScale(0);
+  const yScale = (v) => padT + (h - padT - padB) * (1 - (v - yMin) / (yMax - yMin || 1));
 
-  let pathD = '';
-  let circles = '';
-  data.forEach((v, i) => {
+  const realPath = pathFor(real, xScale, yScale);
+  const theoPath = pathFor(theoretical, xScale, yScale);
+  let realCircles = '';
+  real.forEach((v, i) => {
     if (v === null || v === undefined) return;
-    const x = xScale(i);
-    const y = yScale(v);
-    pathD += (pathD === '' ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-    circles += \`<circle cx="\${x.toFixed(1)}" cy="\${y.toFixed(1)}" r="3.5" fill="\${toneColorSvg(v)}" stroke="var(--surface)" stroke-width="1"></circle>\`;
+    realCircles += \`<circle cx="\${xScale(i).toFixed(1)}" cy="\${yScale(v).toFixed(1)}" r="3.5" fill="\${toneColorSvg(diffs[i])}" stroke="var(--surface)" stroke-width="1"></circle>\`;
+  });
+  let theoCircles = '';
+  theoretical.forEach((v, i) => {
+    if (v === null || v === undefined) return;
+    theoCircles += \`<circle cx="\${xScale(i).toFixed(1)}" cy="\${yScale(v).toFixed(1)}" r="2.5" fill="currentColor" opacity="0.7"></circle>\`;
   });
 
   const ticks = labels.map((l, i) => \`<text x="\${xScale(i).toFixed(1)}" y="\${h - 4}" font-size="7" text-anchor="middle" fill="currentColor" opacity="0.65">\${escapeXml(l.slice(0, 6))}</text>\`).join('');
+  const yTickCount = 4;
+  let yTicks = '';
+  for (let t = 0; t <= yTickCount; t++) {
+    const v = yMin + ((yMax - yMin) * t) / yTickCount;
+    yTicks += \`<text x="2" y="\${(yScale(v) + 3).toFixed(1)}" font-size="6.5" fill="currentColor" opacity="0.6">\${formatMinutesOfDaySvg(v)}</text>\`;
+  }
 
   svgEl.setAttribute('viewBox', \`0 0 \${w} \${h}\`);
   svgEl.innerHTML = \`
-    <line x1="\${padL}" y1="\${zeroY.toFixed(1)}" x2="\${w - padR}" y2="\${zeroY.toFixed(1)}" stroke="currentColor" stroke-dasharray="4 3" opacity="0.35"/>
-    \${pathD ? \`<path d="\${pathD}" fill="none" stroke="#2563eb" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>\` : ''}
-    \${circles}
+    \${yTicks}
+    \${theoPath ? \`<path d="\${theoPath}" fill="none" stroke="currentColor" stroke-opacity="0.55" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round"/>\` : ''}
+    \${realPath ? \`<path d="\${realPath}" fill="none" stroke="#2563eb" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>\` : ''}
+    \${theoCircles}
+    \${realCircles}
     \${ticks}
   \`;
 }

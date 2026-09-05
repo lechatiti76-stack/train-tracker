@@ -106,7 +106,7 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
       <div data-role="summary">${summaryRowHTML(train)}</div>
 
       <div class="chart-wrap">
-        <div class="chart-title">Évolution du retard</div>
+        <div class="chart-title">Théorique / Réel</div>
         <div class="chart-canvas-holder"><canvas data-role="chart"></canvas></div>
       </div>
 
@@ -118,6 +118,7 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
         <button type="button" class="btn" data-action="copy-train">Copier</button>
         <button type="button" class="btn" data-action="email-train">Email</button>
         ${readOnly ? '' : `
+          <button type="button" class="btn btn-outline" data-action="reset-all-steps">↺ Réinitialiser les heures</button>
           <button type="button" class="btn btn-outline" data-action="edit-train">Modifier</button>
           <button type="button" class="btn btn-danger" data-action="delete-train" aria-label="Supprimer">✕</button>
         `}

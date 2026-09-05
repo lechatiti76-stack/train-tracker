@@ -151,6 +151,20 @@ function resetStepTime(train, stepIndex) {
   showToast('Heure réinitialisée');
 }
 
+function resetAllStepsForTrain(train) {
+  const recordedCount = train.steps.filter((s) => s.real).length;
+  if (recordedCount === 0) {
+    showToast('Aucune heure enregistrée à réinitialiser');
+    return;
+  }
+  if (!confirm(`Réinitialiser les ${recordedCount} heure(s) enregistrée(s) pour le train ${train.number} ?`)) return;
+  train.steps.forEach((s) => { s.real = null; });
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+  showToast('Toutes les heures ont été réinitialisées');
+}
+
 function openStepTimeEditor(train, stepIndex) {
   const step = train.steps[stepIndex];
   const current = step.real ? new Date(step.real) : new Date();
@@ -281,6 +295,7 @@ function onGridClick(e) {
     case 'record-step': recordStepNow(train, stepIndex); break;
     case 'edit-step-time': openStepTimeEditor(train, stepIndex); break;
     case 'reset-step-time': resetStepTime(train, stepIndex); break;
+    case 'reset-all-steps': resetAllStepsForTrain(train); break;
     case 'copy-train': copyTrainData(train); break;
     case 'email-train': emailTrainData(train); break;
     case 'edit-train': openTrainModal(train); break;
