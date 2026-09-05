@@ -64,9 +64,13 @@ export function computeTrainStatus(train) {
   }
   const d = delays[lastRecordedIndex];
   const label = formatDelayLabel(d.diffMin, { onTimeThreshold: DELAY_THRESHOLDS.onTime });
-  const isArrival = lastRecordedIndex === train.steps.length - 1;
-  if (isArrival) {
-    return { label: label === "À L'HEURE" ? 'ARRIVÉ À L\'HEURE' : `ARRIVÉ ${label}`, tone: d.tone };
+  const isLastStep = lastRecordedIndex === train.steps.length - 1;
+  if (isLastStep) {
+    // Le préfixe reprend le libellé réel de la dernière étape (ex : "Arrivée"
+    // ou "Départ pour la ligne") plutôt qu'un mot figé : ce n'est pas
+    // toujours une arrivée (checklist de préparation avant départ, etc.).
+    const prefix = normalize(train.steps[lastRecordedIndex].label).toUpperCase();
+    return { label: label === "À L'HEURE" ? `${prefix} À L'HEURE` : `${prefix} ${label}`, tone: d.tone };
   }
   if (d.tone === 'early') return { label: `EN AVANCE ${label}`, tone: d.tone };
   return { label, tone: d.tone };

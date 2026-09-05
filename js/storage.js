@@ -90,28 +90,23 @@ export function seedDemoTrains(stepLabels) {
   };
   const demo = [
     {
-      number: '1234',
-      theoretical: ['08:15', '08:30', '08:45', '09:00', '09:15', '09:30', '09:45'],
-      real: [2, 4, 5, 8, 5, 8, 9],
-      cause: [null, null, null, 'Ralentissement signalisation', null, null, null],
+      // Exemple repris tel quel : préparation avec un retard croissant.
+      number: '50238',
+      theoretical: ['16:30', '16:45', '16:55', '17:40', '17:42', '17:43', '17:47'],
+      real: [2, 3, 5, 8, 5, 8, 9],
+      cause: [null, null, null, 'Attente formation', null, null, null],
     },
     {
-      number: '5678',
-      theoretical: ['09:00', '09:12', '09:24', '09:36', '09:48', '10:00', '10:12'],
+      number: '61175',
+      theoretical: ['05:10', '05:25', '05:35', '06:20', '06:22', '06:23', '06:27'],
       real: [0, 0, -1, 0, 0, 0, 0],
       cause: [null, null, null, null, null, null, null],
     },
     {
-      number: '9021',
-      theoretical: ['10:05', '10:20', '10:35', '10:50', '11:05', '11:20', '11:35'],
+      number: '72410',
+      theoretical: ['13:05', '13:20', '13:30', '14:05', '14:07', '14:08', '14:12'],
       real: [null, null, null, null, null, null, null],
       cause: [null, null, null, null, null, null, null],
-    },
-    {
-      number: '4456',
-      theoretical: ['07:50', '08:05', '08:20', '08:35', '08:50', '09:05', '09:20'],
-      real: [1, 3, 12, 14, 13, 15, 16],
-      cause: [null, null, 'Incident voyageur', null, null, null, 'Retard cumulé'],
     },
   ];
 

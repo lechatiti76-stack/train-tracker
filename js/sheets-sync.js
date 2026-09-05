@@ -9,6 +9,43 @@
 // forme de retour : { ok: true, rows: [...] } ou { ok: false, reason }.
 import { createEmptyTrain } from './storage.js';
 import { applyOffsetSteps } from './delay-calc.js';
+import { weekdayOf } from './time-utils.js';
+
+const WEEKDAY_PREFIXES = [
+  { prefix: 'dim', day: 0 },
+  { prefix: 'lun', day: 1 },
+  { prefix: 'mar', day: 2 },
+  { prefix: 'mer', day: 3 },
+  { prefix: 'jeu', day: 4 },
+  { prefix: 'ven', day: 5 },
+  { prefix: 'sam', day: 6 },
+];
+
+function stripAccentsLower(str) {
+  return (str || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+// Convertit la colonne "Jours de circulation" (ex : "Mardi,Jeudi", "Lun Mer
+// Ven", "Tous les jours") en une liste de jours (0 = dimanche ... 6 =
+// samedi, comme Date.getDay()). Insensible à la casse, aux accents et aux
+// abréviations (3 lettres suffisent : "mar", "jeu"...).
+export function parseJoursDeCirculation(value) {
+  const norm = stripAccentsLower(value);
+  if (!norm) return [];
+  if (/tous|tlj|quotidien/.test(norm)) return [0, 1, 2, 3, 4, 5, 6];
+  const tokens = norm.split(/[,;/\s]+/).filter(Boolean);
+  const days = new Set();
+  for (const token of tokens) {
+    const match = WEEKDAY_PREFIXES.find((w) => token.startsWith(w.prefix));
+    if (match) days.add(match.day);
+  }
+  return [...days].sort();
+}
 
 export async function fetchTheoreticalFromSheet(webAppUrl, dateISO, { timeoutMs = 8000 } = {}) {
   if (!webAppUrl) return { ok: false, reason: 'not_configured' };
@@ -55,11 +92,23 @@ export function applySillonRowsToTrain(train, rows) {
   }
 }
 
+// Un sillon "circule" pour une date donnée si son jour de la semaine fait
+// partie de sa colonne "Jours de circulation". Repli sur une correspondance
+// de date exacte (ancien schéma, colonne "Date") si "Jours" est absente ;
+// si aucune des deux n'est renseignée, on considère que le sillon circule
+// tous les jours plutôt que de le faire disparaître silencieusement.
+function rowRunsOn(row, dateISO) {
+  const jours = row.jours ?? row.Jours ?? row['Jours de circulation'] ?? '';
+  if (jours) return parseJoursDeCirculation(jours).includes(weekdayOf(dateISO));
+  const dateValue = row.date ?? row.Date ?? '';
+  if (dateValue) return normalizeSheetDate(dateValue) === dateISO;
+  return true;
+}
+
 function groupRowsByTrainForDate(rows, dateISO) {
   const byTrainNumber = new Map();
   for (const row of rows) {
-    const dateStr = normalizeSheetDate(row.date ?? row.Date);
-    if (dateStr !== dateISO) continue;
+    if (!rowRunsOn(row, dateISO)) continue;
     const number = String(row.train ?? row.Train ?? '').trim();
     if (!number) continue;
     if (!byTrainNumber.has(number)) byTrainNumber.set(number, []);

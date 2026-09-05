@@ -324,7 +324,7 @@ function setSillonStatus(trainId, state, extra) {
   const messages = {
     loading: 'Recherche du sillon…',
     ok: `Sillon ${extra} appliqué`,
-    'not-found': "Aucun sillon trouvé dans le Sheet pour cette heure d'arrivée à cette date.",
+    'not-found': "Aucun sillon trouvé dans le Sheet pour cette heure, ce jour-là.",
     error: `Google Sheets indisponible${extra ? ' (' + extra + ')' : ''}.`,
   };
   el.textContent = messages[state] || '';
@@ -350,7 +350,7 @@ async function lookupSillonByArrival(train, timeValue) {
   const match = findSillonByArrivalTime(res.rows, train.date, timeValue);
   if (!match) {
     setSillonStatus(train.id, 'not-found');
-    showToast("Aucun sillon trouvé pour cette heure d'arrivée", 'error');
+    showToast('Aucun sillon trouvé pour cette heure', 'error');
     return;
   }
 

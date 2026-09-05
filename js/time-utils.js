@@ -63,3 +63,11 @@ export function delayTone(diffMin, thresholds) {
 export function nowLocalISOWithSeconds() {
   return new Date().toISOString();
 }
+
+// Jour de la semaine (0 = dimanche ... 6 = samedi, comme Date.getDay())
+// pour une date 'YYYY-MM-DD'. Sert à faire correspondre les sillons
+// (définis par leurs jours de circulation récurrents) à la date affichée.
+export function weekdayOf(dateISO) {
+  const [y, m, d] = dateISO.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}

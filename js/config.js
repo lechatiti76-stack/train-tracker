@@ -10,7 +10,20 @@ export const DEFAULT_SETTINGS = {
   // Sinon, laissez vide : chaque utilisateur peut la définir via Réglages
   // (elle est alors stockée dans son navigateur).
   sheetsWebAppUrl: '',
-  defaultStepLabels: ['Départ', 'Point 1', 'Point 2', 'Point 3', 'Point 4', 'Point 5', 'Arrivée'],
+  // Checklist de préparation avant le départ commercial (100 % modifiable
+  // par train via "Modifier", ou ici pour changer le défaut des nouveaux
+  // trains). La dernière étape n'est pas forcément une "arrivée" : le
+  // statut affiché reprend automatiquement le libellé réel de la dernière
+  // étape enregistrée (voir computeTrainStatus dans delay-calc.js).
+  defaultStepLabels: [
+    'Départ FA / Titoir-Fosse',
+    'Arrivée LHTE',
+    'Mise en tête',
+    'Annoncé Bon au départ',
+    'Retour du régulateur',
+    'Ouverture du signal',
+    'Départ pour la ligne',
+  ],
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,

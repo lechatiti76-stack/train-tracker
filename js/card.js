@@ -85,7 +85,7 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
 
       ${readOnly ? '' : `
         <div class="sillon-lookup">
-          <label class="sillon-lookup-label" for="arrival-${train.id}">Heure d'arrivée du sillon (Google Sheets)</label>
+          <label class="sillon-lookup-label" for="arrival-${train.id}">Heure de la dernière étape (sillon Google Sheets)</label>
           <div class="sillon-lookup-row">
             <input type="time" id="arrival-${train.id}" class="sillon-lookup-input" data-role="arrival-lookup" value="${train.targetArrival || ''}">
             <button type="button" class="btn btn-outline btn-sm" data-action="lookup-sillon">🔍 Retrouver</button>

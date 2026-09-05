@@ -131,12 +131,21 @@ lecture seule.
 ### 6.1. Préparer la feuille
 
 1. Créez un Google Sheet avec un onglet nommé **`Horaires`**.
-2. Première ligne = en-têtes : `Date | Train | Étape | Heure théorique | Cause`
+2. Première ligne = en-têtes : `Train | Étape | Heure théorique | Cause | Jours de circulation`
 3. Importez ou recopiez le contenu de [`data/exemple-google-sheet.csv`](data/exemple-google-sheet.csv)
    pour voir un exemple fonctionnel (`Fichier → Importer` dans Google Sheets).
 4. Le libellé de la colonne **Étape** doit correspondre exactement aux
-   libellés configurés côté app (par défaut : `Départ`, `Point 1` à
-   `Point 5`, `Arrivée` — voir [section 9](#9-modifier-les-7-étapes)).
+   libellés configurés côté app (par défaut : `Départ FA / Titoir-Fosse`,
+   `Arrivée LHTE`, `Mise en tête`, `Annoncé Bon au départ`, `Retour du
+   régulateur`, `Ouverture du signal`, `Départ pour la ligne` — voir
+   [section 9](#9-modifier-les-7-étapes)).
+5. **Jours de circulation** : le planning est basé sur des jours de la
+   semaine récurrents, pas sur une date précise — un sillon n'a besoin
+   d'être saisi qu'une seule fois, pas rejoué chaque jour. Écrivez les jours
+   séparés par une virgule, en français, complets ou abrégés (3 lettres
+   suffisent) : `Mardi,Jeudi`, `Lundi,Mercredi,Vendredi`, ou `Tous les
+   jours` pour un service quotidien. Toutes les lignes d'un même sillon
+   (même numéro de train) doivent avoir les mêmes jours.
 
 ### 6.2. Déployer le Web App
 
@@ -176,11 +185,12 @@ Chaque vignette a un champ **"Heure d'arrivée du sillon"** juste sous son
 en-tête. C'est un raccourci qui évite de ressaisir les 7 horaires à la
 main :
 
-1. Tapez l'heure d'arrivée théorique du sillon (celle de la dernière étape,
-   `Arrivée`) et cliquez sur **🔍 Retrouver** (ou appuyez sur Entrée).
-2. L'application interroge le Web App Google Apps Script pour la **date du
-   train affiché sur la vignette**, et cherche, parmi tous les sillons de ce
-   jour-là, celui dont l'heure d'arrivée correspond exactement.
+1. Tapez l'heure théorique de la dernière étape (`Départ pour la ligne` par
+   défaut) et cliquez sur **🔍 Retrouver** (ou appuyez sur Entrée).
+2. L'application interroge le Web App Google Apps Script, calcule le jour
+   de la semaine de la **date du train affiché sur la vignette**, et
+   cherche, parmi les sillons qui circulent ce jour-là, celui dont la
+   dernière heure théorique correspond exactement.
 3. Si un sillon correspond : les 7 horaires théoriques et les causes du
    Sheet sont copiés sur la vignette, son numéro de train est mis à jour
    avec celui du Sheet, et le badge **⇄ Sheet** apparaît. Les heures
@@ -285,8 +295,12 @@ sert de référence), un champ **"Décalage / Départ (min)"** est disponible :
   simplement sans écart calculable ("—").
 - Google Sheet inaccessible ou mal configuré → indicateur d'erreur discret,
   aucune donnée locale perdue, aucun plantage.
-- Recherche de sillon par heure d'arrivée sans correspondance dans le Sheet
-  → message explicite sous le champ, rien n'est modifié sur la vignette.
+- Recherche de sillon sans correspondance dans le Sheet (heure inconnue, ou
+  sillon qui ne circule pas ce jour de la semaine) → message explicite sous
+  le champ, rien n'est modifié sur la vignette.
+- Dernière étape qui n'est pas une arrivée (ex : "Départ pour la ligne")
+  → le statut global reprend automatiquement le libellé réel de cette
+  dernière étape plutôt qu'un mot "ARRIVÉ" figé.
 
 ## 11. Limites connues
 

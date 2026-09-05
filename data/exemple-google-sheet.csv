@@ -1,22 +1,15 @@
-Date,Train,Étape,Heure théorique,Cause
-01/09/2026,1234,Départ,08:15,-
-01/09/2026,1234,Point 1,08:30,-
-01/09/2026,1234,Point 2,08:45,-
-01/09/2026,1234,Point 3,09:00,Ralentissement signalisation
-01/09/2026,1234,Point 4,09:15,-
-01/09/2026,1234,Point 5,09:30,-
-01/09/2026,1234,Arrivée,09:45,-
-01/09/2026,5678,Départ,09:00,-
-01/09/2026,5678,Point 1,09:12,-
-01/09/2026,5678,Point 2,09:24,-
-01/09/2026,5678,Point 3,09:36,-
-01/09/2026,5678,Point 4,09:48,-
-01/09/2026,5678,Point 5,10:00,-
-01/09/2026,5678,Arrivée,10:12,-
-02/09/2026,1234,Départ,08:15,-
-02/09/2026,1234,Point 1,08:30,-
-02/09/2026,1234,Point 2,08:45,-
-02/09/2026,1234,Point 3,09:00,-
-02/09/2026,1234,Point 4,09:15,-
-02/09/2026,1234,Point 5,09:30,-
-02/09/2026,1234,Arrivée,09:45,-
+Train,Étape,Heure théorique,Cause,Jours de circulation
+50238,Départ FA / Titoir-Fosse,16:30,-,"Mardi,Jeudi"
+50238,Arrivée LHTE,16:45,-,"Mardi,Jeudi"
+50238,Mise en tête,16:55,-,"Mardi,Jeudi"
+50238,Annoncé Bon au départ,17:40,-,"Mardi,Jeudi"
+50238,Retour du régulateur,17:42,-,"Mardi,Jeudi"
+50238,Ouverture du signal,17:43,-,"Mardi,Jeudi"
+50238,Départ pour la ligne,17:47,-,"Mardi,Jeudi"
+61175,Départ FA / Titoir-Fosse,05:10,-,"Lundi,Mercredi,Vendredi"
+61175,Arrivée LHTE,05:25,-,"Lundi,Mercredi,Vendredi"
+61175,Mise en tête,05:35,-,"Lundi,Mercredi,Vendredi"
+61175,Annoncé Bon au départ,06:20,-,"Lundi,Mercredi,Vendredi"
+61175,Retour du régulateur,06:22,Ralentissement voie,"Lundi,Mercredi,Vendredi"
+61175,Ouverture du signal,06:23,-,"Lundi,Mercredi,Vendredi"
+61175,Départ pour la ligne,06:27,-,"Lundi,Mercredi,Vendredi"
