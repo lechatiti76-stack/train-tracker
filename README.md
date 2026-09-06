@@ -37,8 +37,9 @@ graphique d'évolution, et installation en PWA sur mobile.
 │   ├── delay-calc.js              Statut global, cause principale (logique métier pure)
 │   ├── sheets-sync.js             Récupération + fusion des horaires Google Sheets
 │   ├── splitflap.js               Composant panneau à palettes façon aéroport
-│   ├── charts.js                  Graphique d'évolution du retard (Chart.js)
+│   ├── charts.js                  Graphique théorique/réel en heure absolue (Chart.js)
 │   ├── card.js                    Génération/mise à jour du HTML d'une vignette
+│   ├── stopwatch.js               Chronomètre de pause indépendant (feu tricolore)
 │   └── app.js                     Orchestrateur : état, événements, modales
 ├── apps-script/
 │   └── Code.gs                   Web App Google Apps Script (lecture seule, sans clé API)
@@ -230,16 +231,53 @@ le menu de partage.
 - **Ajouter** : bouton **"+ Ajouter un train"** en haut à droite → renseignez
   le numéro, la date de circulation, et pour chaque étape le libellé,
   l'heure théorique et une cause optionnelle.
+- **Un train qui circule sur plusieurs dates précises** : dans le formulaire
+  d'ajout, cliquez **"+ Ajouter une autre date de circulation"** autant de
+  fois que nécessaire. Une vignette indépendante est créée par date (chacune
+  garde ses propres heures réelles). Pour un train qui circule chaque
+  semaine les mêmes jours, préférez plutôt la synchronisation Google Sheets
+  avec la colonne "Jours de circulation" (section 6.1) — plus adapté à un
+  service récurrent.
 - **Modifier** : bouton **"Modifier"** sur la vignette du train. Les heures
   réelles déjà enregistrées ne sont jamais touchées par ce formulaire —
   seules les infos générales (numéro, date, libellés, heures théoriques,
-  causes) sont modifiées ici.
+  causes) sont modifiées ici. Ne modifie qu'une seule vignette à la fois
+  (pas de "date multiple" en édition).
 - **Supprimer** : bouton **✕** sur la vignette (confirmation demandée).
+- **Réinitialiser toutes les heures** : bouton **"↺ Réinitialiser les
+  heures"** dans le pied de la vignette — efface en un clic les 7 heures
+  réelles enregistrées (confirmation demandée), sans toucher aux horaires
+  théoriques. Pour ne réinitialiser qu'une seule étape, utilisez plutôt
+  l'icône ↺ à côté de cette étape.
 - **Réorganiser** : boutons **◀ ▶** dans le pied de la vignette (fonctionne
   partout, y compris tactile) ; sur ordinateur, on peut aussi glisser une
   vignette par sa poignée **⠿**.
-- Par défaut, l'app crée 4 trains de démonstration au tout premier
+- Par défaut, l'app crée 3 trains de démonstration au tout premier
   lancement (une seule fois) pour montrer un tableau de bord déjà rempli.
+
+### 8.1. Voir tous les trains enregistrés (calendrier / vue globale)
+
+Le tableau de bord n'affiche que les trains **de la date du jour**. Pour
+voir tous les trains déjà enregistrés, quelle que soit leur date (passée
+ou à venir — par exemple un train ajouté pour lundi prochain), cliquez sur
+**"📅 Calendrier"** dans l'en-tête. Chaque date apparaît avec son nombre de
+trains ; cliquez dessus pour voir le détail (statut, cause principale,
+écart max) en lecture seule. Aucune donnée n'est jamais supprimée par le
+changement de date — cette vue permet justement de les retrouver.
+
+### 8.2. Chronomètre de pause
+
+Un chronomètre indépendant (pas lié à un train en particulier) est affiché
+en permanence sous l'en-tête, pour mesurer un temps de pause/arrêt :
+
+- **▶ Démarrer** lance le décompte, **⏸ Arrêter** le met en pause (un
+  nouveau **Démarrer** reprend où il s'était arrêté), **↺ Réinitialiser**
+  remet à zéro (confirmation demandée si un temps est en cours).
+- Un indicateur façon **feu tricolore** s'allume selon le temps écoulé :
+  **rouge** de 0 à 15 min, **orange** de 15 à 20 min, **vert** au-delà de
+  20 min.
+- L'état survit à un rechargement accidentel de la page (sauvegardé dans le
+  navigateur).
 
 ## 9. Modifier les 7 étapes
 

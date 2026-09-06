@@ -11,6 +11,7 @@ import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, findSillonByArriva
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml } from './card.js';
+import { initStopwatch } from './stopwatch.js';
 
 let settings = loadSettings();
 let trains = loadTrains();
@@ -456,6 +457,11 @@ function trainFormBodyHTML(train) {
           <input type="date" id="fDate" required value="${train?.date || currentDate}">
         </label>
       </div>
+      ${train ? '' : `
+        <div id="extraDatesContainer" class="extra-dates"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnAddDateRow">+ Ajouter une autre date de circulation</button>
+        <p class="help-text">Un train qui circule sur plusieurs dates précises crée une vignette indépendante par date (chacune garde ses propres heures réelles). Pour un train qui circule chaque semaine les mêmes jours, préférez la synchronisation Google Sheets (section 6 du README).</p>
+      `}
       <p class="help-text">
         "Décalage / Départ (min)" est optionnel : si renseigné pour une
         étape, son heure théorique est calculée automatiquement à partir de
@@ -491,6 +497,15 @@ function sortedByIndex(list) {
   return [...list].sort((a, b) => Number(a.dataset.i) - Number(b.dataset.i));
 }
 
+function addDateRow(container) {
+  const row = document.createElement('div');
+  row.className = 'date-row-extra';
+  row.innerHTML = `
+    <input type="date" class="fDateExtra" required value="${currentDate}">
+    <button type="button" class="icon-btn" data-action="remove-date-row" aria-label="Retirer cette date">✕</button>`;
+  container.appendChild(row);
+}
+
 function openTrainModal(train) {
   openModal({
     title: train ? `Modifier le train ${escapeHtml(train.number)}` : 'Ajouter un train',
@@ -501,14 +516,23 @@ function openTrainModal(train) {
         e.preventDefault();
         saveTrainForm(panel, train);
       });
+      const addDateBtn = panel.querySelector('#btnAddDateRow');
+      const extraDatesContainer = panel.querySelector('#extraDatesContainer');
+      if (addDateBtn && extraDatesContainer) {
+        addDateBtn.addEventListener('click', () => addDateRow(extraDatesContainer));
+        extraDatesContainer.addEventListener('click', (e) => {
+          const removeBtn = e.target.closest('[data-action="remove-date-row"]');
+          if (removeBtn) removeBtn.closest('.date-row-extra').remove();
+        });
+      }
     },
   });
 }
 
 function saveTrainForm(panel, existingTrain) {
   const number = panel.querySelector('#fNumber').value.trim();
-  const date = panel.querySelector('#fDate').value;
-  if (!number || !date) return;
+  const primaryDate = panel.querySelector('#fDate').value;
+  if (!number || !primaryDate) return;
 
   const labels = sortedByIndex([...panel.querySelectorAll('.fStepLabel')]).map((i) => i.value.trim());
   const theos = sortedByIndex([...panel.querySelectorAll('.fStepTheo')]).map((i) => i.value);
@@ -517,6 +541,7 @@ function saveTrainForm(panel, existingTrain) {
 
   const applyStepFields = (train) => {
     train.steps.forEach((step, i) => {
+      step.label = labels[i] || step.label;
       step.cause = causes[i] || '';
       step.offsetMinutes = i === 0 ? null : offsets[i];
       // Une étape avec décalage voit son heure théorique recalculée depuis
@@ -527,23 +552,32 @@ function saveTrainForm(panel, existingTrain) {
     applyOffsetSteps(train);
   };
 
+  let createdCount = 0;
   if (existingTrain) {
     existingTrain.number = number;
-    existingTrain.date = date;
-    existingTrain.steps.forEach((step, i) => { step.label = labels[i] || step.label; });
+    existingTrain.date = primaryDate;
     applyStepFields(existingTrain);
     existingTrain.updatedAt = new Date().toISOString();
   } else {
-    const maxOrder = trains.reduce((m, t) => Math.max(m, t.order || 0), -1);
-    const newTrain = createEmptyTrain({ number, date, stepLabels: labels, order: maxOrder + 1, source: 'manual' });
-    applyStepFields(newTrain);
-    trains.push(newTrain);
+    // Une vignette indépendante par date sélectionnée (chacune garde ses
+    // propres heures réelles) — un train qui "circule sur plusieurs dates"
+    // n'est pas un seul objet partagé entre ces dates.
+    const extraDates = [...panel.querySelectorAll('.fDateExtra')].map((i) => i.value).filter(Boolean);
+    const allDates = [...new Set([primaryDate, ...extraDates])];
+    let maxOrder = trains.reduce((m, t) => Math.max(m, t.order || 0), -1);
+    for (const date of allDates) {
+      const newTrain = createEmptyTrain({ number, date, stepLabels: labels, order: ++maxOrder, source: 'manual' });
+      applyStepFields(newTrain);
+      trains.push(newTrain);
+    }
+    createdCount = allDates.length;
   }
 
   persist();
   closeModal();
   renderGrid();
-  showToast(existingTrain ? 'Train mis à jour' : 'Train ajouté');
+  if (existingTrain) showToast('Train mis à jour');
+  else showToast(createdCount > 1 ? `${createdCount} vignettes ajoutées (une par date)` : 'Train ajouté');
 }
 
 // ---------- Modale Réglages ----------
@@ -614,16 +648,23 @@ function openSettingsModal() {
   });
 }
 
-// ---------- Modale Historique ----------
+// ---------- Modale Calendrier (vue globale, passé + à venir) ----------
 function historyBodyHTML() {
-  const pastDates = [...new Set(trains.filter((t) => t.date < currentDate).map((t) => t.date))].sort((a, b) => b.localeCompare(a));
-  if (pastDates.length === 0) {
-    return `<p class="help-text">Aucun historique pour l'instant. Les trains des jours précédents apparaîtront ici automatiquement — aucune donnée n'est jamais supprimée par le changement de date.</p>`;
+  const countByDate = new Map();
+  for (const t of trains) countByDate.set(t.date, (countByDate.get(t.date) || 0) + 1);
+  const allDates = [...countByDate.keys()].sort((a, b) => a.localeCompare(b));
+  if (allDates.length === 0) {
+    return `<p class="help-text">Aucun train enregistré pour l'instant.</p>`;
   }
   return `
+    <p class="help-text">Tous les trains enregistrés, quelle que soit leur date (passée ou à venir). Rien n'est jamais supprimé par le changement de date.</p>
     <div class="history-layout">
       <div class="history-dates">
-        ${pastDates.map((d) => `<button type="button" class="btn btn-outline history-date-btn" data-date="${d}">${formatDateFR(d)}</button>`).join('')}
+        ${allDates.map((d) => {
+          const isToday = d === currentDate;
+          const count = countByDate.get(d);
+          return `<button type="button" class="btn btn-outline history-date-btn${isToday ? ' active' : ''}" data-date="${d}">${formatDateFR(d)}${isToday ? ' · Aujourd\'hui' : ''} (${count})</button>`;
+        }).join('')}
       </div>
       <div class="history-detail" id="historyDetail"><p class="help-text">Sélectionnez une date ci-dessus.</p></div>
     </div>`;
@@ -658,17 +699,20 @@ function renderHistoryDetail(container, dateISO) {
 
 function openHistoryModal() {
   openModal({
-    title: 'Historique des trains',
+    title: 'Calendrier des trains',
     wide: true,
     bodyHTML: historyBodyHTML(),
     onMount: (panel) => {
-      panel.querySelectorAll('.history-date-btn').forEach((btn) => {
+      const dateButtons = panel.querySelectorAll('.history-date-btn');
+      dateButtons.forEach((btn) => {
         btn.addEventListener('click', () => {
-          panel.querySelectorAll('.history-date-btn').forEach((b) => b.classList.remove('active'));
+          dateButtons.forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           renderHistoryDetail(panel.querySelector('#historyDetail'), btn.dataset.date);
         });
       });
+      const todayBtn = panel.querySelector('.history-date-btn.active');
+      if (todayBtn) renderHistoryDetail(panel.querySelector('#historyDetail'), todayBtn.dataset.date);
     },
   });
 }
@@ -802,6 +846,7 @@ function init() {
   wireSillonInputs(grid);
 
   wireHeaderButtons();
+  initStopwatch(el('stopwatchWidget'));
   wireInstallPrompt();
   registerServiceWorker();
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');

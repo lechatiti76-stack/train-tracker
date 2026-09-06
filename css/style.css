@@ -175,6 +175,69 @@ body {
 }
 .icon-btn:active { transform: scale(0.92); }
 
+/* ---------- Chronomètre de pause ---------- */
+.stopwatch-bar { padding: 1.1rem 1.25rem 0; max-width: 1600px; margin: 0 auto; }
+.stopwatch-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+  transition: box-shadow 0.25s ease;
+}
+.stopwatch-card.is-running {
+  box-shadow: var(--shadow-card), 0 0 0 1px var(--accent) inset;
+}
+.stopwatch-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.stopwatch-lights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  background: #0a0f1c;
+  border-radius: 10px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.stopwatch-light {
+  display: block;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #232d45;
+  transition: background-color 0.25s ease, box-shadow 0.25s ease;
+}
+.stopwatch-light.tone-red.active { background: #ef4444; box-shadow: 0 0 9px 2px rgba(239, 68, 68, 0.75); }
+.stopwatch-light.tone-orange.active { background: #f59e0b; box-shadow: 0 0 9px 2px rgba(245, 158, 11, 0.75); }
+.stopwatch-light.tone-green.active { background: #22c55e; box-shadow: 0 0 9px 2px rgba(34, 197, 94, 0.75); }
+.stopwatch-display {
+  font-family: var(--font-mono);
+  font-size: 1.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  min-width: 8ch;
+  transition: color 0.25s ease;
+}
+.stopwatch-card.is-running .stopwatch-display { color: var(--accent); }
+.stopwatch-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-left: auto; }
+.stopwatch-controls .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ---------- Grille & cartes ---------- */
 .app-main { padding: 1.25rem; max-width: 1600px; margin: 0 auto; }
 .trains-grid {
@@ -526,6 +589,9 @@ body.modal-open { overflow: hidden; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
 .form-actions { display: flex; justify-content: flex-end; gap: 0.6rem; flex-wrap: wrap; }
 .help-text { font-size: 0.8rem; color: var(--text-faint); line-height: 1.5; }
+.extra-dates { display: flex; flex-direction: column; gap: 0.5rem; }
+.date-row-extra { display: flex; gap: 0.5rem; align-items: center; }
+.date-row-extra input { flex: 1 1 auto; }
 
 .steps-form-list { display: flex; flex-direction: column; gap: 0.7rem; max-height: 44vh; overflow-y: auto; padding-right: 0.2rem; }
 .step-form-row {

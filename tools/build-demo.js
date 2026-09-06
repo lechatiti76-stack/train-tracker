@@ -27,6 +27,7 @@ const storage = readJs('storage.js');
 const delayCalc = readJs('delay-calc.js');
 const sheetsSync = readJs('sheets-sync.js');
 const splitflap = readJs('splitflap.js');
+const stopwatch = readJs('stopwatch.js');
 
 let card = readJs('card.js');
 card = card.replace(
@@ -148,6 +149,8 @@ const bundle = [
   sheetsSync,
   '// ---- splitflap.js ----',
   splitflap,
+  '// ---- stopwatch.js ----',
+  stopwatch,
   '// ---- charts.js (version SVG autonome pour cet aperçu) ----',
   chartsDemo,
   '// ---- card.js ----',
@@ -203,7 +206,7 @@ ${css}
       <span id="syncLabel" class="sync-label">Google Sheets non configuré</span>
     </div>
     <button type="button" id="btnInstall" class="btn btn-outline" hidden>Installer l'app</button>
-    <button type="button" id="btnHistory" class="btn btn-ghost">Historique</button>
+    <button type="button" id="btnHistory" class="btn btn-ghost">📅 Calendrier</button>
     <button type="button" id="btnSettings" class="icon-btn" aria-label="Réglages">⚙</button>
     <button type="button" id="btnAddTrain" class="btn btn-primary">+ Ajouter un train</button>
   </div>
@@ -212,6 +215,23 @@ ${css}
 <div class="demo-banner">
   <p>Démo autonome pour test rapide — identique à l'application réelle, à deux différences près propres à cet aperçu : le graphique est ici en SVG simple (pas de Chart.js, bloqué par le bac à sable), et il n'y a pas de PWA/Service Worker. Le projet complet (à publier sur GitHub Pages) est dans l'archive fournie.</p>
 </div>
+
+<section class="stopwatch-bar" id="stopwatchWidget" aria-label="Chronomètre de pause">
+  <div class="stopwatch-card">
+    <div class="stopwatch-title"><span aria-hidden="true">⏱</span> Temps de pause</div>
+    <div class="stopwatch-lights" aria-hidden="true">
+      <span class="stopwatch-light tone-red" data-role="light-red"></span>
+      <span class="stopwatch-light tone-orange" data-role="light-orange"></span>
+      <span class="stopwatch-light tone-green" data-role="light-green"></span>
+    </div>
+    <div class="stopwatch-display" data-role="stopwatch-display" aria-live="polite">00:00:00</div>
+    <div class="stopwatch-controls">
+      <button type="button" class="btn btn-primary" data-action="stopwatch-start">▶ Démarrer</button>
+      <button type="button" class="btn btn-outline" data-action="stopwatch-stop">⏸ Arrêter</button>
+      <button type="button" class="btn btn-ghost" data-action="stopwatch-reset">↺ Réinitialiser</button>
+    </div>
+  </div>
+</section>
 
 <main id="mainContent" class="app-main">
   <div id="trainsGrid" class="trains-grid" aria-live="polite"></div>
