@@ -180,32 +180,38 @@ Script dépassé...), l'application affiche un indicateur d'erreur discret
 dans l'en-tête et continue de fonctionner avec les données déjà en local —
 elle ne plante jamais.
 
-### 6.4. Retrouver un sillon par son heure d'arrivée
+### 6.4. Remplissage automatique des 7 heures depuis "l'heure du sillon"
 
-Chaque vignette a un champ **"Heure d'arrivée du sillon"** juste sous son
-en-tête. C'est un raccourci qui évite de ressaisir les 7 horaires à la
-main :
+Chaque vignette a un champ **"Heure du sillon (départ pour la ligne + 15
+min)"** juste sous son en-tête. C'est un calcul 100 % local (aucun appel
+réseau) qui évite de ressaisir les 7 horaires théoriques à la main :
 
-1. Tapez l'heure théorique de la dernière étape (`Départ pour la ligne` par
-   défaut) et cliquez sur **🔍 Retrouver** (ou appuyez sur Entrée).
-2. L'application interroge le Web App Google Apps Script, calcule le jour
-   de la semaine de la **date du train affiché sur la vignette**, et
-   cherche, parmi les sillons qui circulent ce jour-là, celui dont la
-   dernière heure théorique correspond exactement.
-3. Si un sillon correspond : les 7 horaires théoriques et les causes du
-   Sheet sont copiés sur la vignette, son numéro de train est mis à jour
-   avec celui du Sheet, et le badge **⇄ Sheet** apparaît. Les heures
-   **réelles déjà enregistrées ne sont jamais touchées** — seul le
-   théorique change, donc les écarts et le graphique se recalculent en
+1. Tapez l'heure du sillon et cliquez sur **⚡ Remplir les 7 heures** (ou
+   appuyez sur Entrée).
+2. L'application calcule automatiquement l'heure théorique des 7 étapes à
+   partir de cette seule valeur, selon un enchaînement fixe :
+
+   | Étape                     | Décalage vs heure du sillon |
+   | ------------------------- | ---------------------------: |
+   | Départ FA / Titoir-Fosse  | -240 min |
+   | Arrivée LHTE               | -161 min |
+   | Mise en tête                | -97 min |
+   | Annoncé Bon au départ      | -38 min |
+   | Retour du régulateur        | -19 min |
+   | Ouverture du signal          | -17 min |
+   | Départ pour la ligne          | -15 min |
+
+3. Les heures **réelles déjà enregistrées ne sont jamais touchées** — seul
+   le théorique change, donc les écarts et le graphique se recalculent en
    conséquence.
-4. Si aucun sillon ne correspond à cette heure pour cette date, un message
-   explicite s'affiche sous le champ ("Aucun sillon trouvé...") — rien
-   n'est modifié.
+4. **Cas particuliers** : rien n'empêche de corriger ensuite une étape à la
+   main via **"Modifier"** si un train a besoin d'un enchaînement différent
+   ce jour-là — le remplissage automatique est un point de départ, pas une
+   contrainte figée.
 
-Cette recherche se fait par l'heure elle-même (l'heure d'arrivée la plus
-tardive du groupe de lignes partageant un même numéro de train dans le
-Sheet, pour la date donnée), pas par numéro de train : vous n'avez donc pas
-besoin de connaître le numéro du sillon à l'avance.
+Ces décalages sont définis une fois pour toutes dans `js/config.js` →
+`SILLON_STEP_OFFSETS` (alignés par position sur les 7 étapes, pas par nom :
+si vous renommez une étape, gardez le même ordre).
 
 ## 7. Installer la PWA sur smartphone
 
@@ -278,6 +284,23 @@ en permanence sous l'en-tête, pour mesurer un temps de pause/arrêt :
   20 min.
 - L'état survit à un rechargement accidentel de la page (sauvegardé dans le
   navigateur).
+
+### 8.3. Navettes internes
+
+Une rangée de vignettes cliquables pour les navettes internes est affichée
+sous le chronomètre, groupées par couleur de cadre :
+
+| Groupe | Lignes | Couleur | Arrivée = départ + |
+| ------ | ------ | ------- | ------------------: |
+| FL | FL1, FL2, FL3 | orange | 35 min |
+| NL | NL1, NL2 | bleu foncé | 35 min |
+| AL | AL1, AL2 | jaune | 40 min |
+
+Cliquez sur une navette pour ouvrir une fenêtre où saisir son **heure de
+départ du Terminal** ; l'heure d'arrivée estimée se calcule et s'affiche
+immédiatement (et se met à jour en direct pendant la saisie). Un bouton
+**"Effacer"** réinitialise cette navette. Les lignes, couleurs et décalages
+se modifient dans `js/config.js` → `SHUTTLE_GROUPS`.
 
 ## 9. Modifier les 7 étapes
 

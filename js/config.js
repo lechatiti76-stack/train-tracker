@@ -32,6 +32,21 @@ export const DEFAULT_SETTINGS = {
 
 export const STEP_COUNT = 7;
 
+// Décalages (minutes, par rapport à "l'heure du sillon" = le départ pour la
+// ligne + 15 min) utilisés par le remplissage automatique des 7 étapes.
+// Alignés par position sur `DEFAULT_SETTINGS.defaultStepLabels` : si les
+// libellés d'un train sont personnalisés, l'ordre (pas le nom) fait
+// toujours foi. Reste modifiable au cas par cas après coup via "Modifier".
+export const SILLON_STEP_OFFSETS = [-240, -161, -97, -38, -19, -17, -15];
+
+// Navettes internes : chaque groupe a son propre décalage (arrivée = départ
+// Terminal + offsetMinutes) et sa couleur de cadre.
+export const SHUTTLE_GROUPS = [
+  { id: 'FL', codes: ['FL1', 'FL2', 'FL3'], color: '#f59e0b', offsetMinutes: 35 },
+  { id: 'NL', codes: ['NL1', 'NL2'], color: '#1e3a8a', offsetMinutes: 35 },
+  { id: 'AL', codes: ['AL1', 'AL2'], color: '#ca8a04', offsetMinutes: 40 },
+];
+
 // Seuils (en minutes) utilisés pour la sévérité visuelle des écarts.
 export const DELAY_THRESHOLDS = {
   onTime: 1, // |écart| < 1 min => "à l'heure"
@@ -42,4 +57,5 @@ export const DELAY_THRESHOLDS = {
 export const STORAGE_KEYS = {
   trains: 'traintrack:trains:v1',
   settings: 'traintrack:settings:v1',
+  shuttles: 'traintrack:shuttles:v1',
 };

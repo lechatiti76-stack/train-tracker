@@ -233,6 +233,10 @@ ${css}
   </div>
 </section>
 
+<section class="shuttles-bar" aria-label="Navettes internes">
+  <div id="shuttlesBar" class="shuttles-bar-inner"></div>
+</section>
+
 <main id="mainContent" class="app-main">
   <div id="trainsGrid" class="trains-grid" aria-live="polite"></div>
 </main>

@@ -238,6 +238,31 @@ body {
 .stopwatch-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-left: auto; }
 .stopwatch-controls .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* ---------- Navettes internes ---------- */
+.shuttles-bar { max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
+.shuttles-bar-inner { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.shuttle-chip {
+  --shuttle-color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: var(--surface);
+  border: 2px solid var(--shuttle-color);
+  border-radius: var(--radius-md);
+  padding: 0.45rem 0.85rem;
+  min-height: 44px;
+  min-width: 130px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.shuttle-chip:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--shuttle-color) 20%, transparent); }
+.shuttle-chip:active { transform: scale(0.97); }
+.shuttle-code { font-weight: 800; font-size: 0.85rem; color: var(--shuttle-color); letter-spacing: 0.02em; }
+.shuttle-times { font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); }
+.shuttle-times-empty { color: var(--text-faint); font-style: italic; font-family: var(--font-sans); }
+.shuttle-arrival-preview { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 800; text-align: center; margin: 0; }
+
 /* ---------- Grille & cartes ---------- */
 .app-main { padding: 1.25rem; max-width: 1600px; margin: 0 auto; }
 .trains-grid {

@@ -2,7 +2,24 @@
 // principale de retard. Fonctions pures (aucun accès au DOM ni au stockage)
 // pour rester faciles à faire évoluer.
 import { combineDateAndTime, diffMinutes, formatDelayLabel, delayTone, formatHHMM } from './time-utils.js';
-import { DELAY_THRESHOLDS } from './config.js';
+import { DELAY_THRESHOLDS, SILLON_STEP_OFFSETS } from './config.js';
+
+// Remplit automatiquement l'heure théorique des 7 étapes à partir d'une
+// seule heure de référence : "l'heure du sillon" (départ pour la ligne +
+// 15 min). Les décalages sont fixes (SILLON_STEP_OFFSETS, alignés par
+// position) et reflètent l'enchaînement réel de la préparation. Ne touche
+// jamais aux heures réelles ; chaque étape reste modifiable au cas par cas
+// ensuite via "Modifier".
+export function applySillonSequence(train, sillonHHMM, offsets = SILLON_STEP_OFFSETS) {
+  const sillonDate = combineDateAndTime(train.date, sillonHHMM);
+  if (!sillonDate) return;
+  train.steps.forEach((step, i) => {
+    const offset = offsets[i];
+    if (offset === undefined) return;
+    const computed = new Date(sillonDate.getTime() + offset * 60000);
+    step.theoretical = formatHHMM(computed);
+  });
+}
 
 // Calcule automatiquement l'heure théorique des étapes qui ont un décalage
 // (en minutes, positif ou négatif) défini par rapport à l'étape de référence

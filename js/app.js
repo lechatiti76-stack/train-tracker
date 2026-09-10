@@ -3,11 +3,11 @@
 // DOM (delay-calc, time-utils, storage, sheets-sync) ni à l'état global
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
-import { DELAY_THRESHOLDS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains } from './storage.js';
-import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps } from './delay-calc.js';
-import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds } from './time-utils.js';
-import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, findSillonByArrivalTime, applySillonRowsToTrain } from './sheets-sync.js';
+import { DELAY_THRESHOLDS, SHUTTLE_GROUPS } from './config.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles } from './storage.js';
+import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence } from './delay-calc.js';
+import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM } from './time-utils.js';
+import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml } from './card.js';
@@ -16,6 +16,7 @@ import { initStopwatch } from './stopwatch.js';
 let settings = loadSettings();
 let trains = loadTrains();
 let currentDate = todayISO();
+let shuttles = loadShuttles();
 
 const chartsByTrainId = new Map();
 const flapsByTrainId = new Map();
@@ -303,9 +304,9 @@ function onGridClick(e) {
     case 'delete-train': deleteTrain(train); break;
     case 'move-left': moveTrain(train, -1); break;
     case 'move-right': moveTrain(train, 1); break;
-    case 'lookup-sillon': {
-      const input = cardEl.querySelector('[data-role="arrival-lookup"]');
-      lookupSillonByArrival(train, input?.value);
+    case 'apply-sillon': {
+      const input = cardEl.querySelector('[data-role="sillon-time"]');
+      applySillonQuickFill(train, input?.value);
       break;
     }
     default: break;
@@ -314,72 +315,38 @@ function onGridClick(e) {
 
 function wireSillonInputs(grid) {
   grid.addEventListener('change', (e) => {
-    const input = e.target.closest('[data-role="arrival-lookup"]');
+    const input = e.target.closest('[data-role="sillon-time"]');
     if (!input) return;
     const cardEl = input.closest('.train-card');
     const train = findTrain(cardEl?.dataset.trainId);
     if (!train) return;
-    train.targetArrival = input.value || null;
+    train.sillonTime = input.value || null;
     persist();
   });
   grid.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    const input = e.target.closest('[data-role="arrival-lookup"]');
+    const input = e.target.closest('[data-role="sillon-time"]');
     if (!input) return;
     e.preventDefault();
     const cardEl = input.closest('.train-card');
     const train = findTrain(cardEl?.dataset.trainId);
-    if (train) lookupSillonByArrival(train, input.value);
+    if (train) applySillonQuickFill(train, input.value);
   });
 }
 
-function setSillonStatus(trainId, state, extra) {
-  const cardEl = grid_cardEl(trainId);
-  const el = cardEl?.querySelector('[data-role="sillon-status"]');
-  if (!el) return;
-  const messages = {
-    loading: 'Recherche du sillon…',
-    ok: `Sillon ${extra} appliqué`,
-    'not-found': "Aucun sillon trouvé dans le Sheet pour cette heure, ce jour-là.",
-    error: `Google Sheets indisponible${extra ? ' (' + extra + ')' : ''}.`,
-  };
-  el.textContent = messages[state] || '';
-  el.className = `sillon-lookup-status status-${state}`;
-}
-
-async function lookupSillonByArrival(train, timeValue) {
-  if (!timeValue) return;
-  if (!settings.sheetsWebAppUrl) {
-    showToast("Configurez d'abord l'URL Google Sheets dans les Réglages", 'error');
-    setSillonStatus(train.id, 'error', 'non configuré');
-    return;
-  }
-  setSillonStatus(train.id, 'loading');
-  const res = await fetchTheoreticalFromSheet(settings.sheetsWebAppUrl, train.date);
-  if (!res.ok) {
-    const detail = SYNC_ERROR_LABELS[res.reason] || res.reason;
-    setSillonStatus(train.id, 'error', detail);
-    showToast('Google Sheets indisponible', 'error');
-    return;
-  }
-
-  const match = findSillonByArrivalTime(res.rows, train.date, timeValue);
-  if (!match) {
-    setSillonStatus(train.id, 'not-found');
-    showToast('Aucun sillon trouvé pour cette heure', 'error');
-    return;
-  }
-
-  applySillonRowsToTrain(train, match.rows);
-  applyOffsetSteps(train);
-  train.number = match.trainNumber || train.number;
-  train.targetArrival = timeValue;
-  train.source = 'sheet';
+function applySillonQuickFill(train, sillonTime) {
+  if (!sillonTime) return;
+  applySillonSequence(train, sillonTime);
+  train.sillonTime = sillonTime;
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
-  setSillonStatus(train.id, 'ok', match.trainNumber);
-  showToast(`Sillon ${match.trainNumber} appliqué (${match.rows.length} horaires)`);
+  const statusEl = grid_cardEl(train.id)?.querySelector('[data-role="sillon-status"]');
+  if (statusEl) {
+    statusEl.textContent = 'Les 7 heures théoriques ont été calculées ✓';
+    statusEl.className = 'sillon-lookup-status status-ok';
+  }
+  showToast('Les 7 heures théoriques ont été calculées');
 }
 
 function wireDragAndDrop(grid) {
@@ -816,6 +783,89 @@ function registerServiceWorker() {
 }
 
 // ---------- Initialisation ----------
+// ---------- Navettes internes ----------
+function findShuttleGroup(code) {
+  return SHUTTLE_GROUPS.find((g) => g.codes.includes(code));
+}
+
+function computeShuttleArrival(code, departureHHMM) {
+  const group = findShuttleGroup(code);
+  const parsed = parseHHMM(departureHHMM);
+  if (!group || !parsed) return null;
+  const base = new Date(2000, 0, 1, parsed.h, parsed.m, 0, 0);
+  const arrival = new Date(base.getTime() + group.offsetMinutes * 60000);
+  return formatHHMM(arrival);
+}
+
+function renderShuttlesBar() {
+  const container = el('shuttlesBar');
+  if (!container) return;
+  container.innerHTML = SHUTTLE_GROUPS.map((group) => group.codes.map((code) => {
+    const departure = shuttles[code]?.departure;
+    const arrival = departure ? computeShuttleArrival(code, departure) : null;
+    return `
+      <button type="button" class="shuttle-chip" style="--shuttle-color:${group.color}" data-shuttle-code="${code}">
+        <span class="shuttle-code">${escapeHtml(code)}</span>
+        ${departure
+          ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
+          : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
+      </button>`;
+  }).join('')).join('');
+}
+
+function openShuttleModal(code) {
+  const group = findShuttleGroup(code);
+  if (!group) return;
+  const departure = shuttles[code]?.departure || '';
+
+  openModal({
+    title: `Navette ${escapeHtml(code)}`,
+    bodyHTML: `
+      <form id="shuttleForm" class="stacked-form">
+        <label>Heure de départ (Terminal)
+          <input type="time" id="fShuttleDeparture" value="${departure}">
+        </label>
+        <p class="help-text">Heure d'arrivée estimée (départ + ${group.offsetMinutes} min) :</p>
+        <p class="shuttle-arrival-preview" data-role="shuttle-arrival">${departure ? computeShuttleArrival(code, departure) : '--:--'}</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnClearShuttle">Effacer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      const input = panel.querySelector('#fShuttleDeparture');
+      const preview = panel.querySelector('[data-role="shuttle-arrival"]');
+      input.addEventListener('input', () => {
+        preview.textContent = input.value ? computeShuttleArrival(code, input.value) : '--:--';
+      });
+      panel.querySelector('#shuttleForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        shuttles[code] = { departure: input.value || null };
+        saveShuttles(shuttles);
+        renderShuttlesBar();
+        closeModal();
+        showToast(`Navette ${code} mise à jour`);
+      });
+      panel.querySelector('#btnClearShuttle').addEventListener('click', () => {
+        shuttles[code] = { departure: null };
+        saveShuttles(shuttles);
+        renderShuttlesBar();
+        closeModal();
+        showToast(`Navette ${code} réinitialisée`);
+      });
+    },
+  });
+}
+
+function wireShuttlesBar() {
+  const container = el('shuttlesBar');
+  if (!container) return;
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-shuttle-code]');
+    if (btn) openShuttleModal(btn.dataset.shuttleCode);
+  });
+}
+
 function wireHeaderButtons() {
   el('btnAddTrain').addEventListener('click', () => openTrainModal(null));
   el('btnSettings').addEventListener('click', openSettingsModal);
@@ -847,6 +897,8 @@ function init() {
 
   wireHeaderButtons();
   initStopwatch(el('stopwatchWidget'));
+  renderShuttlesBar();
+  wireShuttlesBar();
   wireInstallPrompt();
   registerServiceWorker();
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');

@@ -142,27 +142,6 @@ export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabel
   return { trains: result, touchedNumbers };
 }
 
-// Recherche, parmi tous les sillons connus pour une date, celui dont l'heure
-// d'arrivée théorique (la plus tardive des heures du groupe) correspond à
-// l'heure donnée. Ne dépend pas du numéro de train : c'est l'heure elle-même
-// qui identifie le sillon, comme demandé.
-export function findSillonByArrivalTime(rows, dateISO, arrivalHHMM) {
-  const targetTime = normalizeSheetTime(arrivalHHMM);
-  if (!targetTime) return null;
-
-  const byTrainNumber = groupRowsByTrainForDate(rows, dateISO);
-  const matches = [];
-  for (const [number, groupRows] of byTrainNumber) {
-    let latest = null;
-    for (const row of groupRows) {
-      const t = normalizeSheetTime(row.heureTheorique ?? row['Heure théorique'] ?? row.heure ?? '');
-      if (t && (!latest || t > latest)) latest = t;
-    }
-    if (latest === targetTime) matches.push({ trainNumber: number, rows: groupRows });
-  }
-  return matches[0] || null;
-}
-
 function normalizeSheetDate(value) {
   if (!value) return '';
   const str = String(value).trim();

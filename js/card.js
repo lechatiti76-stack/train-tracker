@@ -85,10 +85,10 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
 
       ${readOnly ? '' : `
         <div class="sillon-lookup">
-          <label class="sillon-lookup-label" for="arrival-${train.id}">Heure de la dernière étape (sillon Google Sheets)</label>
+          <label class="sillon-lookup-label" for="sillon-${train.id}">Heure du sillon (départ pour la ligne + 15 min)</label>
           <div class="sillon-lookup-row">
-            <input type="time" id="arrival-${train.id}" class="sillon-lookup-input" data-role="arrival-lookup" value="${train.targetArrival || ''}">
-            <button type="button" class="btn btn-outline btn-sm" data-action="lookup-sillon">🔍 Retrouver</button>
+            <input type="time" id="sillon-${train.id}" class="sillon-lookup-input" data-role="sillon-time" value="${train.sillonTime || ''}">
+            <button type="button" class="btn btn-outline btn-sm" data-action="apply-sillon">⚡ Remplir les 7 heures</button>
           </div>
           <p class="sillon-lookup-status" data-role="sillon-status"></p>
         </div>`}

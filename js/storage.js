@@ -44,6 +44,20 @@ export function saveSettings(settings) {
   }
 }
 
+export function loadShuttles() {
+  return safeParse(localStorage.getItem(STORAGE_KEYS.shuttles), {});
+}
+
+export function saveShuttles(shuttles) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.shuttles, JSON.stringify(shuttles));
+    return true;
+  } catch (err) {
+    console.error('Impossible d\'enregistrer les navettes.', err);
+    return false;
+  }
+}
+
 function uuid() {
   if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -57,7 +71,7 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     date, // 'YYYY-MM-DD'
     order,
     source, // 'manual' | 'sheet'
-    targetArrival: null, // 'HH:MM' saisie pour retrouver le sillon dans Google Sheets
+    sillonTime: null, // 'HH:MM' — heure de référence pour le remplissage auto des 7 étapes
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
