@@ -24,6 +24,13 @@ export const DEFAULT_SETTINGS = {
     'Ouverture du signal',
     'Départ pour la ligne',
   ],
+  // Décalages (minutes, par rapport à "l'heure du sillon" = le départ pour
+  // la ligne + 15 min) utilisés par "Remplir les 7 heures" sur chaque
+  // vignette. Alignés par position sur `defaultStepLabels` (pas par nom).
+  // Modifiable dans Réglages sans toucher au code — voir la section
+  // "Décalages du remplissage automatique" du README pour les ajuster si
+  // les horaires calculés ne correspondent pas à la réalité du terrain.
+  sillonStepOffsets: [-240, -161, -97, -38, -19, -17, -15],
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
@@ -31,13 +38,6 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const STEP_COUNT = 7;
-
-// Décalages (minutes, par rapport à "l'heure du sillon" = le départ pour la
-// ligne + 15 min) utilisés par le remplissage automatique des 7 étapes.
-// Alignés par position sur `DEFAULT_SETTINGS.defaultStepLabels` : si les
-// libellés d'un train sont personnalisés, l'ordre (pas le nom) fait
-// toujours foi. Reste modifiable au cas par cas après coup via "Modifier".
-export const SILLON_STEP_OFFSETS = [-240, -161, -97, -38, -19, -17, -15];
 
 // Navettes internes : chaque groupe a son propre décalage (arrivée = départ
 // Terminal + offsetMinutes) et sa couleur de cadre.

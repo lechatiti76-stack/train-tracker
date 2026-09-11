@@ -262,6 +262,40 @@ body {
 .shuttle-times { font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); }
 .shuttle-times-empty { color: var(--text-faint); font-style: italic; font-family: var(--font-sans); }
 .shuttle-arrival-preview { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 800; text-align: center; margin: 0; }
+.shuttle-state-label { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
+
+.shuttle-chip.state-approaching {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+.shuttle-chip.state-approaching .shuttle-state-label { color: #f59e0b; }
+
+.shuttle-chip.state-imminent {
+  border-color: #ef4444;
+  animation: shuttleBlink 1s step-start infinite;
+}
+.shuttle-chip.state-imminent .shuttle-state-label { color: #ef4444; }
+@keyframes shuttleBlink {
+  50% {
+    border-color: transparent;
+    background: rgba(239, 68, 68, 0.16);
+    box-shadow: 0 0 14px 2px rgba(239, 68, 68, 0.55);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shuttle-chip.state-imminent {
+    animation: none;
+    box-shadow: 0 0 10px 2px rgba(239, 68, 68, 0.55);
+  }
+}
+
+.shuttle-chip.state-arrived {
+  border-color: var(--border);
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.shuttle-chip.state-arrived .shuttle-code { color: var(--text-faint); }
+.shuttle-chip.state-arrived .shuttle-state-label { color: var(--text-faint); }
 
 /* ---------- Grille & cartes ---------- */
 .app-main { padding: 1.25rem; max-width: 1600px; margin: 0 auto; }

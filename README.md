@@ -209,9 +209,12 @@ réseau) qui évite de ressaisir les 7 horaires théoriques à la main :
    ce jour-là — le remplissage automatique est un point de départ, pas une
    contrainte figée.
 
-Ces décalages sont définis une fois pour toutes dans `js/config.js` →
-`SILLON_STEP_OFFSETS` (alignés par position sur les 7 étapes, pas par nom :
-si vous renommez une étape, gardez le même ordre).
+**Si les horaires calculés ne correspondent pas à la réalité du terrain**,
+pas besoin de toucher au code : ouvrez **⚙ Réglages**, section "Décalages
+du bouton ⚡ Remplir les 7 heures" — un champ par étape, en minutes,
+directement modifiable et sauvegardé pour toutes les vignettes. Les
+décalages sont alignés par **position** sur les 7 étapes, pas par nom : si
+vous renommez une étape, gardez le même ordre.
 
 ## 7. Installer la PWA sur smartphone
 
@@ -297,10 +300,22 @@ sous le chronomètre, groupées par couleur de cadre :
 | AL | AL1, AL2 | jaune | 40 min |
 
 Cliquez sur une navette pour ouvrir une fenêtre où saisir son **heure de
-départ du Terminal** ; l'heure d'arrivée estimée se calcule et s'affiche
-immédiatement (et se met à jour en direct pendant la saisie). Un bouton
-**"Effacer"** réinitialise cette navette. Les lignes, couleurs et décalages
-se modifient dans `js/config.js` → `SHUTTLE_GROUPS`.
+départ du Terminal** — le bouton **"Maintenant"** capture directement
+l'heure actuelle en un clic. L'heure d'arrivée estimée se calcule et
+s'affiche immédiatement (et se met à jour en direct pendant la saisie). Un
+bouton **"Effacer"** réinitialise cette navette. Les lignes, couleurs et
+décalages se modifient dans `js/config.js` → `SHUTTLE_GROUPS`.
+
+Chaque vignette change d'aspect automatiquement selon le temps restant
+avant l'heure d'arrivée estimée (revérifié en direct toutes les 15
+secondes, sans avoir à recharger la page) :
+
+| Temps restant avant l'arrivée | Aspect |
+| ------------------------------ | ------ |
+| Plus de 35 min (ou départ non renseigné) | normal (couleur du groupe) |
+| 35 à 30 min | cadre orange + "Arrivée en approche" |
+| 30 à 0 min | cadre rouge **clignotant** + "⚠ Arrivée imminente" |
+| Arrivée passée | grisée + "Arrivée effectuée" (reste cliquable pour saisir le prochain départ) |
 
 ## 9. Modifier les 7 étapes
 

@@ -336,7 +336,7 @@ function wireSillonInputs(grid) {
 
 function applySillonQuickFill(train, sillonTime) {
   if (!sillonTime) return;
-  applySillonSequence(train, sillonTime);
+  applySillonSequence(train, sillonTime, settings.sillonStepOffsets);
   train.sillonTime = sillonTime;
   train.updatedAt = new Date().toISOString();
   persist();
@@ -571,6 +571,20 @@ function settingsBodyHTML() {
           </label>`).join('')}
       </div>
 
+      <div class="steps-form-list">
+        <p class="help-text">
+          Décalages (minutes) du bouton "⚡ Remplir les 7 heures", par
+          rapport à l'heure du sillon (départ pour la ligne + 15 min).
+          Négatif = avant le sillon. Si les horaires calculés ne
+          correspondent pas à la réalité du terrain, corrigez-les ici —
+          ça s'applique à toutes les vignettes.
+        </p>
+        ${settings.defaultStepLabels.map((l, i) => `
+          <label>${escapeHtml(l)}
+            <input type="number" class="sSillonOffset" data-i="${i}" value="${settings.sillonStepOffsets[i] ?? ''}" required>
+          </label>`).join('')}
+      </div>
+
       <label>Thème
         <select id="sTheme">
           <option value="auto" ${settings.theme === 'auto' ? 'selected' : ''}>Automatique (système)</option>
@@ -605,6 +619,7 @@ function openSettingsModal() {
         e.preventDefault();
         settings.sheetsWebAppUrl = panel.querySelector('#sSheetUrl').value.trim();
         settings.defaultStepLabels = sortedByIndex([...panel.querySelectorAll('.sStepLabel')]).map((i) => i.value.trim());
+        settings.sillonStepOffsets = sortedByIndex([...panel.querySelectorAll('.sSillonOffset')]).map((i) => Number(i.value) || 0);
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
@@ -782,8 +797,10 @@ function registerServiceWorker() {
   });
 }
 
-// ---------- Initialisation ----------
 // ---------- Navettes internes ----------
+const SHUTTLE_IMMINENT_MIN = 30; // arrivée <= 30 min => clignotement rouge
+const SHUTTLE_APPROACHING_MIN = 35; // arrivée <= 35 min => "en approche"
+
 function findShuttleGroup(code) {
   return SHUTTLE_GROUPS.find((g) => g.codes.includes(code));
 }
@@ -797,20 +814,69 @@ function computeShuttleArrival(code, departureHHMM) {
   return formatHHMM(arrival);
 }
 
+// État affiché sur la vignette, calculé à partir du temps restant avant
+// l'heure d'arrivée estimée (par rapport à maintenant) :
+//   vide -> programmée -> en approche (35 min) -> imminente (30 min, clignote) -> arrivée (grisée)
+function computeShuttleState(code) {
+  const departure = shuttles[code]?.departure;
+  if (!departure) return 'empty';
+  const arrival = computeShuttleArrival(code, departure);
+  const parsedArrival = parseHHMM(arrival);
+  if (!parsedArrival) return 'empty';
+  const now = new Date();
+  const arrivalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedArrival.h, parsedArrival.m, 0, 0);
+  const remainingMin = (arrivalDate.getTime() - now.getTime()) / 60000;
+  if (remainingMin <= 0) return 'arrived';
+  if (remainingMin <= SHUTTLE_IMMINENT_MIN) return 'imminent';
+  if (remainingMin <= SHUTTLE_APPROACHING_MIN) return 'approaching';
+  return 'scheduled';
+}
+
+const SHUTTLE_STATE_LABELS = {
+  approaching: 'Arrivée en approche',
+  imminent: '⚠ Arrivée imminente',
+  arrived: 'Arrivée effectuée',
+};
+
+function shuttleChipInnerHTML(code) {
+  const departure = shuttles[code]?.departure;
+  const arrival = departure ? computeShuttleArrival(code, departure) : null;
+  const state = computeShuttleState(code);
+  const stateLabel = SHUTTLE_STATE_LABELS[state];
+  return `
+    <span class="shuttle-code">${escapeHtml(code)}</span>
+    ${departure
+      ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
+      : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
+    ${stateLabel ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${stateLabel}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}`;
+}
+
 function renderShuttlesBar() {
   const container = el('shuttlesBar');
   if (!container) return;
-  container.innerHTML = SHUTTLE_GROUPS.map((group) => group.codes.map((code) => {
-    const departure = shuttles[code]?.departure;
-    const arrival = departure ? computeShuttleArrival(code, departure) : null;
-    return `
-      <button type="button" class="shuttle-chip" style="--shuttle-color:${group.color}" data-shuttle-code="${code}">
-        <span class="shuttle-code">${escapeHtml(code)}</span>
-        ${departure
-          ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
-          : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
-      </button>`;
-  }).join('')).join('');
+  container.innerHTML = SHUTTLE_GROUPS.map((group) => group.codes.map((code) => `
+    <button type="button" class="shuttle-chip state-${computeShuttleState(code)}" style="--shuttle-color:${group.color}" data-shuttle-code="${code}">
+      ${shuttleChipInnerHTML(code)}
+    </button>`).join('')).join('');
+}
+
+// Ne touche qu'à la classe d'état + au libellé (pas tout l'innerHTML), pour
+// ne pas interrompre l'animation de clignotement en cours à chaque tick.
+function updateShuttleStates() {
+  const container = el('shuttlesBar');
+  if (!container) return;
+  container.querySelectorAll('[data-shuttle-code]').forEach((chip) => {
+    const code = chip.dataset.shuttleCode;
+    const state = computeShuttleState(code);
+    if (chip.classList.contains(`state-${state}`)) return;
+    chip.className = `shuttle-chip state-${state}`;
+    const labelEl = chip.querySelector('[data-role="shuttle-state-label"]');
+    if (labelEl) {
+      const text = SHUTTLE_STATE_LABELS[state];
+      labelEl.textContent = text || '';
+      labelEl.hidden = !text;
+    }
+  });
 }
 
 function openShuttleModal(code) {
@@ -823,7 +889,10 @@ function openShuttleModal(code) {
     bodyHTML: `
       <form id="shuttleForm" class="stacked-form">
         <label>Heure de départ (Terminal)
-          <input type="time" id="fShuttleDeparture" value="${departure}">
+          <div class="sillon-lookup-row">
+            <input type="time" id="fShuttleDeparture" value="${departure}">
+            <button type="button" class="btn btn-outline btn-sm" id="btnShuttleNow">Maintenant</button>
+          </div>
         </label>
         <p class="help-text">Heure d'arrivée estimée (départ + ${group.offsetMinutes} min) :</p>
         <p class="shuttle-arrival-preview" data-role="shuttle-arrival">${departure ? computeShuttleArrival(code, departure) : '--:--'}</p>
@@ -835,8 +904,13 @@ function openShuttleModal(code) {
     onMount: (panel) => {
       const input = panel.querySelector('#fShuttleDeparture');
       const preview = panel.querySelector('[data-role="shuttle-arrival"]');
-      input.addEventListener('input', () => {
+      const refreshPreview = () => {
         preview.textContent = input.value ? computeShuttleArrival(code, input.value) : '--:--';
+      };
+      input.addEventListener('input', refreshPreview);
+      panel.querySelector('#btnShuttleNow').addEventListener('click', () => {
+        input.value = formatHHMM(new Date());
+        refreshPreview();
       });
       panel.querySelector('#shuttleForm').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -864,6 +938,7 @@ function wireShuttlesBar() {
     const btn = e.target.closest('[data-shuttle-code]');
     if (btn) openShuttleModal(btn.dataset.shuttleCode);
   });
+  setInterval(updateShuttleStates, 15000);
 }
 
 function wireHeaderButtons() {
