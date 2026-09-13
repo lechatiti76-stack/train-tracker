@@ -53,6 +53,20 @@ function stepRowHTML(train, index, readOnly) {
     </li>`;
 }
 
+function midRowHTML(train) {
+  return `
+    <div class="card-mid-row">
+      <div class="cause-panel">
+        <div class="cause-panel-title">Cause principale</div>
+        <div class="flap-board">
+          <div class="flap-row-wrap" data-role="flap-cause"></div>
+          <div class="flap-row-wrap flap-row-amount" data-role="flap-amount"></div>
+        </div>
+      </div>
+      <div data-role="summary">${summaryRowHTML(train)}</div>
+    </div>`;
+}
+
 function summaryRowHTML(train) {
   const delays = computeAllStepDelays(train);
   const lastIndex = train.steps.length - 1;
@@ -93,20 +107,12 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
           <p class="sillon-lookup-status" data-role="sillon-status"></p>
         </div>`}
 
-      <div class="cause-panel">
-        <div class="cause-panel-title">Cause principale</div>
-        <div class="flap-board">
-          <div class="flap-row-wrap" data-role="flap-cause"></div>
-          <div class="flap-row-wrap flap-row-amount" data-role="flap-amount"></div>
-        </div>
-      </div>
-
       <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
 
-      <div data-role="summary">${summaryRowHTML(train)}</div>
+      ${midRowHTML(train)}
 
       <div class="chart-wrap">
-        <div class="chart-title">Théorique / Réel</div>
+        <div class="chart-title">Théorique / Réel — au fil des étapes</div>
         <div class="chart-canvas-holder"><canvas data-role="chart"></canvas></div>
       </div>
 

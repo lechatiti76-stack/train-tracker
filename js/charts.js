@@ -109,10 +109,12 @@ export function createDelayChart(canvas, train) {
         x: {
           grid: { color: gridColor },
           ticks: { color: textColor, font: { size: 10 } },
+          title: { display: true, text: 'Étapes', color: textColor, font: { size: 10, weight: 'bold' } },
         },
         y: {
           grid: { color: gridColor },
           ticks: { color: textColor, font: { size: 10 }, callback: (v) => formatMinutesOfDay(v) },
+          title: { display: true, text: 'Heure', color: textColor, font: { size: 10, weight: 'bold' } },
         },
       },
     },

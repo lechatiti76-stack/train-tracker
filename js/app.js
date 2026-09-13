@@ -817,7 +817,10 @@ function computeShuttleArrival(code, departureHHMM) {
 // État affiché sur la vignette, calculé à partir du temps restant avant
 // l'heure d'arrivée estimée (par rapport à maintenant) :
 //   vide -> programmée -> en approche (35 min) -> imminente (30 min, clignote) -> arrivée (grisée)
+// "arrivedManually" (bouton "Navette arrivée") court-circuite ce calcul :
+// utile quand l'heure réelle ne correspond pas à l'estimation automatique.
 function computeShuttleState(code) {
+  if (shuttles[code]?.arrivedManually) return 'arrived';
   const departure = shuttles[code]?.departure;
   if (!departure) return 'empty';
   const arrival = computeShuttleArrival(code, departure);
@@ -832,6 +835,10 @@ function computeShuttleState(code) {
   return 'scheduled';
 }
 
+function shuttleHasDelayFlag(code) {
+  return Boolean(shuttles[code]?.delayFlag);
+}
+
 const SHUTTLE_STATE_LABELS = {
   approaching: 'Arrivée en approche',
   imminent: '⚠ Arrivée imminente',
@@ -843,19 +850,25 @@ function shuttleChipInnerHTML(code) {
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
   const state = computeShuttleState(code);
   const stateLabel = SHUTTLE_STATE_LABELS[state];
+  const delayFlag = shuttleHasDelayFlag(code);
   return `
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
-    ${stateLabel ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${stateLabel}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}`;
+    ${stateLabel ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${stateLabel}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
+    <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
+}
+
+function shuttleChipClass(code, group) {
+  return `shuttle-chip state-${computeShuttleState(code)}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
 }
 
 function renderShuttlesBar() {
   const container = el('shuttlesBar');
   if (!container) return;
   container.innerHTML = SHUTTLE_GROUPS.map((group) => group.codes.map((code) => `
-    <button type="button" class="shuttle-chip state-${computeShuttleState(code)}" style="--shuttle-color:${group.color}" data-shuttle-code="${code}">
+    <button type="button" class="${shuttleChipClass(code, group)}" style="--shuttle-color:${group.color}" data-shuttle-code="${code}">
       ${shuttleChipInnerHTML(code)}
     </button>`).join('')).join('');
 }
@@ -867,22 +880,35 @@ function updateShuttleStates() {
   if (!container) return;
   container.querySelectorAll('[data-shuttle-code]').forEach((chip) => {
     const code = chip.dataset.shuttleCode;
+    const wantClass = shuttleChipClass(code);
+    if (chip.className === wantClass) return;
+    chip.className = wantClass;
     const state = computeShuttleState(code);
-    if (chip.classList.contains(`state-${state}`)) return;
-    chip.className = `shuttle-chip state-${state}`;
     const labelEl = chip.querySelector('[data-role="shuttle-state-label"]');
     if (labelEl) {
       const text = SHUTTLE_STATE_LABELS[state];
       labelEl.textContent = text || '';
       labelEl.hidden = !text;
     }
+    const delayEl = chip.querySelector('[data-role="shuttle-delay-flag"]');
+    if (delayEl) delayEl.hidden = !shuttleHasDelayFlag(code);
   });
+}
+
+function shuttleQuickStatusText(arrivedManually, delayFlag) {
+  if (arrivedManually && delayFlag) return 'Marquée arrivée manuellement, avec un retard signalé.';
+  if (arrivedManually) return 'Marquée arrivée manuellement (remplace le calcul automatique).';
+  if (delayFlag) return 'Retard / souci signalé — repère visuel ajouté sur la vignette.';
+  return 'Aucune anomalie signalée.';
 }
 
 function openShuttleModal(code) {
   const group = findShuttleGroup(code);
   if (!group) return;
-  const departure = shuttles[code]?.departure || '';
+  const rec = shuttles[code] || {};
+  const departure = rec.departure || '';
+  const arrivedManually = Boolean(rec.arrivedManually);
+  const delayFlag = Boolean(rec.delayFlag);
 
   openModal({
     title: `Navette ${escapeHtml(code)}`,
@@ -896,6 +922,13 @@ function openShuttleModal(code) {
         </label>
         <p class="help-text">Heure d'arrivée estimée (départ + ${group.offsetMinutes} min) :</p>
         <p class="shuttle-arrival-preview" data-role="shuttle-arrival">${departure ? computeShuttleArrival(code, departure) : '--:--'}</p>
+
+        <div class="shuttle-quick-actions">
+          <button type="button" class="btn ${arrivedManually ? 'btn-primary' : 'btn-outline'}" id="btnShuttleArrived" aria-pressed="${arrivedManually}">✓ Navette arrivée</button>
+          <button type="button" class="btn ${delayFlag ? 'btn-danger' : 'btn-outline'}" id="btnShuttleDelay" aria-pressed="${delayFlag}">⚠ Retard / souci</button>
+        </div>
+        <p class="help-text" data-role="shuttle-quick-status">${shuttleQuickStatusText(arrivedManually, delayFlag)}</p>
+
         <div class="form-actions">
           <button type="button" class="btn btn-outline" id="btnClearShuttle">Effacer</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
@@ -912,16 +945,51 @@ function openShuttleModal(code) {
         input.value = formatHHMM(new Date());
         refreshPreview();
       });
+
+      const arrivedBtn = panel.querySelector('#btnShuttleArrived');
+      const delayBtn = panel.querySelector('#btnShuttleDelay');
+      const statusEl = panel.querySelector('[data-role="shuttle-quick-status"]');
+      const refreshQuickButtons = () => {
+        const current = shuttles[code] || {};
+        arrivedBtn.classList.toggle('btn-primary', Boolean(current.arrivedManually));
+        arrivedBtn.classList.toggle('btn-outline', !current.arrivedManually);
+        arrivedBtn.setAttribute('aria-pressed', String(Boolean(current.arrivedManually)));
+        delayBtn.classList.toggle('btn-danger', Boolean(current.delayFlag));
+        delayBtn.classList.toggle('btn-outline', !current.delayFlag);
+        delayBtn.setAttribute('aria-pressed', String(Boolean(current.delayFlag)));
+        statusEl.textContent = shuttleQuickStatusText(current.arrivedManually, current.delayFlag);
+      };
+      arrivedBtn.addEventListener('click', () => {
+        const current = shuttles[code] || {};
+        current.arrivedManually = !current.arrivedManually;
+        shuttles[code] = current;
+        saveShuttles(shuttles);
+        renderShuttlesBar();
+        refreshQuickButtons();
+        showToast(current.arrivedManually ? `Navette ${code} marquée arrivée` : `Navette ${code} réactivée`);
+      });
+      delayBtn.addEventListener('click', () => {
+        const current = shuttles[code] || {};
+        current.delayFlag = !current.delayFlag;
+        shuttles[code] = current;
+        saveShuttles(shuttles);
+        renderShuttlesBar();
+        refreshQuickButtons();
+        showToast(current.delayFlag ? `Retard signalé sur la navette ${code}` : `Retard levé sur la navette ${code}`);
+      });
+
       panel.querySelector('#shuttleForm').addEventListener('submit', (e) => {
         e.preventDefault();
-        shuttles[code] = { departure: input.value || null };
+        const current = shuttles[code] || {};
+        current.departure = input.value || null;
+        shuttles[code] = current;
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
         showToast(`Navette ${code} mise à jour`);
       });
       panel.querySelector('#btnClearShuttle').addEventListener('click', () => {
-        shuttles[code] = { departure: null };
+        shuttles[code] = { departure: null, arrivedManually: false, delayFlag: false };
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();

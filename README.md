@@ -317,6 +317,33 @@ secondes, sans avoir à recharger la page) :
 | 30 à 0 min | cadre rouge **clignotant** + "⚠ Arrivée imminente" |
 | Arrivée passée | grisée + "Arrivée effectuée" (reste cliquable pour saisir le prochain départ) |
 
+**En cas de souci (retard, heure calculée qui ne correspond pas à la
+réalité)**, deux boutons dans la fenêtre de la navette permettent de
+corriger l'affichage sans recalculer quoi que ce soit :
+
+- **✓ Navette arrivée** : force l'état "grisée / Arrivée effectuée"
+  immédiatement, quelle que soit l'heure calculée. Utile si la navette est
+  arrivée plus tôt (ou plus tard) que prévu. Un second clic annule ce
+  forçage et rend la main au calcul automatique.
+- **⚠ Retard / souci** : ajoute un repère visuel rouge ("⚠ Retard signalé")
+  sur la vignette, cumulable avec n'importe quel état (y compris "grisée").
+  Ne modifie aucune heure — c'est un simple signal pour attirer l'attention.
+  Un second clic le retire.
+
+Ces deux réglages sont mémorisés par navette (localStorage) et remis à
+zéro par le bouton **"Effacer"**.
+
+### 8.4. Mise en page des vignettes
+
+Les vignettes sont affichées **en pleine largeur** (une par ligne, format
+paysage) plutôt qu'en grille de cartes verticales, pour que les 7 étapes
+tiennent sur une seule rangée, alignées : le libellé et l'heure théorique
+en haut de chaque colonne, le bouton (ou l'heure réelle enregistrée) en
+dessous. La cause principale et le résumé théorique/réel/écart sont
+affichés côte à côte juste en dessous, puis le graphique théorique/réel
+tout en bas de la vignette, avant les boutons d'action. Sur petit écran
+(mobile), la rangée des 7 étapes défile horizontalement au doigt.
+
 ## 9. Modifier les 7 étapes
 
 - **Pour un train existant** : bouton "Modifier" sur sa vignette → chaque
