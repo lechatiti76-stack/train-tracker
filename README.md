@@ -193,13 +193,16 @@ réseau) qui évite de ressaisir les 7 horaires théoriques à la main :
 
    | Étape                     | Décalage vs heure du sillon |
    | ------------------------- | ---------------------------: |
-   | Départ FA / Titoir-Fosse  | -240 min |
-   | Arrivée LHTE               | -161 min |
-   | Mise en tête                | -97 min |
-   | Annoncé Bon au départ      | -38 min |
+   | Départ FA / Titoir-Fosse  | -87 min |
+   | Arrivée LHTE               | -72 min |
+   | Mise en tête                | -67 min |
+   | Annoncé Bon au départ      | -22 min |
    | Retour du régulateur        | -19 min |
    | Ouverture du signal          | -17 min |
    | Départ pour la ligne          | -15 min |
+
+   Valeurs vérifiées à partir de la séquence réelle (16:36 → 16:51 → 16:56
+   → 17:41 → 17:44 → 17:46 → 17:48 → 18:03 = sillon).
 
 3. Les heures **réelles déjà enregistrées ne sont jamais touchées** — seul
    le théorique change, donc les écarts et le graphique se recalculent en
@@ -214,7 +217,10 @@ pas besoin de toucher au code : ouvrez **⚙ Réglages**, section "Décalages
 du bouton ⚡ Remplir les 7 heures" — un champ par étape, en minutes,
 directement modifiable et sauvegardé pour toutes les vignettes. Les
 décalages sont alignés par **position** sur les 7 étapes, pas par nom : si
-vous renommez une étape, gardez le même ordre.
+vous renommez une étape, gardez le même ordre. Le bouton **"↺
+Réinitialiser aux valeurs par défaut"** juste en dessous remet les 7
+champs aux valeurs ci-dessus (celles de l'application) — pensez à cliquer
+ensuite sur **"Enregistrer"** pour les appliquer.
 
 ## 7. Installer la PWA sur smartphone
 
@@ -297,14 +303,33 @@ sous le chronomètre, groupées par couleur de cadre :
 | ------ | ------ | ------- | ------------------: |
 | FL | FL1, FL2, FL3 | orange | 35 min |
 | NL | NL1, NL2 | bleu foncé | 35 min |
-| AL | AL1, AL2 | jaune | 40 min |
+| AL | AL1, AL2 | jaune | 35 min |
 
 Cliquez sur une navette pour ouvrir une fenêtre où saisir son **heure de
 départ du Terminal** — le bouton **"Maintenant"** capture directement
 l'heure actuelle en un clic. L'heure d'arrivée estimée se calcule et
-s'affiche immédiatement (et se met à jour en direct pendant la saisie). Un
-bouton **"Effacer"** réinitialise cette navette. Les lignes, couleurs et
-décalages se modifient dans `js/config.js` → `SHUTTLE_GROUPS`.
+s'affiche immédiatement (et se met à jour en direct pendant la saisie),
+avec en dessous la liste des **passages intermédiaires** (à titre
+indicatif, calculés depuis l'heure de départ) :
+
+| Groupe | Passages |
+| ------ | -------- |
+| FL, NL | Départ FS (+2 min) · CV 1474 (+5) · Entrée GB (+15) · Sortie GB (+23) |
+| AL | Départ Maritime (+2) · Départ 4R (+5) · Pont rouge (+15) · Point X (+20) · passage FA (+25) |
+
+Un bouton **"Effacer"** réinitialise cette navette. Les lignes, couleurs,
+décalages et passages des groupes intégrés se modifient dans
+`js/config.js` → `SHUTTLE_GROUPS`.
+
+**Ajouter une navette supplémentaire** : cliquez sur le bouton **"+
+Navette"** à la fin de la rangée. Renseignez un nom/destination, une
+couleur de cadre, un ou plusieurs codes (ex : "BL1, BL2"), puis la liste
+des passages avec leur nombre de minutes depuis le départ — le dernier
+(celui avec le plus grand nombre de minutes) définit l'heure d'arrivée
+estimée. Ces navettes ajoutées manuellement apparaissent dans la même
+rangée, avec les mêmes états visuels (approche / imminente / arrivée), et
+se suppriment depuis **⚙ Réglages** (liste "Navettes ajoutées
+manuellement").
 
 Chaque vignette change d'aspect automatiquement selon le temps restant
 avant l'heure d'arrivée estimée (revérifié en direct toutes les 15
@@ -343,6 +368,24 @@ dessous. La cause principale et le résumé théorique/réel/écart sont
 affichés côte à côte juste en dessous, puis le graphique théorique/réel
 tout en bas de la vignette, avant les boutons d'action. Sur petit écran
 (mobile), la rangée des 7 étapes défile horizontalement au doigt.
+
+### 8.5. Trains à accès rapide
+
+Sous les navettes, un bouton apparaît pour chaque numéro de train listé
+dans **⚙ Réglages → "Trains à accès rapide"** (par défaut : 50238, 52232,
+70630, 52006) — utile pour des trains qui circulent certains jours mais
+pas d'autres, sans repasser par le formulaire complet :
+
+- **Bouton non rempli (contour)** : ce train n'a pas de vignette
+  aujourd'hui (ne circule pas). Cliquer dessus **ajoute** sa vignette pour
+  la date du jour, avec les libellés d'étapes par défaut.
+- **Bouton rempli (bleu)** : ce train circule aujourd'hui, sa vignette est
+  affichée. Cliquer dessus la **retire** (confirmation demandée si des
+  heures réelles ont déjà été enregistrées, pour éviter une perte de
+  données par erreur).
+
+La liste des numéros est modifiable à tout moment dans Réglages (numéros
+séparés par une virgule).
 
 ## 9. Modifier les 7 étapes
 

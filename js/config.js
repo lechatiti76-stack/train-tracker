@@ -30,7 +30,18 @@ export const DEFAULT_SETTINGS = {
   // Modifiable dans Réglages sans toucher au code — voir la section
   // "Décalages du remplissage automatique" du README pour les ajuster si
   // les horaires calculés ne correspondent pas à la réalité du terrain.
-  sillonStepOffsets: [-240, -161, -97, -38, -19, -17, -15],
+  // Valeurs vérifiées à partir de la séquence réelle (feuille de calcul) :
+  // 16:36 → +15 → 16:51 → +5 → 16:56 → +45 → 17:41 → +3 → 17:44 → +2 →
+  // 17:46 → +2 → 17:48 → +15 → 18:03 (sillon), soit -87/-72/-67/-22/-19/-17/-15.
+  sillonStepOffsets: [-87, -72, -67, -22, -19, -17, -15],
+  // Numéros de trains à accès rapide : un bouton par numéro sous les
+  // navettes, pour indiquer en un clic que ce train circule aujourd'hui
+  // (ajoute sa vignette) ou ne circule pas (la retire). Modifiable dans
+  // Réglages.
+  quickTrainNumbers: ['50238', '52232', '70630', '52006'],
+  // Navettes ajoutées par l'utilisateur en plus de FL/NL/AL (voir "+ Ajouter
+  // une navette"). Même forme que les entrées de SHUTTLE_GROUPS.
+  customShuttleGroups: [],
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
@@ -40,11 +51,40 @@ export const DEFAULT_SETTINGS = {
 export const STEP_COUNT = 7;
 
 // Navettes internes : chaque groupe a son propre décalage (arrivée = départ
-// Terminal + offsetMinutes) et sa couleur de cadre.
+// Terminal + offsetMinutes), sa couleur de cadre, et la liste des passages
+// intermédiaires (nom + minutes depuis le départ) affichée dans sa fenêtre —
+// à titre indicatif seulement : les états visuels (en approche / imminente /
+// arrivée) restent calculés à partir du temps restant avant l'arrivée
+// (voir computeShuttleState dans app.js), pas à partir de ces passages.
 export const SHUTTLE_GROUPS = [
-  { id: 'FL', codes: ['FL1', 'FL2', 'FL3'], color: '#f59e0b', offsetMinutes: 35 },
-  { id: 'NL', codes: ['NL1', 'NL2'], color: '#1e3a8a', offsetMinutes: 35 },
-  { id: 'AL', codes: ['AL1', 'AL2'], color: '#ca8a04', offsetMinutes: 40 },
+  {
+    id: 'FL', codes: ['FL1', 'FL2', 'FL3'], color: '#f59e0b', offsetMinutes: 35,
+    stops: [
+      { label: 'Départ FS', offsetMin: 2 },
+      { label: 'CV 1474', offsetMin: 5 },
+      { label: 'Entrée GB', offsetMin: 15 },
+      { label: 'Sortie GB', offsetMin: 23 },
+    ],
+  },
+  {
+    id: 'NL', codes: ['NL1', 'NL2'], color: '#1e3a8a', offsetMinutes: 35,
+    stops: [
+      { label: 'Départ FS', offsetMin: 2 },
+      { label: 'CV 1474', offsetMin: 5 },
+      { label: 'Entrée GB', offsetMin: 15 },
+      { label: 'Sortie GB', offsetMin: 23 },
+    ],
+  },
+  {
+    id: 'AL', codes: ['AL1', 'AL2'], color: '#ca8a04', offsetMinutes: 35,
+    stops: [
+      { label: 'Départ Maritime', offsetMin: 2 },
+      { label: 'Départ 4R', offsetMin: 5 },
+      { label: 'Pont rouge', offsetMin: 15 },
+      { label: 'Point X', offsetMin: 20 },
+      { label: 'passage FA', offsetMin: 25 },
+    ],
+  },
 ];
 
 // Seuils (en minutes) utilisés pour la sévérité visuelle des écarts.

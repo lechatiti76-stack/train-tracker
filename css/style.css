@@ -310,6 +310,39 @@ body {
 .shuttle-quick-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .shuttle-quick-actions .btn { flex: 1 1 auto; }
 
+/* ---------- Passages intermédiaires (informatif) ---------- */
+.shuttle-stops { display: flex; flex-direction: column; gap: 0.4rem; }
+.shuttle-stops-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.shuttle-stops-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.shuttle-stops-list li span:last-child { font-family: var(--font-mono); font-weight: 700; }
+
+/* ---------- Chip "+ Ajouter une navette" ---------- */
+.shuttle-chip.shuttle-chip-add {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-style: dashed;
+  font-weight: 700;
+}
+
+/* ---------- Formulaire d'ajout de navette ---------- */
+.shuttle-stop-form-row { display: flex; gap: 0.5rem; align-items: center; }
+.shuttle-stop-form-row .fShuttleStopLabel { flex: 1 1 auto; min-width: 0; }
+.shuttle-stop-form-row .fShuttleStopMin { width: 80px; flex: 0 0 auto; }
+input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
+
+/* ---------- Trains à accès rapide ---------- */
+.quick-trains-bar { max-width: 1900px; margin: 0.6rem auto 0; padding: 0 1.25rem; }
+.quick-trains-bar-inner { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
 /* ---------- Grille & cartes ---------- */
 .app-main { padding: 1.25rem; max-width: 1900px; margin: 0 auto; }
 .trains-grid {
@@ -549,7 +582,7 @@ body {
   background: var(--surface);
   width: 100%;
 }
-.step-real-time { font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; }
+.step-real-time { font-family: var(--font-mono); font-weight: 800; font-size: 1.1rem; }
 .step-delay-badge {
   font-family: var(--font-mono);
   font-weight: 800;

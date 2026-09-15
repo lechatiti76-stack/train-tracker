@@ -237,6 +237,10 @@ ${css}
   <div id="shuttlesBar" class="shuttles-bar-inner"></div>
 </section>
 
+<section class="quick-trains-bar" aria-label="Trains à accès rapide">
+  <div id="quickTrainsBar" class="quick-trains-bar-inner"></div>
+</section>
+
 <main id="mainContent" class="app-main">
   <div id="trainsGrid" class="trains-grid" aria-live="polite"></div>
 </main>
