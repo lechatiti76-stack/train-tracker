@@ -29,9 +29,25 @@ export function saveTrains(trains) {
   }
 }
 
+// Anciens décalages de sillon (calculés à partir d'une mauvaise lecture de
+// la séquence réelle) — remplacés par des valeurs vérifiées, voir
+// DEFAULT_SETTINGS.sillonStepOffsets. Les navigateurs ayant déjà ces
+// valeurs exactes enregistrées (donc jamais personnalisées à la main) sont
+// migrés automatiquement ci-dessous, pour ne pas dépendre d'une action
+// manuelle dans Réglages.
+const LEGACY_SILLON_OFFSETS = [-240, -161, -97, -38, -19, -17, -15];
+
 export function loadSettings() {
   const stored = safeParse(localStorage.getItem(STORAGE_KEYS.settings), {});
-  return { ...DEFAULT_SETTINGS, ...stored };
+  const merged = { ...DEFAULT_SETTINGS, ...stored };
+  const isLegacy = Array.isArray(stored.sillonStepOffsets)
+    && stored.sillonStepOffsets.length === LEGACY_SILLON_OFFSETS.length
+    && stored.sillonStepOffsets.every((v, i) => v === LEGACY_SILLON_OFFSETS[i]);
+  if (isLegacy) {
+    merged.sillonStepOffsets = DEFAULT_SETTINGS.sillonStepOffsets;
+    saveSettings(merged);
+  }
+  return merged;
 }
 
 export function saveSettings(settings) {
