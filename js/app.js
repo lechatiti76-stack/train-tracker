@@ -397,6 +397,7 @@ function applySillonQuickFill(train, sillonTime) {
   }
   showToast('Les 7 heures théoriques ont été calculées');
 }
+
 function wireDragAndDrop(grid) {
   grid.addEventListener('dragstart', (e) => {
     const handle = e.target.closest('[data-action="drag-handle"]');
