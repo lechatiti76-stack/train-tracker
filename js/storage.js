@@ -93,13 +93,26 @@ export function saveSettings(settings) {
   }
 }
 
+// Les navettes internes sont remises à zéro automatiquement chaque jour :
+// le départ saisi hier n'a plus de sens aujourd'hui. On stocke donc la date
+// à laquelle les données ont été enregistrées à côté des données elles-
+// mêmes ({ date, data }) ; si la date lue ne correspond pas à aujourd'hui,
+// on repart d'un objet vide plutôt que de réafficher des navettes de la
+// veille. Ancien format (objet plat de navettes, sans date) : traité comme
+// "d'aujourd'hui" une seule fois lors de la mise à jour de l'app, pour ne
+// pas effacer des données en cours d'utilisation.
 export function loadShuttles() {
-  return safeParse(localStorage.getItem(STORAGE_KEYS.shuttles), {});
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.shuttles), {});
+  if (raw && typeof raw === 'object' && 'date' in raw && 'data' in raw) {
+    if (raw.date !== todayISO()) return {};
+    return raw.data && typeof raw.data === 'object' ? raw.data : {};
+  }
+  return raw && typeof raw === 'object' ? raw : {};
 }
 
 export function saveShuttles(shuttles) {
   try {
-    localStorage.setItem(STORAGE_KEYS.shuttles, JSON.stringify(shuttles));
+    localStorage.setItem(STORAGE_KEYS.shuttles, JSON.stringify({ date: todayISO(), data: shuttles }));
     return true;
   } catch (err) {
     console.error('Impossible d\'enregistrer les navettes.', err);
