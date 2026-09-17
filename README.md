@@ -125,9 +125,14 @@ via "New repository".)
 
 ## 6. Connecter Google Sheets
 
-Aucune clé API n'est jamais placée dans le code : on publie le Google Sheet
-via un petit script serveur (Google Apps Script), qui renvoie du JSON en
-lecture seule.
+Aucune clé API n'est jamais placée dans le code : on passe par un petit
+script serveur (Google Apps Script). Ce Web App fait maintenant deux choses
+avec la même URL :
+- **lecture** (comme avant) : horaires théoriques depuis l'onglet `Horaires` ;
+- **écriture** (nouveau) : chaque heure réelle enregistrée/corrigée/
+  réinitialisée dans l'app est automatiquement envoyée vers un onglet
+  `Journal` séparé, créé automatiquement — l'onglet `Horaires` n'est jamais
+  modifié par cet envoi.
 
 ### 6.1. Préparer la feuille
 
@@ -157,18 +162,35 @@ lecture seule.
 4. Cliquez sur **Déployer → Nouveau déploiement**.
 5. Type : **Application Web**.
 6. "Exécuter en tant que" : **Moi**.
-7. "Qui a accès" : **Tout le monde** (c'est un accès en LECTURE SEULE aux
-   horaires théoriques, sans donnée sensible ; si besoin d'un accès plus
-   restreint, changez cette option, mais l'app devra alors être utilisée
-   par des comptes Google autorisés).
+7. "Qui a accès" : **Tout le monde** (l'écriture n'expose que le journal des
+   heures réelles, sans clé API ni donnée d'authentification ; si besoin
+   d'un accès plus restreint, changez cette option, mais l'app devra alors
+   être utilisée par des comptes Google autorisés).
 8. Cliquez sur **Déployer**, autorisez les permissions demandées, puis
    copiez l'**URL du Web App** (se termine par `/exec`).
+
+**Important — mises à jour de `Code.gs`** : après toute modification de ce
+fichier (dans l'éditeur Apps Script), un simple enregistrement ne suffit
+pas. Il faut créer une **nouvelle version** du déploiement : **Déployer →
+Gérer les déploiements → ✎ (crayon) → Version : "Nouvelle version" →
+Déployer**. L'URL `/exec` ne change pas.
+
+Optionnel : dans l'éditeur Apps Script, sélectionnez la fonction
+`setupSheets` dans le menu déroulant en haut puis cliquez sur **▶
+Exécuter** (autorisez les permissions demandées) pour créer l'onglet
+`Journal` à l'avance — sinon il se crée tout seul dès le premier envoi
+depuis l'app.
 
 ### 6.3. Renseigner l'URL dans l'application
 
 1. Ouvrez l'application, cliquez sur **⚙ Réglages**.
 2. Collez l'URL dans "URL du Web App Google Apps Script".
-3. Cliquez sur **Synchroniser maintenant**, puis **Enregistrer**.
+3. Cliquez sur **↻ Relire les horaires** pour vérifier la lecture, puis
+   **Enregistrer**.
+4. Le bouton **↥ Renvoyer aujourd'hui vers Sheets** envoie manuellement
+   toutes les heures déjà enregistrées aujourd'hui — utile pour rattraper un
+   envoi qui aurait échoué (pas de réseau au moment de la saisie, etc.), les
+   envois automatiques à chaque enregistrement suffisant sinon.
 
 L'URL est stockée dans le navigateur de chaque utilisateur (localStorage).
 Pour qu'elle soit préconfigurée pour tout le monde sans passer par les
@@ -178,7 +200,9 @@ Réglages, vous pouvez aussi la coder en dur dans
 Si le Sheet est injoignable (pas de réseau, mauvaise URL, quota Apps
 Script dépassé...), l'application affiche un indicateur d'erreur discret
 dans l'en-tête et continue de fonctionner avec les données déjà en local —
-elle ne plante jamais.
+elle ne plante jamais. Un envoi vers le Journal qui échoue reste silencieux
+(pas de heurtoir dans l'usage quotidien) : rattrapez-le avec **↥ Renvoyer
+aujourd'hui vers Sheets**.
 
 ### 6.4. Remplissage automatique des 7 heures depuis "l'heure du sillon"
 
@@ -245,7 +269,11 @@ le menu de partage.
 
 - **Ajouter** : bouton **"+ Ajouter un train"** en haut à droite → renseignez
   le numéro, la date de circulation, et pour chaque étape le libellé,
-  l'heure théorique et une cause optionnelle.
+  l'heure théorique et une cause optionnelle. Le bouton **💡** à côté du
+  champ Cause suggère un texte à partir du libellé de l'étape (ex : "Arrivée
+  LHTE" → "arrivée tardif", "Mise en tête" → "mise en tête tardif") — c'est
+  une suggestion, pas une valeur imposée : le champ reste 100 % modifiable
+  avant ou après avoir cliqué.
 - **Un train qui circule sur plusieurs dates précises** : dans le formulaire
   d'ajout, cliquez **"+ Ajouter une autre date de circulation"** autant de
   fois que nécessaire. Une vignette indépendante est créée par date (chacune
@@ -309,38 +337,56 @@ Cliquez sur une navette pour ouvrir une fenêtre où saisir son **heure de
 départ du Terminal** — le bouton **"Maintenant"** capture directement
 l'heure actuelle en un clic. L'heure d'arrivée estimée se calcule et
 s'affiche immédiatement (et se met à jour en direct pendant la saisie),
-avec en dessous la liste des **passages intermédiaires** (à titre
-indicatif, calculés depuis l'heure de départ) :
+avec en dessous la liste des **passages intermédiaires** (calculés depuis
+l'heure de départ) :
 
 | Groupe | Passages |
 | ------ | -------- |
 | FL, NL | Départ FS (+2 min) · CV 1474 (+5) · Entrée GB (+15) · Sortie GB (+23) |
 | AL | Départ Maritime (+2) · Départ 4R (+5) · Pont rouge (+15) · Point X (+20) · passage FA (+25) |
 
-Un bouton **"Effacer"** réinitialise cette navette. Les lignes, couleurs,
-décalages et passages des groupes intégrés se modifient dans
-`js/config.js` → `SHUTTLE_GROUPS`.
+**Progression en temps réel** : dès que le départ est validé, la vignette
+n'affiche plus directement "en approche"/"arrivée" — elle traverse
+automatiquement les passages intermédiaires ci-dessus au fil du temps
+écoulé depuis le départ, puis clignote en rouge à l'approche de l'arrivée.
+Exemple concret (famille FL, départ validé à 10:19) :
+
+| Heure | Aspect de la vignette |
+| ----- | ---------------------- |
+| 10:19 – 10:20 | "Partie du Terminal" |
+| 10:21 | "Départ FS" (passage à +2 min) |
+| 10:24 | "CV 1474" (+5 min) |
+| 10:34 | "Entrée GB" (+15 min) |
+| 10:42 | "Sortie GB" (+23 min) |
+| à partir de 10:44 | cadre rouge **clignotant** + "⚠ Arrivée imminente" (10 min avant l'arrivée estimée à 10:54) |
+| à partir de 10:54 | grisée + "Arrivée effectuée" (reste cliquable pour saisir le prochain départ) |
+
+Recalculé en direct toutes les 15 secondes, sans avoir à recharger la page.
+
+Un bouton **"Effacer"** réinitialise cette navette.
+
+**Réglages FL/NL/AL** : les horaires de FL, NL et AL sont identiques par
+défaut, mais s'ajustent **indépendamment** dans **⚙ Réglages → Navettes** —
+un bloc par famille avec : le décalage d'arrivée (départ + X min), le
+**seuil de clignotement** (nombre de minutes avant l'arrivée à partir
+duquel ça clignote — 10 min par défaut, comme dans l'exemple ci-dessus), et
+la liste des passages intermédiaires (ajout/suppression/renommage). Ça
+s'enregistre pour toutes les navettes de la famille (ex : régler FL
+s'applique à FL1, FL2 et FL3). Les valeurs par défaut restent définies dans
+`js/config.js` → `SHUTTLE_GROUPS` si vous préférez les changer côté code.
 
 **Ajouter une navette supplémentaire** : cliquez sur le bouton **"+
-Navette"** à la fin de la rangée. Renseignez un nom/destination, une
-couleur de cadre, un ou plusieurs codes (ex : "BL1, BL2"), puis la liste
-des passages avec leur nombre de minutes depuis le départ — le dernier
-(celui avec le plus grand nombre de minutes) définit l'heure d'arrivée
-estimée. Ces navettes ajoutées manuellement apparaissent dans la même
-rangée, avec les mêmes états visuels (approche / imminente / arrivée), et
+Navette"** à la fin de la rangée. Trois préréglages rapides sont proposés —
+**FL** (orange), **NL** (bleu), **AL** (jaune) — il suffit d'indiquer le ou
+les nouveaux codes (ex : "FL4") : la couleur, le décalage d'arrivée et les
+passages intermédiaires de la famille sont repris automatiquement (y
+compris vos réglages personnalisés faits dans Réglages → Navettes). Ces
+codes ajoutés se retirent depuis **⚙ Réglages** (à côté des champs de la
+famille correspondante). Le choix **"Personnalisée"** garde l'ancien
+formulaire complet (nom, couleur, codes et passages saisis à la main) pour
+une navette qui n'appartient à aucune des trois familles — ces navettes-là
 se suppriment depuis **⚙ Réglages** (liste "Navettes ajoutées
 manuellement").
-
-Chaque vignette change d'aspect automatiquement selon le temps restant
-avant l'heure d'arrivée estimée (revérifié en direct toutes les 15
-secondes, sans avoir à recharger la page) :
-
-| Temps restant avant l'arrivée | Aspect |
-| ------------------------------ | ------ |
-| Plus de 35 min (ou départ non renseigné) | normal (couleur du groupe) |
-| 35 à 30 min | cadre orange + "Arrivée en approche" |
-| 30 à 0 min | cadre rouge **clignotant** + "⚠ Arrivée imminente" |
-| Arrivée passée | grisée + "Arrivée effectuée" (reste cliquable pour saisir le prochain départ) |
 
 **En cas de souci (retard, heure calculée qui ne correspond pas à la
 réalité)**, deux boutons dans la fenêtre de la navette permettent de
@@ -371,10 +417,22 @@ tout en bas de la vignette, avant les boutons d'action. Sur petit écran
 
 ### 8.5. Trains à accès rapide
 
-Sous les navettes, un bouton apparaît pour chaque numéro de train listé
-dans **⚙ Réglages → "Trains à accès rapide"** (par défaut : 50238, 52232,
-70630, 52006) — utile pour des trains qui circulent certains jours mais
-pas d'autres, sans repasser par le formulaire complet :
+Sous les navettes, un bouton apparaît pour chaque train listé dans **⚙
+Réglages → "Trains à accès rapide"** — utile pour des trains qui circulent
+certains jours mais pas d'autres, sans repasser par le formulaire complet.
+Par défaut :
+
+| Numéro | Opérateur | Destination |
+| ------ | --------- | ----------- |
+| 50238 | NAVILAND | Vénissieux |
+| 50276 | NAVILAND | Bordeaux |
+| 50274 | NAVILAND | SPCO |
+| 52006 | NAVILAND | Montoir |
+| 52232 | FERROVERGNE | Clermont-Ferrand |
+| 70630 | FERROVERGNE | Vierzon |
+
+L'opérateur et la destination s'affichent au-dessus du numéro sur chaque
+bouton :
 
 - **Bouton non rempli (contour)** : ce train n'a pas de vignette
   aujourd'hui (ne circule pas). Cliquer dessus **ajoute** sa vignette pour
@@ -384,8 +442,9 @@ pas d'autres, sans repasser par le formulaire complet :
   heures réelles ont déjà été enregistrées, pour éviter une perte de
   données par erreur).
 
-La liste des numéros est modifiable à tout moment dans Réglages (numéros
-séparés par une virgule).
+La liste (numéro, opérateur, destination) est modifiable à tout moment dans
+**⚙ Réglages → Trains à accès rapide** : une ligne par train, avec
+ajout/suppression — pratique si les opérateurs ou destinations changent.
 
 ## 9. Modifier les 7 étapes
 
