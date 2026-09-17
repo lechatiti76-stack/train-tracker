@@ -264,6 +264,14 @@ body {
 .shuttle-arrival-preview { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 800; text-align: center; margin: 0; }
 .shuttle-state-label { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
 
+/* "departed" (venant de partir) et "enroute" (passage intermédiaire
+   atteint) : progression en temps réel, avant le seuil de clignotement. */
+.shuttle-chip.state-departed .shuttle-state-label,
+.shuttle-chip.state-enroute .shuttle-state-label { color: var(--shuttle-color); }
+.shuttle-chip.state-enroute { box-shadow: 0 0 0 2px color-mix(in srgb, var(--shuttle-color) 25%, transparent); }
+
+.shuttle-chip.state-scheduled { opacity: 0.9; }
+
 .shuttle-chip.state-approaching {
   border-color: #f59e0b;
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
@@ -740,6 +748,44 @@ body.modal-open { overflow: hidden; }
 .step-form-row > label { min-width: 0; }
 .step-form-row input { width: 100%; min-width: 0; }
 .step-form-row legend { grid-column: 1 / -1; font-size: 0.72rem; font-weight: 800; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.2rem; }
+
+.cause-input-row { display: flex; gap: 0.4rem; align-items: center; }
+.cause-input-row input { flex: 1 1 auto; min-width: 0; }
+.fStepCauseSuggestBtn { flex: 0 0 auto; width: 32px; height: 32px; font-size: 0.85rem; }
+
+/* ---------- Trains à accès rapide (accueil + réglages) ---------- */
+.quick-train-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; line-height: 1.2; padding-top: 0.4rem; padding-bottom: 0.4rem; }
+.quick-train-meta { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.75; }
+.quick-train-number { font-family: var(--font-mono); font-weight: 800; }
+.quick-train-form-row { display: flex; gap: 0.5rem; align-items: center; }
+.quick-train-form-row input { flex: 1 1 0; min-width: 0; }
+
+/* ---------- Réglages des navettes (Réglages → Navettes) ---------- */
+.shuttle-timing-fieldset {
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.shuttle-timing-fieldset legend { font-weight: 800; padding: 0 0.3rem; }
+.shuttle-timing-stops { display: flex; flex-direction: column; gap: 0.4rem; }
+.shuttle-extra-codes-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.shuttle-preset-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.9rem; }
+.shuttle-preset-btn {
+  --shuttle-color: #94a3b8;
+  flex: 1 1 auto;
+  padding: 0.6rem 0.9rem;
+  border: 2px solid var(--shuttle-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+.shuttle-preset-btn.is-selected { background: var(--shuttle-color); color: #fff; }
 
 /* ---------- Historique ---------- */
 .history-layout { display: flex; flex-direction: column; gap: 1rem; }
