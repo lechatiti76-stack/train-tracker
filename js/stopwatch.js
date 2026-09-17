@@ -4,24 +4,38 @@
 //   orange  : 15 à 20 min
 //   vert    : à partir de 20 min
 // L'état persiste (localStorage) pour survivre à un rechargement accidentel
-// pendant une mesure en cours.
+// pendant une mesure en cours, mais se remet automatiquement à zéro chaque
+// jour (le temps de pause de la veille n'a plus de sens le lendemain) : la
+// date d'enregistrement est stockée à côté de l'état, et un état daté
+// d'hier est ignoré au chargement comme en cours d'utilisation (voir le
+// contrôle périodique dans initStopwatch ci-dessous, pour le cas où la page
+// reste ouverte au moment du changement de jour).
+import { todayISO } from './storage.js';
+
 const STORAGE_KEY = 'traintrack:stopwatch:v1';
 const THRESHOLDS_MIN = { orange: 15, green: 20 };
+
+function freshState() {
+  return { status: 'idle', startedAt: null, elapsedMs: 0, date: todayISO() };
+}
 
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed.elapsedMs === 'number') return parsed;
+    if (parsed && typeof parsed.elapsedMs === 'number') {
+      if (parsed.date && parsed.date !== todayISO()) return freshState();
+      return { ...parsed, date: parsed.date || todayISO() };
+    }
   } catch (err) {
     // Etat corrompu : on repart de zéro plutôt que de planter.
   }
-  return { status: 'idle', startedAt: null, elapsedMs: 0 };
+  return freshState();
 }
 
 function saveState(state) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, date: todayISO() }));
   } catch (err) {
     // localStorage indisponible (quota, navigation privée...) : le
     // chronomètre reste fonctionnel pour la session en cours.
@@ -103,6 +117,15 @@ export function initStopwatch(root) {
 
   render();
   setInterval(() => {
+    // Remise à zéro automatique si minuit est passé pendant que la page
+    // reste ouverte (le cas "rechargement le lendemain" est déjà couvert
+    // par loadState ci-dessus).
+    if (state.date !== todayISO()) {
+      state = freshState();
+      saveState(state);
+      render();
+      return;
+    }
     if (state.status === 'running') render();
   }, 1000);
 }
