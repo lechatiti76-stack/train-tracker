@@ -382,7 +382,6 @@ function wireSillonInputs(grid) {
     if (train) applySillonQuickFill(train, input.value);
   });
 }
-
 function applySillonQuickFill(train, sillonTime) {
   if (!sillonTime) return;
   applySillonSequence(train, sillonTime, settings.sillonStepOffsets);
@@ -785,7 +784,6 @@ function openSettingsModal() {
         });
         showToast('Décalages réinitialisés — pensez à Enregistrer');
       });
-
       // ---- Trains à accès rapide (lignes numéro/opérateur/destination) ----
       const quickTrainsContainer = panel.querySelector('#sQuickTrainsContainer');
       (settings.quickTrains || []).forEach((t) => addQuickTrainRowInto(quickTrainsContainer, t));
@@ -1000,12 +998,27 @@ async function pushTodayToSheet() {
   const todays = getTodayTrains();
   let sent = 0;
   let failed = 0;
+  let sawBadResponse = false;
   for (const train of todays) {
     const results = await pushAllStepsToSheet(settings.sheetsWebAppUrl, train, computeAllStepDelays);
-    for (const r of results) (r.ok ? sent++ : failed++);
+    for (const r of results) {
+      if (r.ok) sent++;
+      else {
+        failed++;
+        if (r.reason === 'bad_response') sawBadResponse = true;
+      }
+    }
   }
-  if (failed === 0) showToast(`${sent} heure(s) envoyée(s) vers Google Sheets ✓`);
-  else showToast(`${sent} envoyée(s), ${failed} échec(s) — réessayez plus tard`, failed === sent + failed ? 'error' : 'success');
+  if (failed === 0) {
+    showToast(`${sent} heure(s) envoyée(s) vers Google Sheets ✓`);
+  } else if (sawBadResponse) {
+    // Réponse non-JSON du Web App : presque toujours un déploiement Apps
+    // Script pas encore mis à jour (nouvelle version requise après avoir
+    // collé le Code.gs à jour — voir README section 6.2).
+    showToast('Échec — créez une NOUVELLE VERSION du déploiement Apps Script (Code.gs à jour non pris en compte)', 'error');
+  } else {
+    showToast(`${sent} envoyée(s), ${failed} échec(s) — réessayez plus tard`, failed === sent + failed ? 'error' : 'success');
+  }
   return { sent, failed };
 }
 
@@ -1019,6 +1032,13 @@ function startClock() {
       currentDate = iso;
       updateDateLabel();
       renderGrid();
+      // Remise à zéro automatique des navettes internes à chaque changement
+      // de jour : un départ saisi la veille n'a plus de sens aujourd'hui.
+      // (Le chronomètre de pause se remet à zéro tout seul, voir
+      // stopwatch.js — il gère sa propre date en interne.)
+      shuttles = {};
+      saveShuttles(shuttles);
+      renderShuttlesBar();
       if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
     }
   };
@@ -1133,7 +1153,6 @@ function computeShuttleProgress(code) {
 function shuttleHasDelayFlag(code) {
   return Boolean(shuttles[code]?.delayFlag);
 }
-
 function shuttleChipInnerHTML(code) {
   const departure = shuttles[code]?.departure;
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
