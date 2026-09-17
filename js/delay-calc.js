@@ -44,6 +44,30 @@ export function applyOffsetSteps(train) {
   });
 }
 
+// Suggère un texte de cause par défaut à partir du libellé d'une étape, par
+// exemple "Arrivée LHTE" -> "arrivée tardif", "Mise en tête" -> "mise en
+// tête tardif". Purement indicatif (bouton 💡 à côté du champ Cause dans le
+// formulaire) : n'écrase jamais rien automatiquement, et reste 100 %
+// modifiable. Les sigles tout en majuscules (LHTE, FA, GB...) sont retirés
+// du libellé avant de former la suggestion.
+export function suggestCauseForLabel(label) {
+  if (!label) return '';
+  const withoutAcronyms = label
+    .split(/\s+/)
+    .filter((word) => {
+      const letters = word.replace(/[^A-Za-zÀ-ÿ]/g, '');
+      const isAcronym = letters.length >= 2 && letters === letters.toUpperCase() && /[A-ZÀ-Ý]/.test(letters);
+      return !isAcronym;
+    })
+    .join(' ')
+    .replace(/\s*\/\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const base = (withoutAcronyms || label).toLowerCase().trim();
+  if (!base) return '';
+  return `${base} tardif`;
+}
+
 export function computeStepDelay(train, stepIndex) {
   const step = train.steps[stepIndex];
   if (!step) return { status: 'missing', diffMin: null, realDate: null, tone: 'neutral' };
