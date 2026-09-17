@@ -204,6 +204,18 @@ elle ne plante jamais. Un envoi vers le Journal qui échoue reste silencieux
 (pas de heurtoir dans l'usage quotidien) : rattrapez-le avec **↥ Renvoyer
 aujourd'hui vers Sheets**.
 
+**"↥ Renvoyer aujourd'hui vers Sheets" annonce des envois réussis mais rien
+n'apparaît dans l'onglet Journal ?** C'est presque toujours le signe que la
+**nouvelle version du déploiement** n'a pas été créée après avoir collé un
+`Code.gs` à jour dans l'éditeur Apps Script (voir l'avertissement en gras à
+l'étape 8 de la section 6.2 ci-dessus) : le Web App en ligne exécute alors
+encore l'ancien code, sans `doPost`, et répond par une page d'erreur HTML
+plutôt que par du JSON. Depuis cette mise à jour, l'application détecte ce
+cas précis et affiche un message explicite ("créez une NOUVELLE VERSION du
+déploiement...") au lieu de compter ça comme un envoi réussi. Pour corriger :
+dans l'éditeur Apps Script, **Déployer → Gérer les déploiements → ✎ →
+Version : "Nouvelle version" → Déployer**, puis réessayez.
+
 ### 6.4. Remplissage automatique des 7 heures depuis "l'heure du sillon"
 
 Chaque vignette a un champ **"Heure du sillon (départ pour la ligne + 15
@@ -320,7 +332,12 @@ en permanence sous l'en-tête, pour mesurer un temps de pause/arrêt :
   **rouge** de 0 à 15 min, **orange** de 15 à 20 min, **vert** au-delà de
   20 min.
 - L'état survit à un rechargement accidentel de la page (sauvegardé dans le
-  navigateur).
+  navigateur), mais se **remet automatiquement à zéro chaque jour** — pas
+  besoin de cliquer sur "Réinitialiser" en arrivant le matin, ni de le faire
+  manuellement en fin de journée. Ça fonctionne aussi bien après une
+  fermeture du navigateur (rechargement le lendemain) que si l'appareil
+  reste allumé et affiché toute la nuit (vérifié en direct, sans avoir à
+  recharger la page).
 
 ### 8.3. Navettes internes
 
@@ -363,7 +380,13 @@ Exemple concret (famille FL, départ validé à 10:19) :
 
 Recalculé en direct toutes les 15 secondes, sans avoir à recharger la page.
 
-Un bouton **"Effacer"** réinitialise cette navette.
+Un bouton **"Effacer"** réinitialise cette navette manuellement à tout
+moment. En plus de ça, **toutes** les navettes (départ, arrivée manuelle,
+retard signalé) se **remettent à zéro automatiquement chaque jour** — le
+départ saisi hier n'a plus de sens aujourd'hui, pas besoin de cliquer sur
+"Effacer" navette par navette en arrivant. Comme le chronomètre de pause,
+ça fonctionne après une fermeture du navigateur ou en direct si l'appareil
+reste allumé pendant le changement de jour.
 
 **Réglages FL/NL/AL** : les horaires de FL, NL et AL sont identiques par
 défaut, mais s'ajustent **indépendamment** dans **⚙ Réglages → Navettes** —
@@ -402,7 +425,8 @@ corriger l'affichage sans recalculer quoi que ce soit :
   Un second clic le retire.
 
 Ces deux réglages sont mémorisés par navette (localStorage) et remis à
-zéro par le bouton **"Effacer"**.
+zéro par le bouton **"Effacer"**, ou automatiquement au changement de jour
+comme le reste des données de navette.
 
 ### 8.4. Mise en page des vignettes
 
