@@ -382,6 +382,7 @@ function wireSillonInputs(grid) {
     if (train) applySillonQuickFill(train, input.value);
   });
 }
+
 function applySillonQuickFill(train, sillonTime) {
   if (!sillonTime) return;
   applySillonSequence(train, sillonTime, settings.sillonStepOffsets);
@@ -784,6 +785,7 @@ function openSettingsModal() {
         });
         showToast('Décalages réinitialisés — pensez à Enregistrer');
       });
+      
       // ---- Trains à accès rapide (lignes numéro/opérateur/destination) ----
       const quickTrainsContainer = panel.querySelector('#sQuickTrainsContainer');
       (settings.quickTrains || []).forEach((t) => addQuickTrainRowInto(quickTrainsContainer, t));
@@ -1153,6 +1155,7 @@ function computeShuttleProgress(code) {
 function shuttleHasDelayFlag(code) {
   return Boolean(shuttles[code]?.delayFlag);
 }
+
 function shuttleChipInnerHTML(code) {
   const departure = shuttles[code]?.departure;
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
