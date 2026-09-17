@@ -785,7 +785,7 @@ function openSettingsModal() {
         });
         showToast('Décalages réinitialisés — pensez à Enregistrer');
       });
-      
+
       // ---- Trains à accès rapide (lignes numéro/opérateur/destination) ----
       const quickTrainsContainer = panel.querySelector('#sQuickTrainsContainer');
       (settings.quickTrains || []).forEach((t) => addQuickTrainRowInto(quickTrainsContainer, t));
