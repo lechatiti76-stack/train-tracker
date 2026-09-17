@@ -161,3 +161,65 @@ function normalizeSheetTime(value) {
   if (!m) return null;
   return `${m[1].padStart(2, '0')}:${m[2]}`;
 }
+
+// ---------- Écriture vers Google Sheets (journal des heures réelles) ----------
+// Même Web App que la lecture (voir /apps-script/Code.gs), avec une action
+// distincte ('logStep') qui écrit une ligne par étape enregistrée dans un
+// onglet "Journal" séparé (créé automatiquement si absent) — l'onglet
+// "Horaires" utilisé pour la lecture n'est jamais modifié. Utilise
+// `Content-Type: text/plain` pour éviter un préflight CORS (Apps Script ne
+// gère pas les requêtes OPTIONS).
+async function postToSheet(webAppUrl, payload, { timeoutMs = 8000 } = {}) {
+  if (!webAppUrl) return { ok: false, reason: 'not_configured' };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(webAppUrl, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return { ok: false, reason: 'http_error', status: res.status };
+    const data = await res.json().catch(() => ({}));
+    if (data && data.error) return { ok: false, reason: 'server_error', detail: data.error };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err.name === 'AbortError' ? 'timeout' : 'network_error' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function stepLogPayload(train, stepIndex, delay) {
+  const step = train.steps[stepIndex];
+  return {
+    action: 'logStep',
+    date: train.date,
+    train: train.number,
+    etape: step.label,
+    heureTheorique: step.theoretical || '',
+    heureReelle: delay.realDate ? `${String(delay.realDate.getHours()).padStart(2, '0')}:${String(delay.realDate.getMinutes()).padStart(2, '0')}:${String(delay.realDate.getSeconds()).padStart(2, '0')}` : '',
+    ecartMin: delay.status === 'recorded' ? delay.diffMin : '',
+    cause: step.cause || '',
+    misAJour: new Date().toISOString(),
+  };
+}
+
+export async function pushStepToSheet(webAppUrl, train, stepIndex, computeAllStepDelaysFn) {
+  const delays = computeAllStepDelaysFn(train);
+  return postToSheet(webAppUrl, stepLogPayload(train, stepIndex, delays[stepIndex]));
+}
+
+export async function pushAllStepsToSheet(webAppUrl, train, computeAllStepDelaysFn) {
+  const delays = computeAllStepDelaysFn(train);
+  const results = [];
+  for (let i = 0; i < train.steps.length; i++) {
+    if (!train.steps[i].real) continue;
+    // Envoyées séquentiellement (plutôt qu'en parallèle) pour rester
+    // compatible avec LockService côté Apps Script et éviter de saturer les
+    // quotas d'exécution simultanée.
+    results.push(await postToSheet(webAppUrl, stepLogPayload(train, i, delays[i])));
+  }
+  return results;
+}
