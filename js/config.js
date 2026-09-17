@@ -34,31 +34,62 @@ export const DEFAULT_SETTINGS = {
   // 16:36 → +15 → 16:51 → +5 → 16:56 → +45 → 17:41 → +3 → 17:44 → +2 →
   // 17:46 → +2 → 17:48 → +15 → 18:03 (sillon), soit -87/-72/-67/-22/-19/-17/-15.
   sillonStepOffsets: [-87, -72, -67, -22, -19, -17, -15],
-  // Numéros de trains à accès rapide : un bouton par numéro sous les
-  // navettes, pour indiquer en un clic que ce train circule aujourd'hui
-  // (ajoute sa vignette) ou ne circule pas (la retire). Modifiable dans
-  // Réglages.
-  quickTrainNumbers: ['50238', '52232', '70630', '52006'],
+  // Trains à accès rapide : un bouton par train sous les navettes, pour
+  // indiquer en un clic que ce train circule aujourd'hui (ajoute sa
+  // vignette) ou ne circule pas (la retire). Opérateur + destination sont
+  // affichés au-dessus du numéro sur le bouton. Tout est modifiable dans
+  // Réglages (numéro, opérateur, destination, ajout/suppression).
+  quickTrains: [
+    { number: '50238', operator: 'NAVILAND', destination: 'Vénissieux' },
+    { number: '50276', operator: 'NAVILAND', destination: 'Bordeaux' },
+    { number: '50274', operator: 'NAVILAND', destination: 'SPCO' },
+    { number: '52006', operator: 'NAVILAND', destination: 'Montoir' },
+    { number: '52232', operator: 'FERROVERGNE', destination: 'Clermont-Ferrand' },
+    { number: '70630', operator: 'FERROVERGNE', destination: 'Vierzon' },
+  ],
   // Navettes ajoutées par l'utilisateur en plus de FL/NL/AL (voir "+ Ajouter
-  // une navette"). Même forme que les entrées de SHUTTLE_GROUPS.
+  // une navette" → "Personnalisée"). Même forme que les entrées de
+  // SHUTTLE_GROUPS.
   customShuttleGroups: [],
+  // Codes supplémentaires ajoutés à une famille intégrée (FL/NL/AL) via
+  // "+ Ajouter une navette" → préréglage FL/NL/AL (par ex. { FL: ['FL4'] }).
+  // Ces codes réutilisent automatiquement la couleur, le décalage d'arrivée
+  // et les passages intermédiaires de leur famille.
+  shuttleExtraCodes: {},
+  // Réglages FL/NL/AL personnalisés (décalage d'arrivée, seuil de
+  // clignotement, passages intermédiaires), saisis dans Réglages →
+  // "Navettes". Une famille absente d'ici garde les valeurs par défaut de
+  // SHUTTLE_GROUPS ci-dessous. Forme d'une entrée : { offsetMinutes,
+  // imminentMin, stops: [{ label, offsetMin }] }.
+  shuttleTimings: {},
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
   lastSyncStatus: null, // 'ok' | 'error' | null
+  // Indicateur one-shot de migration des trains à accès rapide vers le
+  // format enrichi (opérateur/destination) — voir loadSettings() dans
+  // storage.js.
+  quickTrainsEnrichedV2: false,
 };
 
 export const STEP_COUNT = 7;
 
-// Navettes internes : chaque groupe a son propre décalage (arrivée = départ
-// Terminal + offsetMinutes), sa couleur de cadre, et la liste des passages
-// intermédiaires (nom + minutes depuis le départ) affichée dans sa fenêtre —
-// à titre indicatif seulement : les états visuels (en approche / imminente /
-// arrivée) restent calculés à partir du temps restant avant l'arrivée
-// (voir computeShuttleState dans app.js), pas à partir de ces passages.
+// Navettes internes : chaque groupe a son propre décalage d'arrivée (arrivée
+// = départ Terminal + offsetMinutes), sa couleur de cadre, et la liste des
+// passages intermédiaires (nom + minutes depuis le départ). Ces passages
+// sont désormais utilisés pour l'affichage EN TEMPS RÉEL de la progression
+// de la navette (voir computeShuttleProgress dans app.js) : dès que le
+// départ est validé, la vignette affiche automatiquement le dernier passage
+// atteint selon le temps écoulé, jusqu'au clignotement rouge "imminente" à
+// `imminentMin` minutes de l'arrivée estimée. `offsetMinutes`, `imminentMin`
+// et `stops` sont réglables par famille (FL/NL/AL) dans Réglages → Navettes
+// — voir DEFAULT_SETTINGS.shuttleTimings, qui prévaut sur ces valeurs par
+// défaut quand renseigné.
+export const SHUTTLE_DEFAULT_IMMINENT_MIN = 10;
+
 export const SHUTTLE_GROUPS = [
   {
-    id: 'FL', codes: ['FL1', 'FL2', 'FL3'], color: '#f59e0b', offsetMinutes: 35,
+    id: 'FL', codes: ['FL1', 'FL2', 'FL3'], color: '#f59e0b', offsetMinutes: 35, imminentMin: SHUTTLE_DEFAULT_IMMINENT_MIN,
     stops: [
       { label: 'Départ FS', offsetMin: 2 },
       { label: 'CV 1474', offsetMin: 5 },
@@ -67,7 +98,7 @@ export const SHUTTLE_GROUPS = [
     ],
   },
   {
-    id: 'NL', codes: ['NL1', 'NL2'], color: '#1e3a8a', offsetMinutes: 35,
+    id: 'NL', codes: ['NL1', 'NL2'], color: '#1e3a8a', offsetMinutes: 35, imminentMin: SHUTTLE_DEFAULT_IMMINENT_MIN,
     stops: [
       { label: 'Départ FS', offsetMin: 2 },
       { label: 'CV 1474', offsetMin: 5 },
@@ -76,7 +107,7 @@ export const SHUTTLE_GROUPS = [
     ],
   },
   {
-    id: 'AL', codes: ['AL1', 'AL2'], color: '#ca8a04', offsetMinutes: 35,
+    id: 'AL', codes: ['AL1', 'AL2'], color: '#eab308', offsetMinutes: 35, imminentMin: SHUTTLE_DEFAULT_IMMINENT_MIN,
     stops: [
       { label: 'Départ Maritime', offsetMin: 2 },
       { label: 'Départ 4R', offsetMin: 5 },
