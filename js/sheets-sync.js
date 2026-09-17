@@ -181,7 +181,18 @@ async function postToSheet(webAppUrl, payload, { timeoutMs = 8000 } = {}) {
       body: JSON.stringify(payload),
     });
     if (!res.ok) return { ok: false, reason: 'http_error', status: res.status };
-    const data = await res.json().catch(() => ({}));
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      // Réponse non-JSON (souvent une page d'erreur HTML renvoyée par Apps
+      // Script) : le plus souvent le signe qu'une NOUVELLE VERSION du
+      // déploiement Web App n'a pas été créée après la mise à jour de
+      // Code.gs (doPost absent de la version actuellement déployée). On
+      // considère ça comme un échec plutôt que de le prendre pour un
+      // succès silencieux.
+      return { ok: false, reason: 'bad_response' };
+    }
     if (data && data.error) return { ok: false, reason: 'server_error', detail: data.error };
     return { ok: true };
   } catch (err) {
