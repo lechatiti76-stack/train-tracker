@@ -3,11 +3,11 @@
 // DOM (delay-calc, time-utils, storage, sheets-sync) ni à l'état global
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
-import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, DEFAULT_SETTINGS } from './config.js';
+import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, DEFAULT_SETTINGS } from './config.js';
 import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles } from './storage.js';
-import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence } from './delay-calc.js';
+import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM } from './time-utils.js';
-import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains } from './sheets-sync.js';
+import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml } from './card.js';
@@ -103,11 +103,16 @@ function renderGrid() {
 function renderQuickTrainsBar() {
   const container = el('quickTrainsBar');
   if (!container) return;
-  const numbers = settings.quickTrainNumbers || [];
-  if (numbers.length === 0) { container.innerHTML = ''; return; }
-  container.innerHTML = numbers.map((number) => {
+  const quickTrains = settings.quickTrains || [];
+  if (quickTrains.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = quickTrains.map(({ number, operator, destination }) => {
     const exists = trains.some((t) => t.date === currentDate && t.number === number);
-    return `<button type="button" class="btn ${exists ? 'btn-primary' : 'btn-outline'}" data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">${exists ? '● ' : '○ '}${escapeHtml(number)}</button>`;
+    const meta = [operator, destination].filter(Boolean).join(' · ');
+    return `
+      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}" data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
+        ${meta ? `<span class="quick-train-meta">${escapeHtml(meta)}</span>` : ''}
+        <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}</span>
+      </button>`;
   }).join('');
 }
 
@@ -182,6 +187,7 @@ function recordStepNow(train, stepIndex) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
+  pushStepIfConfigured(train, stepIndex);
   showToast(`${step.label} enregistré à ${formatHHMMSS(new Date(step.real))}`);
 }
 
@@ -191,6 +197,7 @@ function resetStepTime(train, stepIndex) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
+  pushStepIfConfigured(train, stepIndex);
   showToast('Heure réinitialisée');
 }
 
@@ -201,7 +208,7 @@ function resetAllStepsForTrain(train) {
     return;
   }
   if (!confirm(`Réinitialiser les ${recordedCount} heure(s) enregistrée(s) pour le train ${train.number} ?`)) return;
-  train.steps.forEach((s) => { s.real = null; });
+  train.steps.forEach((s, i) => { s.real = null; pushStepIfConfigured(train, i); });
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
@@ -237,6 +244,7 @@ function openStepTimeEditor(train, stepIndex) {
         persist();
         closeModal();
         refreshTrainCard(train);
+        pushStepIfConfigured(train, stepIndex);
         showToast('Heure corrigée');
       });
     },
@@ -389,7 +397,6 @@ function applySillonQuickFill(train, sillonTime) {
   }
   showToast('Les 7 heures théoriques ont été calculées');
 }
-
 function wireDragAndDrop(grid) {
   grid.addEventListener('dragstart', (e) => {
     const handle = e.target.closest('[data-action="drag-handle"]');
@@ -491,7 +498,10 @@ function trainFormBodyHTML(train) {
               <input type="number" class="fStepOffset" data-i="${i}" value="${stepOffset[i]}" placeholder="ex : -91" ${i === 0 ? 'disabled' : ''}>
             </label>
             <label>Cause (si retard)
-              <input type="text" class="fStepCause" data-i="${i}" value="${escapeHtml(stepCause[i])}" placeholder="ex : Signalisation">
+              <span class="cause-input-row">
+                <input type="text" class="fStepCause" data-i="${i}" value="${escapeHtml(stepCause[i])}" placeholder="ex : Signalisation">
+                <button type="button" class="icon-btn fStepCauseSuggestBtn" data-i="${i}" data-label="${escapeHtml(label)}" title="Suggérer une cause à partir du libellé de l'étape" aria-label="Suggérer une cause">💡</button>
+              </span>
             </label>
           </fieldset>`).join('')}
       </div>
@@ -523,6 +533,17 @@ function openTrainModal(train) {
       panel.querySelector('#trainForm').addEventListener('submit', (e) => {
         e.preventDefault();
         saveTrainForm(panel, train);
+      });
+      panel.querySelectorAll('.fStepCauseSuggestBtn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = btn.dataset.i;
+          const fieldset = btn.closest('.step-form-row');
+          const labelInput = fieldset?.querySelector('.fStepLabel');
+          const causeInput = fieldset?.querySelector('.fStepCause');
+          if (!causeInput) return;
+          const suggestion = suggestCauseForLabel(labelInput?.value || btn.dataset.label);
+          if (suggestion) causeInput.value = suggestion;
+        });
       });
       const addDateBtn = panel.querySelector('#btnAddDateRow');
       const extraDatesContainer = panel.querySelector('#extraDatesContainer');
@@ -584,11 +605,61 @@ function saveTrainForm(panel, existingTrain) {
   persist();
   closeModal();
   renderGrid();
-  if (existingTrain) showToast('Train mis à jour');
-  else showToast(createdCount > 1 ? `${createdCount} vignettes ajoutées (une par date)` : 'Train ajouté');
+  if (existingTrain) {
+    if (settings.sheetsWebAppUrl) pushAllStepsToSheet(settings.sheetsWebAppUrl, existingTrain, computeAllStepDelays).catch(() => {});
+    showToast('Train mis à jour');
+  } else {
+    showToast(createdCount > 1 ? `${createdCount} vignettes ajoutées (une par date)` : 'Train ajouté');
+  }
 }
 
 // ---------- Modale Réglages ----------
+function addQuickTrainRowInto(container, { number = '', operator = '', destination = '' } = {}) {
+  const row = document.createElement('div');
+  row.className = 'quick-train-form-row date-row-extra';
+  row.innerHTML = `
+    <input type="text" class="fQuickTrainNumber" placeholder="Numéro" inputmode="numeric" value="${escapeHtml(number)}" style="max-width:110px;">
+    <input type="text" class="fQuickTrainOperator" placeholder="Opérateur (ex : NAVILAND)" value="${escapeHtml(operator)}">
+    <input type="text" class="fQuickTrainDestination" placeholder="Destination" value="${escapeHtml(destination)}">
+    <button type="button" class="icon-btn" data-action="remove-quick-train-row" aria-label="Retirer ce train">✕</button>`;
+  container.appendChild(row);
+}
+
+function shuttleTimingSectionHTML(group) {
+  const stops = group.stops || [];
+  return `
+    <fieldset class="shuttle-timing-fieldset" data-shuttle-family="${escapeHtml(group.id)}" style="border-color:${escapeHtml(group.color)}">
+      <legend style="color:${escapeHtml(group.color)}">${escapeHtml(group.id)} — ${escapeHtml(group.codes.join(', '))}</legend>
+      <div class="form-row">
+        <label>Arrivée = départ + (min)
+          <input type="number" class="sShuttleOffset" min="0" value="${group.offsetMinutes}">
+        </label>
+        <label>Seuil de clignotement (min avant arrivée)
+          <input type="number" class="sShuttleImminent" min="0" value="${group.imminentMin ?? SHUTTLE_DEFAULT_IMMINENT_MIN}">
+        </label>
+      </div>
+      <p class="help-text">Passages intermédiaires (nom + minutes depuis le départ) :</p>
+      <div class="shuttle-timing-stops" data-role="shuttle-timing-stops">
+        ${stops.map((s) => `
+          <div class="shuttle-stop-form-row">
+            <input type="text" class="fShuttleTimingStopLabel" placeholder="ex : Pont rouge" value="${escapeHtml(s.label)}">
+            <input type="number" class="fShuttleTimingStopMin" placeholder="min" min="0" value="${escapeHtml(String(s.offsetMin))}">
+            <button type="button" class="icon-btn" data-action="remove-shuttle-timing-stop" aria-label="Retirer ce passage">✕</button>
+          </div>`).join('')}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="add-shuttle-timing-stop">+ Ajouter un passage</button>
+      ${(settings.shuttleExtraCodes?.[group.id] || []).length ? `
+        <p class="help-text">Codes ajoutés à cette famille (via "+ Navette") :</p>
+        <div class="shuttle-extra-codes-list">
+          ${settings.shuttleExtraCodes[group.id].map((code) => `
+            <span class="quick-train-btn btn btn-outline btn-sm" style="display:inline-flex;gap:0.4rem;align-items:center;">
+              ${escapeHtml(code)}
+              <button type="button" class="icon-btn" data-action="remove-shuttle-extra-code" data-family="${escapeHtml(group.id)}" data-code="${escapeHtml(code)}" aria-label="Retirer ce code">✕</button>
+            </span>`).join('')}
+        </div>` : ''}
+    </fieldset>`;
+}
+
 function syncInfoText() {
   if (!settings.lastSyncAt) return 'Aucune synchronisation effectuée pour le moment.';
   const date = new Date(settings.lastSyncAt);
@@ -599,10 +670,10 @@ function syncInfoText() {
 function settingsBodyHTML() {
   return `
     <form id="settingsForm" class="stacked-form">
-      <label>URL du Web App Google Apps Script (horaires théoriques)
+      <label>URL du Web App Google Apps Script (horaires théoriques + journal des heures réelles)
         <input type="url" id="sSheetUrl" value="${escapeHtml(settings.sheetsWebAppUrl || '')}" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
       </label>
-      <p class="help-text">Laissez vide pour saisir les horaires uniquement à la main. Voir le README pour créer ce Web App (aucune clé API n'est requise, aucun secret côté navigateur).</p>
+      <p class="help-text">Laissez vide pour saisir les horaires uniquement à la main. Cette même URL sert désormais aussi à envoyer automatiquement vers un onglet "Journal" chaque heure réelle enregistrée (mise à jour de apps-script/Code.gs requise — voir le README).</p>
 
       <div class="steps-form-list">
         <p class="help-text">Libellés par défaut des 7 étapes (nouveaux trains uniquement) :</p>
@@ -627,9 +698,21 @@ function settingsBodyHTML() {
         <button type="button" class="btn btn-ghost btn-sm" id="btnResetSillonOffsets">↺ Réinitialiser aux valeurs par défaut</button>
       </div>
 
+      <div class="steps-form-list">
+        <p class="help-text">
+          Navettes internes — réglages par famille. Les horaires de FL/NL/AL
+          sont identiques par défaut ; ajustez-les ici indépendamment selon
+          vos observations, ça se sauvegarde pour toutes les navettes de la
+          famille (FL1/FL2/FL3, NL1/NL2, AL1/AL2). "Seuil de clignotement"
+          est le nombre de minutes avant l'arrivée estimée à partir duquel la
+          vignette clignote en rouge ("Arrivée imminente").
+        </p>
+        ${getAllShuttleGroups().filter((g) => !g.id.startsWith('custom-')).map((g) => shuttleTimingSectionHTML(g)).join('')}
+      </div>
+
       ${(settings.customShuttleGroups || []).length ? `
         <div class="steps-form-list">
-          <p class="help-text">Navettes ajoutées manuellement (via "+ Navette") :</p>
+          <p class="help-text">Navettes ajoutées manuellement (via "+ Navette" → "Personnalisée") :</p>
           ${settings.customShuttleGroups.map((g) => `
             <div class="date-row-extra">
               <span style="flex:1 1 auto;">
@@ -640,10 +723,11 @@ function settingsBodyHTML() {
             </div>`).join('')}
         </div>` : ''}
 
-      <label>Trains à accès rapide (numéros séparés par une virgule)
-        <input type="text" id="sQuickTrains" value="${escapeHtml((settings.quickTrainNumbers || []).join(', '))}" placeholder="ex : 50238, 52232, 70630, 52006">
-      </label>
-      <p class="help-text">Un bouton apparaît pour chacun sous les navettes : cliquez pour indiquer qu'il circule aujourd'hui (ajoute sa vignette avec les libellés par défaut) ou qu'il ne circule pas (la retire).</p>
+      <div class="steps-form-list">
+        <p class="help-text">Trains à accès rapide — un bouton apparaît pour chacun sous les navettes : cliquez pour indiquer qu'il circule aujourd'hui (ajoute sa vignette) ou qu'il ne circule pas (la retire). Opérateur et destination sont affichés au-dessus du numéro.</p>
+        <div id="sQuickTrainsContainer" class="extra-dates"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnAddQuickTrainRow">+ Ajouter un train à accès rapide</button>
+      </div>
 
       <label>Thème
         <select id="sTheme">
@@ -656,7 +740,8 @@ function settingsBodyHTML() {
       <p class="help-text" id="syncInfo">${syncInfoText()}</p>
 
       <div class="form-actions">
-        <button type="button" id="btnSyncNow" class="btn btn-outline">Synchroniser maintenant</button>
+        <button type="button" id="btnSyncNow" class="btn btn-outline">↻ Relire les horaires</button>
+        <button type="button" id="btnPushToday" class="btn btn-outline">↥ Renvoyer aujourd'hui vers Sheets</button>
         <button type="submit" class="btn btn-primary">Enregistrer</button>
       </div>
     </form>`;
@@ -674,6 +759,11 @@ function openSettingsModal() {
         await syncWithSheet();
         const info = panel.querySelector('#syncInfo');
         if (info) info.textContent = syncInfoText();
+      });
+      panel.querySelector('#btnPushToday').addEventListener('click', async () => {
+        settings.sheetsWebAppUrl = panel.querySelector('#sSheetUrl').value.trim();
+        saveSettings(settings);
+        await pushTodayToSheet();
       });
       panel.querySelectorAll('[data-action="remove-custom-shuttle"]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -694,16 +784,73 @@ function openSettingsModal() {
         });
         showToast('Décalages réinitialisés — pensez à Enregistrer');
       });
+
+      // ---- Trains à accès rapide (lignes numéro/opérateur/destination) ----
+      const quickTrainsContainer = panel.querySelector('#sQuickTrainsContainer');
+      (settings.quickTrains || []).forEach((t) => addQuickTrainRowInto(quickTrainsContainer, t));
+      panel.querySelector('#btnAddQuickTrainRow').addEventListener('click', () => addQuickTrainRowInto(quickTrainsContainer));
+      quickTrainsContainer.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-action="remove-quick-train-row"]');
+        if (removeBtn) removeBtn.closest('.quick-train-form-row').remove();
+      });
+
+      // ---- Navettes FL/NL/AL : passages intermédiaires (ajout/suppression de lignes) ----
+      panel.querySelectorAll('[data-role="shuttle-timing-stops"]').forEach((stopsContainer) => {
+        const fieldset = stopsContainer.closest('.shuttle-timing-fieldset');
+        const addBtn = fieldset.querySelector('[data-action="add-shuttle-timing-stop"]');
+        addBtn.addEventListener('click', () => addShuttleTimingStopRowInto(stopsContainer));
+      });
+      panel.addEventListener('click', (e) => {
+        const removeStopBtn = e.target.closest('[data-action="remove-shuttle-timing-stop"]');
+        if (removeStopBtn) { removeStopBtn.closest('.shuttle-stop-form-row').remove(); return; }
+        const removeExtraCodeBtn = e.target.closest('[data-action="remove-shuttle-extra-code"]');
+        if (removeExtraCodeBtn) {
+          const { family, code } = removeExtraCodeBtn.dataset;
+          settings.shuttleExtraCodes = { ...settings.shuttleExtraCodes };
+          settings.shuttleExtraCodes[family] = (settings.shuttleExtraCodes[family] || []).filter((c) => c !== code);
+          saveSettings(settings);
+          renderShuttlesBar();
+          removeExtraCodeBtn.closest('.shuttle-extra-codes-list > span, span').remove();
+          showToast(`Code ${code} retiré de ${family}`);
+        }
+      });
+
       panel.querySelector('#settingsForm').addEventListener('submit', (e) => {
         e.preventDefault();
         settings.sheetsWebAppUrl = panel.querySelector('#sSheetUrl').value.trim();
         settings.defaultStepLabels = sortedByIndex([...panel.querySelectorAll('.sStepLabel')]).map((i) => i.value.trim());
         settings.sillonStepOffsets = sortedByIndex([...panel.querySelectorAll('.sSillonOffset')]).map((i) => Number(i.value) || 0);
-        settings.quickTrainNumbers = panel.querySelector('#sQuickTrains').value.split(',').map((s) => s.trim()).filter(Boolean);
+
+        settings.quickTrains = [...quickTrainsContainer.querySelectorAll('.quick-train-form-row')]
+          .map((row) => ({
+            number: row.querySelector('.fQuickTrainNumber').value.trim(),
+            operator: row.querySelector('.fQuickTrainOperator').value.trim(),
+            destination: row.querySelector('.fQuickTrainDestination').value.trim(),
+          }))
+          .filter((t) => t.number);
+        settings.quickTrainsEnrichedV2 = true;
+
+        const shuttleTimings = { ...(settings.shuttleTimings || {}) };
+        panel.querySelectorAll('.shuttle-timing-fieldset').forEach((fieldset) => {
+          const familyId = fieldset.dataset.shuttleFamily;
+          const offsetMinutes = Number(fieldset.querySelector('.sShuttleOffset').value) || 0;
+          const imminentMin = Number(fieldset.querySelector('.sShuttleImminent').value) || 0;
+          const stops = [...fieldset.querySelectorAll('.shuttle-stop-form-row')]
+            .map((row) => ({
+              label: row.querySelector('.fShuttleTimingStopLabel').value.trim(),
+              offsetMin: Number(row.querySelector('.fShuttleTimingStopMin').value) || 0,
+            }))
+            .filter((s) => s.label)
+            .sort((a, b) => a.offsetMin - b.offsetMin);
+          shuttleTimings[familyId] = { offsetMinutes, imminentMin, stops };
+        });
+        settings.shuttleTimings = shuttleTimings;
+
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
         renderQuickTrainsBar();
+        renderShuttlesBar();
         closeModal();
         showToast('Réglages enregistrés');
       });
@@ -832,6 +979,35 @@ async function syncWithSheet({ silent = false } = {}) {
   if (!silent && touchedNumbers.size) showToast(`Horaires synchronisés (${touchedNumbers.size} train${touchedNumbers.size > 1 ? 's' : ''})`);
 }
 
+// Envoi (fire-and-forget) d'une étape vers le "Journal" Google Sheets dès
+// qu'une heure réelle est enregistrée/corrigée/réinitialisée, si une URL est
+// configurée. N'affiche rien en cas de succès (pour ne pas surcharger
+// l'utilisateur de toasts) ; une erreur reste silencieuse ici aussi — le
+// bouton "↥ Renvoyer aujourd'hui vers Sheets" dans Réglages permet de
+// rattraper manuellement tout ce qui n'aurait pas pu être envoyé (ex : pas
+// de réseau au moment de la saisie).
+function pushStepIfConfigured(train, stepIndex) {
+  if (!settings.sheetsWebAppUrl) return;
+  pushStepToSheet(settings.sheetsWebAppUrl, train, stepIndex, computeAllStepDelays).catch(() => {});
+}
+
+async function pushTodayToSheet() {
+  if (!settings.sheetsWebAppUrl) {
+    showToast('Configurez d\'abord une URL Google Sheets', 'error');
+    return { sent: 0, failed: 0 };
+  }
+  const todays = getTodayTrains();
+  let sent = 0;
+  let failed = 0;
+  for (const train of todays) {
+    const results = await pushAllStepsToSheet(settings.sheetsWebAppUrl, train, computeAllStepDelays);
+    for (const r of results) (r.ok ? sent++ : failed++);
+  }
+  if (failed === 0) showToast(`${sent} heure(s) envoyée(s) vers Google Sheets ✓`);
+  else showToast(`${sent} envoyée(s), ${failed} échec(s) — réessayez plus tard`, failed === sent + failed ? 'error' : 'success');
+  return { sent, failed };
+}
+
 // ---------- Horloge & bascule de date ----------
 function startClock() {
   const clockEl = el('clock');
@@ -879,11 +1055,23 @@ function registerServiceWorker() {
 }
 
 // ---------- Navettes internes ----------
-const SHUTTLE_IMMINENT_MIN = 30; // arrivée <= 30 min => clignotement rouge
-const SHUTTLE_APPROACHING_MIN = 35; // arrivée <= 35 min => "en approche"
-
+// Fusionne les réglages personnalisés (settings.shuttleTimings, par famille
+// FL/NL/AL) et les codes ajoutés via les préréglages (settings.
+// shuttleExtraCodes) sur les groupes intégrés, puis ajoute les navettes
+// personnalisées (settings.customShuttleGroups) telles quelles.
 function getAllShuttleGroups() {
-  return [...SHUTTLE_GROUPS, ...(settings.customShuttleGroups || [])];
+  const builtIn = SHUTTLE_GROUPS.map((group) => {
+    const override = settings.shuttleTimings?.[group.id];
+    const extraCodes = settings.shuttleExtraCodes?.[group.id] || [];
+    return {
+      ...group,
+      offsetMinutes: override?.offsetMinutes ?? group.offsetMinutes,
+      imminentMin: override?.imminentMin ?? group.imminentMin ?? SHUTTLE_DEFAULT_IMMINENT_MIN,
+      stops: override?.stops?.length ? override.stops : group.stops,
+      codes: [...group.codes, ...extraCodes],
+    };
+  });
+  return [...builtIn, ...(settings.customShuttleGroups || [])];
 }
 
 function findShuttleGroup(code) {
@@ -899,83 +1087,97 @@ function computeShuttleArrival(code, departureHHMM) {
   return formatHHMM(arrival);
 }
 
-// État affiché sur la vignette, calculé à partir du temps restant avant
-// l'heure d'arrivée estimée (par rapport à maintenant) :
-//   vide -> programmée -> en approche (35 min) -> imminente (30 min, clignote) -> arrivée (grisée)
+// Progression de la navette calculée à partir du temps ÉCOULÉ depuis
+// l'heure de départ validée (plutôt que de sauter directement à "en
+// approche"/"arrivée") :
+//   vide -> partie du Terminal -> [passage intermédiaire atteint] (répété,
+//   un par un, selon `group.stops`) -> imminente (clignote, à `imminentMin`
+//   minutes de l'arrivée estimée) -> arrivée (grisée).
+// Exemple (FL, départ validé à 10:19, arrivée = +35 min = 10:54,
+// imminentMin = 10) : 10:19-10:20 "Partie du Terminal", 10:21 "Départ FS"
+// (passage à +2 min), 10:24 "CV 1474" (+5), 10:34 "Entrée GB" (+15), 10:42
+// "Sortie GB" (+23), puis dès 10:44 (10:54 - 10 min) "⚠ Arrivée imminente"
+// clignotante, et "Arrivée effectuée" (grisée) à partir de 10:54.
 // "arrivedManually" (bouton "Navette arrivée") court-circuite ce calcul :
 // utile quand l'heure réelle ne correspond pas à l'estimation automatique.
-function computeShuttleState(code) {
-  if (shuttles[code]?.arrivedManually) return 'arrived';
+function computeShuttleProgress(code) {
+  if (shuttles[code]?.arrivedManually) return { state: 'arrived', label: 'Arrivée effectuée' };
+  const group = findShuttleGroup(code);
   const departure = shuttles[code]?.departure;
-  if (!departure) return 'empty';
-  const arrival = computeShuttleArrival(code, departure);
-  const parsedArrival = parseHHMM(arrival);
-  if (!parsedArrival) return 'empty';
+  if (!group || !departure) return { state: 'empty', label: '' };
+  const parsedDeparture = parseHHMM(departure);
+  if (!parsedDeparture) return { state: 'empty', label: '' };
+
   const now = new Date();
-  const arrivalDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedArrival.h, parsedArrival.m, 0, 0);
-  const remainingMin = (arrivalDate.getTime() - now.getTime()) / 60000;
-  if (remainingMin <= 0) return 'arrived';
-  if (remainingMin <= SHUTTLE_IMMINENT_MIN) return 'imminent';
-  if (remainingMin <= SHUTTLE_APPROACHING_MIN) return 'approaching';
-  return 'scheduled';
+  const departureDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedDeparture.h, parsedDeparture.m, 0, 0);
+  const elapsedMin = (now.getTime() - departureDate.getTime()) / 60000;
+
+  const arrivalOffset = group.offsetMinutes;
+  const imminentMin = group.imminentMin ?? SHUTTLE_DEFAULT_IMMINENT_MIN;
+
+  if (elapsedMin >= arrivalOffset) return { state: 'arrived', label: 'Arrivée effectuée' };
+  if (elapsedMin >= arrivalOffset - imminentMin) return { state: 'imminent', label: '⚠ Arrivée imminente' };
+  if (elapsedMin < 0) return { state: 'scheduled', label: '' };
+
+  const stops = [...(group.stops || [])].sort((a, b) => a.offsetMin - b.offsetMin);
+  let currentStop = null;
+  for (const stop of stops) {
+    if (elapsedMin >= stop.offsetMin) currentStop = stop;
+    else break;
+  }
+  if (currentStop) return { state: 'enroute', label: currentStop.label };
+  return { state: 'departed', label: 'Partie du Terminal' };
 }
 
 function shuttleHasDelayFlag(code) {
   return Boolean(shuttles[code]?.delayFlag);
 }
 
-const SHUTTLE_STATE_LABELS = {
-  approaching: 'Arrivée en approche',
-  imminent: '⚠ Arrivée imminente',
-  arrived: 'Arrivée effectuée',
-};
-
 function shuttleChipInnerHTML(code) {
   const departure = shuttles[code]?.departure;
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
-  const state = computeShuttleState(code);
-  const stateLabel = SHUTTLE_STATE_LABELS[state];
+  const progress = computeShuttleProgress(code);
   const delayFlag = shuttleHasDelayFlag(code);
   return `
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
-    ${stateLabel ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${stateLabel}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
+    ${progress.label ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
     <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
 
-function shuttleChipClass(code, group) {
-  return `shuttle-chip state-${computeShuttleState(code)}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
+function shuttleChipClass(code) {
+  return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
 }
 
 function renderShuttlesBar() {
   const container = el('shuttlesBar');
   if (!container) return;
   const chips = getAllShuttleGroups().map((group) => group.codes.map((code) => `
-    <button type="button" class="${shuttleChipClass(code, group)}" style="--shuttle-color:${group.color}" data-shuttle-code="${code}" title="${escapeHtml(group.label || '')}">
+    <button type="button" class="${shuttleChipClass(code)}" style="--shuttle-color:${group.color}" data-shuttle-code="${code}" title="${escapeHtml(group.label || '')}">
       ${shuttleChipInnerHTML(code)}
     </button>`).join('')).join('');
   container.innerHTML = `${chips}
     <button type="button" class="shuttle-chip shuttle-chip-add" id="btnAddShuttle">+ Navette</button>`;
 }
 
-// Ne touche qu'à la classe d'état + au libellé (pas tout l'innerHTML), pour
-// ne pas interrompre l'animation de clignotement en cours à chaque tick.
+// Recalcule la classe d'état + le libellé de chaque navette à chaque tick
+// (utile pour la progression en temps réel), mais ne touche au DOM que ce
+// qui a changé, pour ne pas interrompre l'animation de clignotement en
+// cours.
 function updateShuttleStates() {
   const container = el('shuttlesBar');
   if (!container) return;
   container.querySelectorAll('[data-shuttle-code]').forEach((chip) => {
     const code = chip.dataset.shuttleCode;
     const wantClass = shuttleChipClass(code);
-    if (chip.className === wantClass) return;
-    chip.className = wantClass;
-    const state = computeShuttleState(code);
+    if (chip.className !== wantClass) chip.className = wantClass;
+    const progress = computeShuttleProgress(code);
     const labelEl = chip.querySelector('[data-role="shuttle-state-label"]');
-    if (labelEl) {
-      const text = SHUTTLE_STATE_LABELS[state];
-      labelEl.textContent = text || '';
-      labelEl.hidden = !text;
+    if (labelEl && labelEl.textContent !== progress.label) {
+      labelEl.textContent = progress.label || '';
+      labelEl.hidden = !progress.label;
     }
     const delayEl = chip.querySelector('[data-role="shuttle-delay-flag"]');
     if (delayEl) delayEl.hidden = !shuttleHasDelayFlag(code);
@@ -1107,6 +1309,16 @@ function openShuttleModal(code) {
   });
 }
 
+function addShuttleTimingStopRowInto(container, label = '', minutes = '') {
+  const row = document.createElement('div');
+  row.className = 'shuttle-stop-form-row';
+  row.innerHTML = `
+    <input type="text" class="fShuttleTimingStopLabel" placeholder="ex : Pont rouge" value="${escapeHtml(label)}">
+    <input type="number" class="fShuttleTimingStopMin" placeholder="min" min="0" value="${escapeHtml(String(minutes))}">
+    <button type="button" class="icon-btn" data-action="remove-shuttle-timing-stop" aria-label="Retirer ce passage">✕</button>`;
+  container.appendChild(row);
+}
+
 function addShuttleStopRowInto(container, label = '', minutes = '') {
   const row = document.createElement('div');
   row.className = 'shuttle-stop-form-row';
@@ -1117,11 +1329,17 @@ function addShuttleStopRowInto(container, label = '', minutes = '') {
   container.appendChild(row);
 }
 
-function openAddShuttleModal() {
-  openModal({
-    title: 'Ajouter une navette',
-    wide: true,
-    bodyHTML: `
+const SHUTTLE_PRESET_LABELS = { FL: 'FL — orange', NL: 'NL — bleu', AL: 'AL — jaune' };
+
+function shuttlePresetPreviewHTML(presetId) {
+  const group = getAllShuttleGroups().find((g) => g.id === presetId);
+  if (!group) return '';
+  return `Reprend automatiquement le trajet, la couleur et les horaires ${escapeHtml(presetId)} (arrivée à + ${group.offsetMinutes} min, ${group.stops.length} passage${group.stops.length > 1 ? 's' : ''} intermédiaire${group.stops.length > 1 ? 's' : ''}). Codes actuels : ${escapeHtml(group.codes.join(', '))}.`;
+}
+
+function shuttleAddDynamicHTML(preset) {
+  if (preset === 'custom') {
+    return `
       <form id="addShuttleForm" class="stacked-form">
         <div class="form-row">
           <label>Nom / destination
@@ -1144,47 +1362,108 @@ function openAddShuttleModal() {
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Ajouter la navette</button>
         </div>
-      </form>`,
+      </form>`;
+  }
+  return `
+    <form id="addShuttlePresetForm" class="stacked-form">
+      <p class="help-text">${shuttlePresetPreviewHTML(preset)}</p>
+      <label>Nouveau(x) code(s) pour cette famille (séparés par une virgule)
+        <input type="text" id="fShuttlePresetCodes" required placeholder="ex : ${preset}4">
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Ajouter à ${escapeHtml(preset)}</button>
+      </div>
+    </form>`;
+}
+
+function openAddShuttleModal() {
+  openModal({
+    title: 'Ajouter une navette',
+    wide: true,
+    bodyHTML: `
+      <div class="shuttle-preset-row">
+        ${['FL', 'NL', 'AL'].map((id) => {
+          const group = SHUTTLE_GROUPS.find((g) => g.id === id);
+          return `<button type="button" class="shuttle-preset-btn" data-preset="${id}" style="--shuttle-color:${group.color}">${escapeHtml(SHUTTLE_PRESET_LABELS[id])}</button>`;
+        }).join('')}
+        <button type="button" class="shuttle-preset-btn" data-preset="custom">Personnalisée</button>
+      </div>
+      <div id="shuttleAddDynamic"></div>`,
     onMount: (panel) => {
-      const stopsContainer = panel.querySelector('#shuttleStopsContainer');
-      addShuttleStopRowInto(stopsContainer);
-      addShuttleStopRowInto(stopsContainer);
-      panel.querySelector('#btnAddShuttleStop').addEventListener('click', () => addShuttleStopRowInto(stopsContainer));
-      stopsContainer.addEventListener('click', (e) => {
-        const removeBtn = e.target.closest('[data-action="remove-shuttle-stop"]');
-        if (removeBtn) removeBtn.closest('.shuttle-stop-form-row').remove();
-      });
-      panel.querySelector('#addShuttleForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const name = panel.querySelector('#fShuttleName').value.trim();
-        const color = panel.querySelector('#fShuttleColor').value;
-        const codes = panel.querySelector('#fShuttleCodes').value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
-        if (codes.length === 0) { showToast('Indiquez au moins un code de navette', 'error'); return; }
-        const existingCodes = new Set(getAllShuttleGroups().flatMap((g) => g.codes));
-        const clashing = codes.filter((c) => existingCodes.has(c));
-        if (clashing.length) { showToast(`Code(s) déjà utilisé(s) : ${clashing.join(', ')}`, 'error'); return; }
-        const stops = [...stopsContainer.querySelectorAll('.shuttle-stop-form-row')]
-          .map((row) => ({
-            label: row.querySelector('.fShuttleStopLabel').value.trim(),
-            offsetMin: Number(row.querySelector('.fShuttleStopMin').value) || 0,
-          }))
-          .filter((s) => s.label)
-          .sort((a, b) => a.offsetMin - b.offsetMin);
-        if (stops.length === 0) { showToast("Ajoutez au moins un passage (l'arrivée)", 'error'); return; }
-        const newGroup = {
-          id: 'custom-' + Date.now().toString(36),
-          label: name || codes[0],
-          codes,
-          color,
-          offsetMinutes: stops[stops.length - 1].offsetMin,
-          stops: stops.slice(0, -1),
-        };
-        settings.customShuttleGroups = [...(settings.customShuttleGroups || []), newGroup];
-        saveSettings(settings);
-        renderShuttlesBar();
-        closeModal();
-        showToast(`Navette "${newGroup.label}" ajoutée`);
-      });
+      const dynamic = panel.querySelector('#shuttleAddDynamic');
+      const presetButtons = [...panel.querySelectorAll('.shuttle-preset-btn')];
+
+      function selectPreset(preset) {
+        presetButtons.forEach((b) => b.classList.toggle('is-selected', b.dataset.preset === preset));
+        dynamic.innerHTML = shuttleAddDynamicHTML(preset);
+        wireDynamicForm(preset);
+      }
+
+      function wireDynamicForm(preset) {
+        if (preset === 'custom') {
+          const stopsContainer = dynamic.querySelector('#shuttleStopsContainer');
+          addShuttleStopRowInto(stopsContainer);
+          addShuttleStopRowInto(stopsContainer);
+          dynamic.querySelector('#btnAddShuttleStop').addEventListener('click', () => addShuttleStopRowInto(stopsContainer));
+          stopsContainer.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('[data-action="remove-shuttle-stop"]');
+            if (removeBtn) removeBtn.closest('.shuttle-stop-form-row').remove();
+          });
+          dynamic.querySelector('#addShuttleForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const name = dynamic.querySelector('#fShuttleName').value.trim();
+            const color = dynamic.querySelector('#fShuttleColor').value;
+            const codes = dynamic.querySelector('#fShuttleCodes').value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+            if (codes.length === 0) { showToast('Indiquez au moins un code de navette', 'error'); return; }
+            const existingCodes = new Set(getAllShuttleGroups().flatMap((g) => g.codes));
+            const clashing = codes.filter((c) => existingCodes.has(c));
+            if (clashing.length) { showToast(`Code(s) déjà utilisé(s) : ${clashing.join(', ')}`, 'error'); return; }
+            const stops = [...stopsContainer.querySelectorAll('.shuttle-stop-form-row')]
+              .map((row) => ({
+                label: row.querySelector('.fShuttleStopLabel').value.trim(),
+                offsetMin: Number(row.querySelector('.fShuttleStopMin').value) || 0,
+              }))
+              .filter((s) => s.label)
+              .sort((a, b) => a.offsetMin - b.offsetMin);
+            if (stops.length === 0) { showToast("Ajoutez au moins un passage (l'arrivée)", 'error'); return; }
+            const newGroup = {
+              id: 'custom-' + Date.now().toString(36),
+              label: name || codes[0],
+              codes,
+              color,
+              offsetMinutes: stops[stops.length - 1].offsetMin,
+              stops: stops.slice(0, -1),
+            };
+            settings.customShuttleGroups = [...(settings.customShuttleGroups || []), newGroup];
+            saveSettings(settings);
+            renderShuttlesBar();
+            closeModal();
+            showToast(`Navette "${newGroup.label}" ajoutée`);
+          });
+          return;
+        }
+
+        // Préréglage FL/NL/AL : on ne demande que le(s) nouveau(x) code(s),
+        // tout le reste (couleur, décalage d'arrivée, passages) est repris
+        // de la famille via getAllShuttleGroups().
+        dynamic.querySelector('#addShuttlePresetForm').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const codes = dynamic.querySelector('#fShuttlePresetCodes').value.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+          if (codes.length === 0) { showToast('Indiquez au moins un code', 'error'); return; }
+          const existingCodes = new Set(getAllShuttleGroups().flatMap((g) => g.codes));
+          const clashing = codes.filter((c) => existingCodes.has(c));
+          if (clashing.length) { showToast(`Code(s) déjà utilisé(s) : ${clashing.join(', ')}`, 'error'); return; }
+          settings.shuttleExtraCodes = { ...settings.shuttleExtraCodes };
+          settings.shuttleExtraCodes[preset] = [...(settings.shuttleExtraCodes[preset] || []), ...codes];
+          saveSettings(settings);
+          renderShuttlesBar();
+          closeModal();
+          showToast(`${codes.join(', ')} ajouté(s) à ${preset}`);
+        });
+      }
+
+      presetButtons.forEach((btn) => btn.addEventListener('click', () => selectPreset(btn.dataset.preset)));
+      selectPreset('FL');
     },
   });
 }
