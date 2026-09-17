@@ -37,6 +37,15 @@ export function saveTrains(trains) {
 // manuelle dans Réglages.
 const LEGACY_SILLON_OFFSETS = [-240, -161, -97, -38, -19, -17, -15];
 
+// Ancien format des trains à accès rapide : un simple tableau de numéros
+// (`quickTrainNumbers`), sans opérateur ni destination. Remplacé par
+// `quickTrains` (tableau d'objets { number, operator, destination }) —
+// migré automatiquement ci-dessous en enrichissant chaque numéro connu avec
+// son opérateur/destination par défaut (voir DEFAULT_SETTINGS.quickTrains),
+// et en ajoutant les nouveaux trains par défaut (50276, 50274) qui
+// n'existaient pas dans l'ancien format. Idempotent et protégé par un
+// indicateur one-shot pour ne jamais réajouter un train que l'utilisateur a
+// sciemment retiré ensuite.
 export function loadSettings() {
   const stored = safeParse(localStorage.getItem(STORAGE_KEYS.settings), {});
   const merged = { ...DEFAULT_SETTINGS, ...stored };
@@ -45,8 +54,32 @@ export function loadSettings() {
     && stored.sillonStepOffsets.every((v, i) => v === LEGACY_SILLON_OFFSETS[i]);
   if (isLegacy) {
     merged.sillonStepOffsets = DEFAULT_SETTINGS.sillonStepOffsets;
-    saveSettings(merged);
   }
+  let needsSave = isLegacy;
+
+  if (!Array.isArray(stored.quickTrains) && Array.isArray(stored.quickTrainNumbers)) {
+    const defaultsByNumber = new Map(DEFAULT_SETTINGS.quickTrains.map((t) => [t.number, t]));
+    merged.quickTrains = stored.quickTrainNumbers.map((number) => {
+      const def = defaultsByNumber.get(number);
+      return def ? { ...def } : { number, operator: '', destination: '' };
+    });
+    needsSave = true;
+  }
+  if (!merged.quickTrainsEnrichedV2) {
+    const defaultsByNumber = new Map(DEFAULT_SETTINGS.quickTrains.map((t) => [t.number, t]));
+    merged.quickTrains = (merged.quickTrains || []).map((t) => {
+      if (t.operator || t.destination) return t;
+      const def = defaultsByNumber.get(t.number);
+      return def ? { ...def } : t;
+    });
+    const known = new Set(merged.quickTrains.map((t) => t.number));
+    const missingDefaults = DEFAULT_SETTINGS.quickTrains.filter((t) => !known.has(t.number));
+    merged.quickTrains = [...merged.quickTrains, ...missingDefaults];
+    merged.quickTrainsEnrichedV2 = true;
+    needsSave = true;
+  }
+
+  if (needsSave) saveSettings(merged);
   return merged;
 }
 
