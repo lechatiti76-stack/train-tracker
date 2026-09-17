@@ -1,12 +1,19 @@
 /**
- * Web App Google Apps Script — publie en lecture seule les horaires
- * théoriques d'un Google Sheet, au format JSON, pour l'application
- * "Suivi Trains". Aucune clé API n'est nécessaire : Apps Script gère
- * l'autorisation sous le compte du propriétaire de la feuille, et le Web
- * App ne fait QUE lire (aucune fonction d'écriture n'est exposée ici).
+ * Web App Google Apps Script pour l'application "Suivi Trains" :
+ *  - LECTURE (doGet, inchangée) : publie en JSON les horaires théoriques de
+ *    l'onglet "Horaires", en lecture seule.
+ *  - ÉCRITURE (doPost, ajoutée) : reçoit une action 'logStep' à chaque heure
+ *    réelle enregistrée/corrigée/réinitialisée côté app, et l'écrit dans un
+ *    onglet "Journal" séparé (créé automatiquement si absent). L'onglet
+ *    "Horaires" n'est jamais modifié par l'écriture.
+ * Aucune clé API n'est nécessaire : Apps Script gère l'autorisation sous le
+ * compte du propriétaire de la feuille.
  *
  * Installation : voir la section "Connecter Google Sheets" du README.md
- * à la racine du projet.
+ * à la racine du projet. Après toute modification de ce fichier, il faut
+ * créer une NOUVELLE VERSION du déploiement (Déployer → Gérer les
+ * déploiements → ✎ → Version : Nouvelle version → Déployer) pour que les
+ * changements soient pris en compte — l'URL /exec ne change pas.
  *
  * Colonnes attendues dans l'onglet "Horaires" (ligne d'en-tête obligatoire) :
  *   Train | Étape | Heure théorique | Cause | Jours de circulation
@@ -21,9 +28,17 @@
  *                            "Mardi,Jeudi" ou "Lundi,Mercredi,Vendredi" ou
  *                            "Tous les jours" — le sillon est un service
  *                            récurrent, PAS lié à une date précise.
+ *
+ * L'onglet "Journal" (écriture) est créé automatiquement avec les colonnes :
+ *   Date | Train | Étape | Heure théorique | Heure réelle | Écart (min) |
+ *   Cause | Mis à jour le
+ * Une ligne par (Date, Train, Étape) : un nouvel envoi met à jour la ligne
+ * existante plutôt que d'en créer une autre (upsert).
  */
 
 const SHEET_NAME = 'Horaires';
+const JOURNAL_SHEET_NAME = 'Journal';
+const JOURNAL_HEADERS = ['Date', 'Train', 'Étape', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Cause', 'Mis à jour le'];
 
 function doGet(e) {
   try {
@@ -32,6 +47,89 @@ function doGet(e) {
   } catch (err) {
     return jsonResponse_({ error: String(err) });
   }
+}
+
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    return jsonResponse_({ error: 'Verrou indisponible, réessayez.' });
+  }
+  try {
+    const payload = JSON.parse(e.postData.contents || '{}');
+    if (payload.action !== 'logStep') {
+      return jsonResponse_({ error: 'Action inconnue : ' + payload.action });
+    }
+    upsertJournalRow_(payload);
+    return jsonResponse_({ ok: true });
+  } catch (err) {
+    return jsonResponse_({ error: String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function upsertJournalRow_(payload) {
+  const sheet = getOrCreateJournalSheet_();
+  const values = sheet.getDataRange().getValues();
+  const key = [payload.date, payload.train, payload.etape].join('|');
+
+  let targetRow = -1;
+  for (let i = 1; i < values.length; i++) {
+    const rowKey = [cellToKey_(values[i][0]), String(values[i][1]), String(values[i][2])].join('|');
+    if (rowKey === key) { targetRow = i + 1; break; }
+  }
+
+  const rowValues = [
+    payload.date || '',
+    payload.train || '',
+    payload.etape || '',
+    payload.heureTheorique || '',
+    payload.heureReelle || '',
+    payload.ecartMin === '' || payload.ecartMin === undefined ? '' : Number(payload.ecartMin),
+    payload.cause || '',
+    payload.misAJour || new Date().toISOString(),
+  ];
+
+  if (targetRow > -1) {
+    sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+  } else {
+    sheet.appendRow(rowValues);
+  }
+}
+
+function cellToKey_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(value || '');
+}
+
+function getOrCreateJournalSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(JOURNAL_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(JOURNAL_SHEET_NAME);
+    sheet.appendRow(JOURNAL_HEADERS);
+    sheet.setFrozenRows(1);
+    // Colonnes Date/Train/Étape en texte, pour éviter que Sheets ne les
+    // réinterprète (ex : un numéro de train "01234" tronqué en nombre).
+    sheet.getRange('A2:C').setNumberFormat('@');
+  }
+  return sheet;
+}
+
+/**
+ * À exécuter UNE FOIS manuellement depuis l'éditeur Apps Script (menu
+ * déroulant en haut → sélectionner "setupSheets" → ▶ Exécuter) pour créer
+ * l'onglet "Journal" avec ses en-têtes avant le premier envoi depuis l'app.
+ * Sans appel manuel, il se crée de toute façon automatiquement au premier
+ * "logStep" reçu — cette fonction sert juste à vérifier/forcer la création
+ * à l'avance.
+ */
+function setupSheets() {
+  getOrCreateJournalSheet_();
 }
 
 function readScheduleRows_() {
