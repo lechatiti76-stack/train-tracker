@@ -62,6 +62,19 @@ export const DEFAULT_SETTINGS = {
   // SHUTTLE_GROUPS ci-dessous. Forme d'une entrée : { offsetMinutes,
   // imminentMin, stops: [{ label, offsetMin }] }.
   shuttleTimings: {},
+  // Arrivées (trains fret en provenance d'autres sites) ajoutées par
+  // l'utilisateur en plus des 6 destinations intégrées (voir "+ Arrivée").
+  // Même forme que les entrées de ARRIVAL_GROUPS.
+  customArrivalGroups: [],
+  // Réglages par défaut des 6 arrivées intégrées (décalage d'arrivée, seuil
+  // de clignotement, étapes), saisis dans Réglages → "Arrivées". Une
+  // destination absente d'ici garde les valeurs par défaut de
+  // ARRIVAL_GROUPS ci-dessous. Forme d'une entrée : { offsetMinutes,
+  // imminentMin, stops: [{ label, offsetMin }] }. Ne pas confondre avec les
+  // étapes modifiées directement depuis la vignette (au clic), qui ne
+  // valent que pour la journée en cours — voir loadArrivals/saveArrivals
+  // dans storage.js.
+  arrivalTimings: {},
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
@@ -118,6 +131,39 @@ export const SHUTTLE_GROUPS = [
   },
 ];
 
+// Arrivées (trains fret en provenance d'autres sites) : même principe que
+// les navettes internes (SHUTTLE_GROUPS ci-dessus) — une vignette par
+// destination, avec décalage d'arrivée, couleur, et étapes intermédiaires
+// (nom + minutes depuis le départ saisi). `offsetMinutes` par défaut est une
+// estimation générique (3h) à ajuster dans Réglages → Arrivées selon la
+// réalité du terrain pour chaque destination ; les étapes peuvent aussi être
+// modifiées au jour le jour directement depuis la vignette (au clic), sans
+// toucher aux valeurs par défaut ci-dessous. Couleurs choisies et validées
+// (contraste + distinction daltonisme) avec l'outil de validation de
+// palette catégorielle.
+export const ARRIVAL_DEFAULT_IMMINENT_MIN = 10;
+
+export const ARRIVAL_GROUPS = [
+  { id: 'venissieux', label: 'Vénissieux', color: '#1baf7a', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+  { id: 'spco', label: 'Saint-Pierre-des-Corps', color: '#4f46e5', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+  { id: 'bordeaux', label: 'Bordeaux', color: '#be123c', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+  { id: 'vierzon', label: 'Vierzon', color: '#0ea5e9', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+  { id: 'clermont', label: 'Clermont-Ferrand', color: '#ca8a04', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+  { id: 'montoir', label: 'Montoir', color: '#0891b2', offsetMinutes: 180, imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN, stops: [] },
+];
+
+// Couleurs de cadre des trains à accès rapide, par opérateur (voir
+// quickTrainOperatorColor dans app.js) — calculées dynamiquement à partir du
+// champ `operator` de chaque train (voir DEFAULT_SETTINGS.quickTrains
+// ci-dessus), donc aucune migration de données n'est nécessaire : ça
+// s'applique automatiquement à tout train dont l'opérateur correspond,
+// existant ou ajouté ensuite dans Réglages. Couleurs validées (contraste +
+// distinction daltonisme).
+export const QUICK_TRAIN_OPERATOR_COLORS = {
+  NAVILAND: '#7c3aed',
+  FERROVERGNE: '#ea580c',
+};
+
 // Seuils (en minutes) utilisés pour la sévérité visuelle des écarts.
 export const DELAY_THRESHOLDS = {
   onTime: 1, // |écart| < 1 min => "à l'heure"
@@ -129,4 +175,5 @@ export const STORAGE_KEYS = {
   trains: 'traintrack:trains:v1',
   settings: 'traintrack:settings:v1',
   shuttles: 'traintrack:shuttles:v1',
+  arrivals: 'traintrack:arrivals:v1',
 };
