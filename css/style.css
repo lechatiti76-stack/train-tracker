@@ -347,6 +347,117 @@ body {
 .shuttle-stop-form-row .fShuttleStopMin { width: 80px; flex: 0 0 auto; }
 input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
 
+/* ---------- Arrivées (trains fret en provenance d'autres sites) ---------- */
+/* Même structure visuelle que les navettes internes (.shuttle-chip
+   ci-dessus) — réutilise volontairement .shuttle-times/.shuttle-state-label/
+   .shuttle-delay-flag/.shuttle-quick-actions/.shuttle-arrival-preview pour
+   ne pas dupliquer ces styles déjà validés. Seul le cadre coloré (une
+   couleur fixe par destination plutôt qu'un état de progression) et le
+   mini-rail animé sont propres aux arrivées. */
+.arrivals-bar { max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
+.arrivals-bar-inner { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.arrival-chip {
+  --arrival-color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  background: var(--surface);
+  border: 2px solid var(--arrival-color);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.85rem;
+  min-height: 44px;
+  min-width: 190px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.arrival-chip:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arrival-color) 20%, transparent); }
+.arrival-chip:active { transform: scale(0.97); }
+.arrival-label { font-weight: 800; font-size: 0.85rem; color: var(--arrival-color); letter-spacing: 0.01em; }
+
+.arrival-chip.state-imminent {
+  border-color: #ef4444;
+  animation: shuttleBlink 1s step-start infinite;
+}
+.arrival-chip.state-imminent .shuttle-state-label { color: #ef4444; }
+@media (prefers-reduced-motion: reduce) {
+  .arrival-chip.state-imminent { animation: none; box-shadow: 0 0 10px 2px rgba(239, 68, 68, 0.55); }
+}
+.arrival-chip.state-arrived {
+  border-color: var(--border);
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.arrival-chip.state-arrived .arrival-label { color: var(--text-faint); }
+.arrival-chip.has-delay { box-shadow: 0 0 0 2px #b91c1c inset; }
+
+/* Mini-rail animé : ligne fine, repères d'étapes, icône du train qui avance
+   en continu (transition CSS lissée entre deux mises à jour par seconde —
+   voir updateArrivalStates dans app.js, qui ne touche que `left` et ne
+   redessine jamais tout le rail pour ne pas casser l'animation). */
+.arrival-track { position: relative; width: 100%; height: 34px; margin: 0.15rem 0; }
+.arrival-track-line {
+  position: absolute;
+  left: 0; right: 0; top: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--arrival-color) 30%, var(--border));
+}
+.arrival-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+.arrival-tick-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  margin-top: 14px;
+}
+.arrival-tick.reached .arrival-tick-dot { background: var(--arrival-color); border-color: var(--arrival-color); }
+.arrival-tick-time {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-faint);
+  white-space: nowrap;
+  order: -1;
+}
+.arrival-tick.reached .arrival-tick-time { color: var(--arrival-color); }
+.arrival-track-icon {
+  position: absolute;
+  top: -3px;
+  transform: translateX(-50%);
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: left 1s linear;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+.arrival-track-icon.chugging { animation: trainChug 0.5s ease-in-out infinite; }
+@keyframes trainChug {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(-2deg); }
+  50% { transform: translateX(-50%) translateY(-2px) rotate(2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrival-track-icon { transition: none; }
+  .arrival-track-icon.chugging { animation: none; }
+}
+
+/* ---------- Chip "+ Ajouter une arrivée" ---------- */
+.arrival-chip.arrival-chip-add {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-style: dashed;
+  font-weight: 700;
+}
+
 /* ---------- Trains à accès rapide ---------- */
 .quick-trains-bar { max-width: 1900px; margin: 0.6rem auto 0; padding: 0 1.25rem; }
 .quick-trains-bar-inner { display: flex; flex-wrap: wrap; gap: 0.5rem; }
@@ -402,6 +513,7 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .card-handle { display: inline-flex; } }
 .card-title { font-size: 1.05rem; font-weight: 800; letter-spacing: 0.02em; flex: 1; }
 .card-title span { color: var(--accent); }
+.card-title .card-destination { color: var(--text-muted); font-weight: 600; font-size: 0.85em; letter-spacing: 0; }
 .source-badge {
   font-size: 0.68rem;
   font-weight: 700;
@@ -759,6 +871,11 @@ body.modal-open { overflow: hidden; }
 .quick-train-number { font-family: var(--font-mono); font-weight: 800; }
 .quick-train-form-row { display: flex; gap: 0.5rem; align-items: center; }
 .quick-train-form-row input { flex: 1 1 0; min-width: 0; }
+
+/* Encadrement par opérateur (NAVILAND = violet, FERROVERGNE = orange) —
+   placé après .btn-outline/.btn-primary pour l'emporter à spécificité égale. */
+.quick-train-btn.has-operator-color { border: 2px solid var(--quick-train-color); }
+.quick-train-btn.has-operator-color.btn-primary { background: var(--quick-train-color); border-color: var(--quick-train-color); }
 
 /* ---------- Réglages des navettes (Réglages → Navettes) ---------- */
 .shuttle-timing-fieldset {
