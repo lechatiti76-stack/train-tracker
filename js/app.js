@@ -2032,6 +2032,45 @@ function wireHeaderButtons() {
   el('btnSyncHeader').addEventListener('click', () => syncWithSheet());
 }
 
+// Une PWA installée peut rester "suspendue" en arrière-plan pendant des
+// heures (Android met la page en pause plutôt que de la fermer) : à la
+// réouverture, le navigateur redonne parfois la main à cette PAGE FIGÉE
+// telle qu'elle était (au lieu d'en recharger une neuve), avec en mémoire
+// un `trains`/`settings` périmé — par exemple vide, si l'app avait été
+// ouverte avant même le premier train du jour. Résultat : "Aucun train"
+// alors que des trains existent bel et bien dans le stockage local, jusqu'à
+// ce qu'une action quelconque (comme ouvrir Réglages) déclenche un nouveau
+// rendu. On se protège de ça en relisant tout depuis le stockage et en
+// redessinant dès que l'app redevient visible/active — sans toucher à une
+// modale déjà ouverte (édition en cours).
+function refreshFromStorage() {
+  if (document.body.classList.contains('modal-open')) return;
+  settings = loadSettings();
+  trains = loadTrains();
+  shuttles = loadShuttles();
+  arrivals = loadArrivals();
+  currentDate = todayISO();
+  applyTheme();
+  updateDateLabel();
+  renderGrid();
+  renderShuttlesBar();
+  renderArrivalsBar();
+  setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');
+  if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
+}
+
+function wireVisibilityRefresh() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshFromStorage();
+  });
+  // bfcache (retour arrière/avant du navigateur) : la page peut être
+  // restaurée telle quelle, sans ré-exécuter ce script, avec le même risque
+  // de données périmées.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) refreshFromStorage();
+  });
+}
+
 function init() {
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -2063,6 +2102,7 @@ function init() {
   wireQuickTrainsBar();
   wireInstallPrompt();
   registerServiceWorker();
+  wireVisibilityRefresh();
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');
 
   if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
