@@ -120,6 +120,29 @@ export function saveShuttles(shuttles) {
   }
 }
 
+// Arrivées (trains fret en provenance d'autres sites) : même remise à zéro
+// quotidienne automatique que les navettes ci-dessus, et pour la même
+// raison (un départ saisi hier n'a plus de sens aujourd'hui) — voir
+// loadShuttles/saveShuttles.
+export function loadArrivals() {
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.arrivals), {});
+  if (raw && typeof raw === 'object' && 'date' in raw && 'data' in raw) {
+    if (raw.date !== todayISO()) return {};
+    return raw.data && typeof raw.data === 'object' ? raw.data : {};
+  }
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+export function saveArrivals(arrivals) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.arrivals, JSON.stringify({ date: todayISO(), data: arrivals }));
+    return true;
+  } catch (err) {
+    console.error('Impossible d\'enregistrer les arrivées.', err);
+    return false;
+  }
+}
+
 function uuid() {
   if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
