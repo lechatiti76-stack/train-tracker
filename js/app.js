@@ -3,8 +3,8 @@
 // DOM (delay-calc, time-utils, storage, sheets-sync) ni à l'état global
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
-import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles } from './storage.js';
+import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadArrivals, saveArrivals } from './storage.js';
 import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM } from './time-utils.js';
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet } from './sheets-sync.js';
@@ -17,6 +17,7 @@ let settings = loadSettings();
 let trains = loadTrains();
 let currentDate = todayISO();
 let shuttles = loadShuttles();
+let arrivals = loadArrivals();
 
 const chartsByTrainId = new Map();
 const flapsByTrainId = new Map();
@@ -94,9 +95,25 @@ function renderGrid() {
     return;
   }
 
-  grid.innerHTML = todays.map((t) => trainCardTemplate(t, { readOnly: false })).join('');
+  grid.innerHTML = todays.map((t) => trainCardTemplate(t, { readOnly: false, destination: getQuickTrainDestination(t.number) })).join('');
   for (const train of todays) mountCardExtras(train);
   renderQuickTrainsBar();
+}
+
+// Destination affichée à côté du numéro sur la vignette (ex : "TRAIN 50238 —
+// à destination de Vénissieux"), reprise des trains à accès rapide déjà
+// configurés dans Réglages (settings.quickTrains) — pas de nouveau champ à
+// saisir, juste une lecture par numéro de train.
+function getQuickTrainDestination(number) {
+  const found = (settings.quickTrains || []).find((t) => t.number === number);
+  return found?.destination || null;
+}
+
+// Couleur de cadre par opérateur (NAVILAND = violet, FERROVERGNE = orange),
+// calculée dynamiquement à partir du champ `operator` — voir
+// QUICK_TRAIN_OPERATOR_COLORS dans config.js.
+function quickTrainOperatorColor(operator) {
+  return QUICK_TRAIN_OPERATOR_COLORS[(operator || '').trim().toUpperCase()] || null;
 }
 
 // ---------- Trains à accès rapide (circule / ne circule pas aujourd'hui) ----------
@@ -108,8 +125,9 @@ function renderQuickTrainsBar() {
   container.innerHTML = quickTrains.map(({ number, operator, destination }) => {
     const exists = trains.some((t) => t.date === currentDate && t.number === number);
     const meta = [operator, destination].filter(Boolean).join(' · ');
+    const color = quickTrainOperatorColor(operator);
     return `
-      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}" data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
+      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}${color ? ' has-operator-color' : ''}" ${color ? `style="--quick-train-color:${color}"` : ''} data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
         ${meta ? `<span class="quick-train-meta">${escapeHtml(meta)}</span>` : ''}
         <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}</span>
       </button>`;
@@ -661,6 +679,42 @@ function shuttleTimingSectionHTML(group) {
     </fieldset>`;
 }
 
+function addArrivalTimingStopRowInto(container, label = '', minutes = '') {
+  const row = document.createElement('div');
+  row.className = 'shuttle-stop-form-row';
+  row.innerHTML = `
+    <input type="text" class="fArrivalTimingStopLabel" placeholder="ex : Passage frontière" value="${escapeHtml(label)}">
+    <input type="number" class="fArrivalTimingStopMin" placeholder="min" min="0" value="${escapeHtml(String(minutes))}">
+    <button type="button" class="icon-btn" data-action="remove-arrival-timing-stop" aria-label="Retirer cette étape">✕</button>`;
+  container.appendChild(row);
+}
+
+function arrivalTimingSectionHTML(group) {
+  const stops = group.stops || [];
+  return `
+    <fieldset class="shuttle-timing-fieldset" data-arrival-family="${escapeHtml(group.id)}" style="border-color:${escapeHtml(group.color)}">
+      <legend style="color:${escapeHtml(group.color)}">${escapeHtml(group.label)}</legend>
+      <div class="form-row">
+        <label>Arrivée = départ + (min)
+          <input type="number" class="sArrivalOffset" min="0" value="${group.offsetMinutes}">
+        </label>
+        <label>Seuil de clignotement (min avant arrivée)
+          <input type="number" class="sArrivalImminent" min="0" value="${group.imminentMin ?? ARRIVAL_DEFAULT_IMMINENT_MIN}">
+        </label>
+      </div>
+      <p class="help-text">Étapes par défaut (nom + minutes depuis le départ) :</p>
+      <div class="shuttle-timing-stops" data-role="arrival-timing-stops">
+        ${stops.map((s) => `
+          <div class="shuttle-stop-form-row">
+            <input type="text" class="fArrivalTimingStopLabel" placeholder="ex : Passage frontière" value="${escapeHtml(s.label)}">
+            <input type="number" class="fArrivalTimingStopMin" placeholder="min" min="0" value="${escapeHtml(String(s.offsetMin))}">
+            <button type="button" class="icon-btn" data-action="remove-arrival-timing-stop" aria-label="Retirer cette étape">✕</button>
+          </div>`).join('')}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="add-arrival-timing-stop">+ Ajouter une étape</button>
+    </fieldset>`;
+}
+
 function syncInfoText() {
   if (!settings.lastSyncAt) return 'Aucune synchronisation effectuée pour le moment.';
   const date = new Date(settings.lastSyncAt);
@@ -725,6 +779,30 @@ function settingsBodyHTML() {
         </div>` : ''}
 
       <div class="steps-form-list">
+        <p class="help-text">
+          Arrivées (trains fret en provenance d'autres sites) — réglages par
+          défaut par destination. "Arrivée = départ + (min)" et les étapes
+          ci-dessous sont les valeurs de départ ; elles restent modifiables
+          au jour le jour directement depuis chaque vignette (au clic), sans
+          toucher aux valeurs par défaut définies ici.
+        </p>
+        ${getAllArrivalGroups().filter((g) => !g.id.startsWith('custom-arrival-')).map((g) => arrivalTimingSectionHTML(g)).join('')}
+      </div>
+
+      ${(settings.customArrivalGroups || []).length ? `
+        <div class="steps-form-list">
+          <p class="help-text">Arrivées ajoutées manuellement (via "+ Arrivée") :</p>
+          ${settings.customArrivalGroups.map((g) => `
+            <div class="date-row-extra">
+              <span style="flex:1 1 auto;">
+                <strong style="color:${escapeHtml(g.color)}">${escapeHtml(g.label || '')}</strong>
+                (arrivée à + ${g.offsetMinutes} min)
+              </span>
+              <button type="button" class="icon-btn" data-action="remove-custom-arrival" data-id="${escapeHtml(g.id)}" aria-label="Supprimer cette arrivée">✕</button>
+            </div>`).join('')}
+        </div>` : ''}
+
+      <div class="steps-form-list">
         <p class="help-text">Trains à accès rapide — un bouton apparaît pour chacun sous les navettes : cliquez pour indiquer qu'il circule aujourd'hui (ajoute sa vignette) ou qu'il ne circule pas (la retire). Opérateur et destination sont affichés au-dessus du numéro.</p>
         <div id="sQuickTrainsContainer" class="extra-dates"></div>
         <button type="button" class="btn btn-ghost btn-sm" id="btnAddQuickTrainRow">+ Ajouter un train à accès rapide</button>
@@ -778,6 +856,18 @@ function openSettingsModal() {
           showToast('Navette supprimée');
         });
       });
+      panel.querySelectorAll('[data-action="remove-custom-arrival"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const group = (settings.customArrivalGroups || []).find((g) => g.id === btn.dataset.id);
+          if (!group) return;
+          if (!confirm(`Supprimer l'arrivée "${group.label}" ?`)) return;
+          settings.customArrivalGroups = settings.customArrivalGroups.filter((g) => g.id !== group.id);
+          saveSettings(settings);
+          renderArrivalsBar();
+          btn.closest('.date-row-extra').remove();
+          showToast('Arrivée supprimée');
+        });
+      });
       panel.querySelector('#btnResetSillonOffsets').addEventListener('click', () => {
         if (!confirm('Réinitialiser les décalages du sillon aux valeurs par défaut de l\'application ?')) return;
         sortedByIndex([...panel.querySelectorAll('.sSillonOffset')]).forEach((input, i) => {
@@ -801,9 +891,17 @@ function openSettingsModal() {
         const addBtn = fieldset.querySelector('[data-action="add-shuttle-timing-stop"]');
         addBtn.addEventListener('click', () => addShuttleTimingStopRowInto(stopsContainer));
       });
+      // ---- Arrivées : étapes par défaut (ajout/suppression de lignes) ----
+      panel.querySelectorAll('[data-role="arrival-timing-stops"]').forEach((stopsContainer) => {
+        const fieldset = stopsContainer.closest('.shuttle-timing-fieldset');
+        const addBtn = fieldset.querySelector('[data-action="add-arrival-timing-stop"]');
+        addBtn.addEventListener('click', () => addArrivalTimingStopRowInto(stopsContainer));
+      });
       panel.addEventListener('click', (e) => {
         const removeStopBtn = e.target.closest('[data-action="remove-shuttle-timing-stop"]');
         if (removeStopBtn) { removeStopBtn.closest('.shuttle-stop-form-row').remove(); return; }
+        const removeArrivalStopBtn = e.target.closest('[data-action="remove-arrival-timing-stop"]');
+        if (removeArrivalStopBtn) { removeArrivalStopBtn.closest('.shuttle-stop-form-row').remove(); return; }
         const removeExtraCodeBtn = e.target.closest('[data-action="remove-shuttle-extra-code"]');
         if (removeExtraCodeBtn) {
           const { family, code } = removeExtraCodeBtn.dataset;
@@ -832,7 +930,7 @@ function openSettingsModal() {
         settings.quickTrainsEnrichedV2 = true;
 
         const shuttleTimings = { ...(settings.shuttleTimings || {}) };
-        panel.querySelectorAll('.shuttle-timing-fieldset').forEach((fieldset) => {
+        panel.querySelectorAll('[data-shuttle-family]').forEach((fieldset) => {
           const familyId = fieldset.dataset.shuttleFamily;
           const offsetMinutes = Number(fieldset.querySelector('.sShuttleOffset').value) || 0;
           const imminentMin = Number(fieldset.querySelector('.sShuttleImminent').value) || 0;
@@ -847,11 +945,28 @@ function openSettingsModal() {
         });
         settings.shuttleTimings = shuttleTimings;
 
+        const arrivalTimings = { ...(settings.arrivalTimings || {}) };
+        panel.querySelectorAll('[data-arrival-family]').forEach((fieldset) => {
+          const familyId = fieldset.dataset.arrivalFamily;
+          const offsetMinutes = Number(fieldset.querySelector('.sArrivalOffset').value) || 0;
+          const imminentMin = Number(fieldset.querySelector('.sArrivalImminent').value) || 0;
+          const stops = [...fieldset.querySelectorAll('.shuttle-stop-form-row')]
+            .map((row) => ({
+              label: row.querySelector('.fArrivalTimingStopLabel').value.trim(),
+              offsetMin: Number(row.querySelector('.fArrivalTimingStopMin').value) || 0,
+            }))
+            .filter((s) => s.label)
+            .sort((a, b) => a.offsetMin - b.offsetMin);
+          arrivalTimings[familyId] = { offsetMinutes, imminentMin, stops };
+        });
+        settings.arrivalTimings = arrivalTimings;
+
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
         renderQuickTrainsBar();
         renderShuttlesBar();
+        renderArrivalsBar();
         closeModal();
         showToast('Réglages enregistrés');
       });
@@ -1041,6 +1156,13 @@ function startClock() {
       shuttles = {};
       saveShuttles(shuttles);
       renderShuttlesBar();
+      // Idem pour les arrivées : les étapes modifiées la veille depuis une
+      // vignette ne valent que pour la journée en cours (voir
+      // getArrivalEffectiveConfig) ; les valeurs par défaut de Réglages
+      // restent, elles, inchangées.
+      arrivals = {};
+      saveArrivals(arrivals);
+      renderArrivalsBar();
       if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
     }
   };
@@ -1502,6 +1624,407 @@ function wireShuttlesBar() {
   setInterval(updateShuttleStates, 15000);
 }
 
+// ---------- Arrivées (trains fret en provenance d'autres sites) ----------
+// Même principe que les navettes internes ci-dessus (getAllShuttleGroups…),
+// avec une différence : les étapes peuvent être modifiées directement
+// depuis la vignette (au clic), pour la journée en cours uniquement — voir
+// getArrivalEffectiveConfig, qui donne priorité aux étapes du jour
+// (arrivals[id].stops) sur les valeurs par défaut de Réglages
+// (settings.arrivalTimings) elles-mêmes prioritaires sur ARRIVAL_GROUPS.
+function getAllArrivalGroups() {
+  const builtIn = ARRIVAL_GROUPS.map((group) => {
+    const override = settings.arrivalTimings?.[group.id];
+    return {
+      ...group,
+      offsetMinutes: override?.offsetMinutes ?? group.offsetMinutes,
+      imminentMin: override?.imminentMin ?? group.imminentMin ?? ARRIVAL_DEFAULT_IMMINENT_MIN,
+      stops: override?.stops?.length ? override.stops : group.stops,
+    };
+  });
+  return [...builtIn, ...(settings.customArrivalGroups || [])];
+}
+
+function findArrivalGroup(id) {
+  return getAllArrivalGroups().find((g) => g.id === id);
+}
+
+// Configuration "effective" du jour : les étapes modifiées depuis la
+// vignette (arrivals[id].stops) remplacent celles de Réglages pour la
+// journée en cours seulement (remis à zéro automatiquement le lendemain,
+// voir startClock) ; la dernière étape de la liste définit l'heure
+// d'arrivée estimée (offsetMinutes), exactement comme pour l'ajout d'une
+// navette personnalisée.
+function getArrivalEffectiveConfig(id) {
+  const group = findArrivalGroup(id);
+  if (!group) return null;
+  const todayStops = arrivals[id]?.stops;
+  const stops = (todayStops && todayStops.length ? [...todayStops] : [...(group.stops || [])]).sort((a, b) => a.offsetMin - b.offsetMin);
+  const offsetMinutes = stops.length ? stops[stops.length - 1].offsetMin : group.offsetMinutes;
+  return { ...group, stops, offsetMinutes };
+}
+
+function computeArrivalETA(id, departureHHMM) {
+  const group = getArrivalEffectiveConfig(id);
+  const parsed = parseHHMM(departureHHMM);
+  if (!group || !parsed) return null;
+  const base = new Date(2000, 0, 1, parsed.h, parsed.m, 0, 0);
+  return formatHHMM(new Date(base.getTime() + group.offsetMinutes * 60000));
+}
+
+function arrivalHasDelayFlag(id) {
+  return Boolean(arrivals[id]?.delayFlag);
+}
+
+// Progression calculée à partir du temps écoulé depuis le départ saisi,
+// exactement comme computeShuttleProgress ci-dessus (mêmes états : vide ->
+// en approche -> imminente -> arrivée), avec en plus le pourcentage `pct`
+// et les étapes avec leur position `pct` le long du rail, utilisés par
+// arrivalTrackHTML pour dessiner et faire avancer l'icône du train.
+function computeArrivalProgress(id) {
+  const group = getArrivalEffectiveConfig(id);
+  if (!group) return { state: 'empty', label: '', pct: 0, stops: [] };
+  const totalMin = group.offsetMinutes || 1;
+  const baseStops = group.stops.map((s) => ({ ...s, pct: Math.max(0, Math.min(100, (s.offsetMin / totalMin) * 100)) }));
+
+  if (arrivals[id]?.arrivedManually) {
+    return { state: 'arrived', label: 'Arrivée effectuée', pct: 100, stops: baseStops.map((s) => ({ ...s, reached: true, time: null })) };
+  }
+
+  const departure = arrivals[id]?.departure;
+  if (!departure) return { state: 'empty', label: '', pct: 0, stops: baseStops.map((s) => ({ ...s, reached: false, time: null })) };
+  const parsedDeparture = parseHHMM(departure);
+  if (!parsedDeparture) return { state: 'empty', label: '', pct: 0, stops: baseStops.map((s) => ({ ...s, reached: false, time: null })) };
+
+  const now = new Date();
+  const departureDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedDeparture.h, parsedDeparture.m, 0, 0);
+  const elapsedMin = (now.getTime() - departureDate.getTime()) / 60000;
+  const imminentMin = group.imminentMin ?? ARRIVAL_DEFAULT_IMMINENT_MIN;
+  const pct = Math.max(0, Math.min(100, (elapsedMin / totalMin) * 100));
+  const stops = baseStops.map((s) => ({
+    ...s,
+    reached: elapsedMin >= s.offsetMin,
+    time: formatHHMM(new Date(departureDate.getTime() + s.offsetMin * 60000)),
+  }));
+
+  if (elapsedMin >= totalMin) return { state: 'arrived', label: 'Arrivée effectuée', pct: 100, stops };
+  if (elapsedMin >= totalMin - imminentMin) return { state: 'imminent', label: '⚠ Arrivée imminente', pct, stops };
+  if (elapsedMin < 0) return { state: 'scheduled', label: '', pct: 0, stops };
+  return { state: 'enroute', label: 'En approche', pct, stops };
+}
+
+// Mini-rail animé : ligne, repères d'étape (révélant l'heure de passage une
+// fois atteints) et icône du train fret positionnée en pourcentage le long
+// du trajet — voir .arrival-track dans style.css pour l'animation (transition
+// CSS sur `left`, plus un léger "dandinement" tant que la navette est en
+// approche).
+function arrivalTrackHTML(progress) {
+  return `
+    <div class="arrival-track">
+      <div class="arrival-track-line"></div>
+      ${progress.stops.map((s) => `
+        <div class="arrival-tick${s.reached ? ' reached' : ''}" style="left:${s.pct}%" title="${escapeHtml(s.label)}">
+          <span class="arrival-tick-dot"></span>
+          <span class="arrival-tick-time">${s.reached && s.time ? escapeHtml(s.time) : ''}</span>
+        </div>`).join('')}
+      <div class="arrival-track-icon${progress.state === 'enroute' ? ' chugging' : ''}" style="left:${progress.pct}%" aria-hidden="true">🚆</div>
+    </div>`;
+}
+
+function arrivalChipInnerHTML(id) {
+  const group = findArrivalGroup(id);
+  const departure = arrivals[id]?.departure;
+  const eta = departure ? computeArrivalETA(id, departure) : null;
+  const progress = computeArrivalProgress(id);
+  const delayFlag = arrivalHasDelayFlag(id);
+  return `
+    <span class="arrival-label">${escapeHtml(group.label)}</span>
+    ${departure
+      ? `<span class="shuttle-times">Dép ${departure} → Arr ${eta}</span>`
+      : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
+    ${arrivalTrackHTML(progress)}
+    ${progress.label ? `<span class="shuttle-state-label" data-role="arrival-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="arrival-state-label" hidden></span>'}
+    <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
+}
+
+function arrivalChipClass(id) {
+  return `arrival-chip state-${computeArrivalProgress(id).state}${arrivalHasDelayFlag(id) ? ' has-delay' : ''}`;
+}
+
+function renderArrivalsBar() {
+  const container = el('arrivalsBar');
+  if (!container) return;
+  const chips = getAllArrivalGroups().map((group) => `
+    <button type="button" class="${arrivalChipClass(group.id)}" style="--arrival-color:${group.color}" data-arrival-id="${escapeHtml(group.id)}" title="${escapeHtml(group.label)}">
+      ${arrivalChipInnerHTML(group.id)}
+    </button>`).join('');
+  container.innerHTML = `${chips}
+    <button type="button" class="arrival-chip arrival-chip-add" id="btnAddArrival">+ Arrivée</button>`;
+}
+
+// Rafraîchissement toutes les secondes, ciblé (jamais de ré-écriture
+// complète du innerHTML) : c'est ce qui permet à l'icône du train d'avancer
+// en continu grâce à la transition CSS sur `left` (voir .arrival-track-icon
+// dans style.css) plutôt que de "sauter" à chaque mise à jour.
+function updateArrivalStates() {
+  const container = el('arrivalsBar');
+  if (!container) return;
+  container.querySelectorAll('[data-arrival-id]').forEach((chip) => {
+    const id = chip.dataset.arrivalId;
+    const progress = computeArrivalProgress(id);
+    const wantClass = arrivalChipClass(id);
+    if (chip.className !== wantClass) chip.className = wantClass;
+
+    const labelEl = chip.querySelector('[data-role="arrival-state-label"]');
+    if (labelEl && labelEl.textContent !== progress.label) {
+      labelEl.textContent = progress.label || '';
+      labelEl.hidden = !progress.label;
+    }
+    const delayEl = chip.querySelector('[data-role="arrival-delay-flag"]');
+    if (delayEl) delayEl.hidden = !arrivalHasDelayFlag(id);
+
+    const icon = chip.querySelector('.arrival-track-icon');
+    if (icon) {
+      icon.style.left = `${progress.pct}%`;
+      icon.classList.toggle('chugging', progress.state === 'enroute');
+    }
+    const ticks = chip.querySelectorAll('.arrival-tick');
+    progress.stops.forEach((s, i) => {
+      const tickEl = ticks[i];
+      if (!tickEl || tickEl.classList.contains('reached') === Boolean(s.reached)) return;
+      tickEl.classList.toggle('reached', Boolean(s.reached));
+      const timeEl = tickEl.querySelector('.arrival-tick-time');
+      if (timeEl) timeEl.textContent = s.reached && s.time ? s.time : '';
+    });
+  });
+}
+
+function arrivalQuickStatusText(arrivedManually, delayFlag) {
+  if (arrivedManually && delayFlag) return 'Marquée arrivée manuellement, avec un retard signalé.';
+  if (arrivedManually) return 'Marquée arrivée manuellement (remplace le calcul automatique).';
+  if (delayFlag) return 'Retard / souci signalé — repère visuel ajouté sur la vignette.';
+  return 'Aucune anomalie signalée.';
+}
+
+function addArrivalStopRowInto(container, label = '', minutes = '') {
+  const row = document.createElement('div');
+  row.className = 'shuttle-stop-form-row';
+  row.innerHTML = `
+    <input type="text" class="fArrivalStopLabel" placeholder="ex : Passage frontière" value="${escapeHtml(label)}">
+    <input type="number" class="fArrivalStopMin" placeholder="min" min="0" value="${escapeHtml(String(minutes))}">
+    <button type="button" class="icon-btn" data-action="remove-arrival-stop" aria-label="Retirer cette étape">✕</button>`;
+  container.appendChild(row);
+}
+
+function openArrivalModal(id) {
+  const group = findArrivalGroup(id);
+  if (!group) return;
+  const rec = arrivals[id] || {};
+  const departure = rec.departure || '';
+  const arrivedManually = Boolean(rec.arrivedManually);
+  const delayFlag = Boolean(rec.delayFlag);
+  const effective = getArrivalEffectiveConfig(id);
+  const stopsForForm = effective.stops.length ? effective.stops : [{ label: 'Arrivée', offsetMin: effective.offsetMinutes }];
+
+  openModal({
+    title: `Arrivée — ${escapeHtml(group.label)}`,
+    wide: true,
+    bodyHTML: `
+      <form id="arrivalForm" class="stacked-form">
+        <label>Heure de départ (origine)
+          <div class="sillon-lookup-row">
+            <input type="time" id="fArrivalDeparture" value="${departure}">
+            <button type="button" class="btn btn-outline btn-sm" id="btnArrivalNow">Maintenant</button>
+          </div>
+        </label>
+        <p class="help-text">Heure d'arrivée estimée (dernière étape ci-dessous) :</p>
+        <p class="shuttle-arrival-preview" data-role="arrival-eta-preview">${departure ? computeArrivalETA(id, departure) : '--:--'}</p>
+
+        <p class="help-text">
+          Étapes (nom + minutes écoulées depuis le départ). La dernière
+          étape de la liste définit l'heure d'arrivée estimée — modifiable
+          librement pour ce trajet du jour uniquement (remis aux valeurs
+          par défaut de Réglages le lendemain).
+        </p>
+        <div id="arrivalStopsContainer" class="extra-dates"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnAddArrivalStop">+ Ajouter une étape</button>
+
+        <div class="shuttle-quick-actions">
+          <button type="button" class="btn ${arrivedManually ? 'btn-primary' : 'btn-outline'}" id="btnArrivalArrived" aria-pressed="${arrivedManually}">✓ Arrivée effectuée</button>
+          <button type="button" class="btn ${delayFlag ? 'btn-danger' : 'btn-outline'}" id="btnArrivalDelay" aria-pressed="${delayFlag}">⚠ Retard / souci</button>
+        </div>
+        <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnClearArrival">Effacer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      const stopsContainer = panel.querySelector('#arrivalStopsContainer');
+      stopsForForm.forEach((s) => addArrivalStopRowInto(stopsContainer, s.label, s.offsetMin));
+      panel.querySelector('#btnAddArrivalStop').addEventListener('click', () => addArrivalStopRowInto(stopsContainer));
+      stopsContainer.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-action="remove-arrival-stop"]');
+        if (removeBtn) removeBtn.closest('.shuttle-stop-form-row').remove();
+      });
+
+      const readFormStops = () => [...stopsContainer.querySelectorAll('.shuttle-stop-form-row')]
+        .map((row) => ({
+          label: row.querySelector('.fArrivalStopLabel').value.trim(),
+          offsetMin: Number(row.querySelector('.fArrivalStopMin').value) || 0,
+        }))
+        .filter((s) => s.label)
+        .sort((a, b) => a.offsetMin - b.offsetMin);
+
+      const input = panel.querySelector('#fArrivalDeparture');
+      const preview = panel.querySelector('[data-role="arrival-eta-preview"]');
+      const refreshPreview = () => {
+        if (!input.value) { preview.textContent = '--:--'; return; }
+        const parsed = parseHHMM(input.value);
+        if (!parsed) { preview.textContent = '--:--'; return; }
+        const stops = readFormStops();
+        const lastOffset = stops.length ? stops[stops.length - 1].offsetMin : effective.offsetMinutes;
+        const base = new Date(2000, 0, 1, parsed.h, parsed.m, 0, 0);
+        preview.textContent = formatHHMM(new Date(base.getTime() + lastOffset * 60000));
+      };
+      refreshPreview();
+      input.addEventListener('input', refreshPreview);
+      stopsContainer.addEventListener('input', refreshPreview);
+      stopsContainer.addEventListener('click', refreshPreview);
+      panel.querySelector('#btnArrivalNow').addEventListener('click', () => {
+        input.value = formatHHMM(new Date());
+        refreshPreview();
+      });
+
+      const arrivedBtn = panel.querySelector('#btnArrivalArrived');
+      const delayBtn = panel.querySelector('#btnArrivalDelay');
+      const statusEl = panel.querySelector('[data-role="arrival-quick-status"]');
+      const refreshQuickButtons = () => {
+        const current = arrivals[id] || {};
+        arrivedBtn.classList.toggle('btn-primary', Boolean(current.arrivedManually));
+        arrivedBtn.classList.toggle('btn-outline', !current.arrivedManually);
+        arrivedBtn.setAttribute('aria-pressed', String(Boolean(current.arrivedManually)));
+        delayBtn.classList.toggle('btn-danger', Boolean(current.delayFlag));
+        delayBtn.classList.toggle('btn-outline', !current.delayFlag);
+        delayBtn.setAttribute('aria-pressed', String(Boolean(current.delayFlag)));
+        statusEl.textContent = arrivalQuickStatusText(current.arrivedManually, current.delayFlag);
+      };
+      arrivedBtn.addEventListener('click', () => {
+        const current = arrivals[id] || {};
+        current.arrivedManually = !current.arrivedManually;
+        arrivals[id] = current;
+        saveArrivals(arrivals);
+        renderArrivalsBar();
+        refreshQuickButtons();
+        showToast(current.arrivedManually ? `${group.label} marquée arrivée` : `${group.label} réactivée`);
+      });
+      delayBtn.addEventListener('click', () => {
+        const current = arrivals[id] || {};
+        current.delayFlag = !current.delayFlag;
+        arrivals[id] = current;
+        saveArrivals(arrivals);
+        renderArrivalsBar();
+        refreshQuickButtons();
+        showToast(current.delayFlag ? `Retard signalé sur ${group.label}` : `Retard levé sur ${group.label}`);
+      });
+
+      panel.querySelector('#arrivalForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const current = arrivals[id] || {};
+        current.departure = input.value || null;
+        current.stops = readFormStops();
+        arrivals[id] = current;
+        saveArrivals(arrivals);
+        renderArrivalsBar();
+        closeModal();
+        showToast(`${group.label} mise à jour`);
+      });
+      panel.querySelector('#btnClearArrival').addEventListener('click', () => {
+        arrivals[id] = { departure: null, arrivedManually: false, delayFlag: false, stops: null };
+        saveArrivals(arrivals);
+        renderArrivalsBar();
+        closeModal();
+        showToast(`${group.label} réinitialisée`);
+      });
+    },
+  });
+}
+
+function openAddArrivalModal() {
+  openModal({
+    title: 'Ajouter une arrivée',
+    wide: true,
+    bodyHTML: `
+      <form id="addArrivalForm" class="stacked-form">
+        <div class="form-row">
+          <label>Nom / destination
+            <input type="text" id="fArrivalName" required placeholder="ex : Miramas">
+          </label>
+          <label>Couleur du cadre
+            <input type="color" id="fArrivalColor" value="#64748b">
+          </label>
+        </div>
+        <p class="help-text">
+          Liste des étapes, avec le nombre de minutes écoulées depuis le
+          départ pour chacune. La dernière étape définit l'heure d'arrivée
+          estimée.
+        </p>
+        <div id="newArrivalStopsContainer" class="extra-dates"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnAddNewArrivalStop">+ Ajouter une étape</button>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Ajouter l'arrivée</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      const stopsContainer = panel.querySelector('#newArrivalStopsContainer');
+      addArrivalStopRowInto(stopsContainer);
+      addArrivalStopRowInto(stopsContainer, 'Arrivée', 180);
+      panel.querySelector('#btnAddNewArrivalStop').addEventListener('click', () => addArrivalStopRowInto(stopsContainer));
+      stopsContainer.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-action="remove-arrival-stop"]');
+        if (removeBtn) removeBtn.closest('.shuttle-stop-form-row').remove();
+      });
+      panel.querySelector('#addArrivalForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = panel.querySelector('#fArrivalName').value.trim();
+        const color = panel.querySelector('#fArrivalColor').value;
+        const stops = [...stopsContainer.querySelectorAll('.shuttle-stop-form-row')]
+          .map((row) => ({
+            label: row.querySelector('.fArrivalStopLabel').value.trim(),
+            offsetMin: Number(row.querySelector('.fArrivalStopMin').value) || 0,
+          }))
+          .filter((s) => s.label)
+          .sort((a, b) => a.offsetMin - b.offsetMin);
+        if (stops.length === 0) { showToast("Ajoutez au moins une étape (l'arrivée)", 'error'); return; }
+        const newGroup = {
+          id: 'custom-arrival-' + Date.now().toString(36),
+          label: name || 'Arrivée',
+          color,
+          offsetMinutes: stops[stops.length - 1].offsetMin,
+          imminentMin: ARRIVAL_DEFAULT_IMMINENT_MIN,
+          stops: stops.slice(0, -1),
+        };
+        settings.customArrivalGroups = [...(settings.customArrivalGroups || []), newGroup];
+        saveSettings(settings);
+        renderArrivalsBar();
+        closeModal();
+        showToast(`Arrivée "${newGroup.label}" ajoutée`);
+      });
+    },
+  });
+}
+
+function wireArrivalsBar() {
+  const container = el('arrivalsBar');
+  if (!container) return;
+  container.addEventListener('click', (e) => {
+    if (e.target.closest('#btnAddArrival')) { openAddArrivalModal(); return; }
+    const btn = e.target.closest('[data-arrival-id]');
+    if (btn) openArrivalModal(btn.dataset.arrivalId);
+  });
+  setInterval(updateArrivalStates, 1000);
+}
+
 function wireHeaderButtons() {
   el('btnAddTrain').addEventListener('click', () => openTrainModal(null));
   el('btnSettings').addEventListener('click', openSettingsModal);
@@ -1535,6 +2058,8 @@ function init() {
   initStopwatch(el('stopwatchWidget'));
   renderShuttlesBar();
   wireShuttlesBar();
+  renderArrivalsBar();
+  wireArrivalsBar();
   wireQuickTrainsBar();
   wireInstallPrompt();
   registerServiceWorker();
