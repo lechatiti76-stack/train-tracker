@@ -470,6 +470,87 @@ La liste (numéro, opérateur, destination) est modifiable à tout moment dans
 **⚙ Réglages → Trains à accès rapide** : une ligne par train, avec
 ajout/suppression — pratique si les opérateurs ou destinations changent.
 
+### 8.6. Encadrement par opérateur
+
+Les boutons "Trains à accès rapide" ci-dessus ont un cadre coloré selon
+l'opérateur renseigné dans la ligne (insensible à la casse) :
+
+| Opérateur | Couleur du cadre |
+| --------- | ----------------- |
+| NAVILAND | violet |
+| FERROVERGNE | orange |
+
+C'est calculé automatiquement à partir du champ "Opérateur" — aucune
+configuration séparée n'est nécessaire, et ça s'applique aussi à un
+opérateur ajouté ensuite dans **⚙ Réglages → Trains à accès rapide**. Un
+opérateur différent (ou vide) garde le cadre neutre habituel. Les deux
+couleurs sont définies dans `js/config.js` → `QUICK_TRAIN_OPERATOR_COLORS`
+si vous voulez les changer.
+
+### 8.7. Destination affichée sur la vignette
+
+Le titre de chaque vignette (tableau des 7 étapes + graphique) affiche
+désormais la destination à côté du numéro de train, quand elle est connue —
+par exemple **"TRAIN 50238 — à destination de Vénissieux"**. La destination
+est reprise automatiquement de la liste "Trains à accès rapide" (section
+8.5) par numéro de train : rien à saisir en plus, et une mise à jour de la
+destination dans **⚙ Réglages** se répercute sur toutes les vignettes de ce
+train dès le prochain rafraîchissement de l'affichage.
+
+### 8.8. Arrivées (trains fret en provenance d'autres sites)
+
+Sous les navettes internes (section 8.3), une seconde rangée de vignettes
+suit exactement le même principe pour les **arrivées** de trains fret en
+provenance d'autres sites, avec 6 destinations intégrées :
+
+| Destination | Couleur |
+| ----------- | ------- |
+| Vénissieux | vert |
+| Saint-Pierre-des-Corps | indigo |
+| Bordeaux | rouge cerise |
+| Vierzon | bleu ciel |
+| Clermont-Ferrand | ocre |
+| Montoir | bleu sarcelle |
+
+Cliquez sur une vignette pour ouvrir une fenêtre où saisir **l'heure de
+départ (origine)** — bouton "Maintenant" inclus, comme pour les navettes.
+L'heure d'arrivée estimée se calcule à partir des **étapes** listées
+en-dessous (nom + minutes écoulées depuis le départ) : la **dernière étape
+de la liste définit l'heure d'arrivée**. Contrairement aux navettes internes
+(dont les passages sont réglés uniquement dans Réglages), les étapes d'une
+arrivée sont **modifiables directement depuis la vignette au clic** —
+pratique quand le trajet du jour ne suit pas exactement le trajet habituel.
+Ces modifications ponctuelles ne valent que pour la journée en cours ; le
+lendemain, la vignette repart des étapes par défaut réglées dans **⚙
+Réglages → Arrivées**.
+
+**Mini-rail animé** : chaque vignette affiche un petit rail avec un repère
+par étape (qui révèle son heure de passage une fois atteinte) et une icône
+de train qui avance en continu le long du trajet, calculée à partir du
+temps écoulé depuis le départ saisi — sans avoir à recharger la page
+(rafraîchi chaque seconde).
+
+Comme pour les navettes, une vignette clignote en rouge ("⚠ Arrivée
+imminente") à l'approche de l'heure d'arrivée estimée (réglable par
+destination), passe en grisé "Arrivée effectuée" une fois ce délai écoulé,
+et propose les mêmes actions rapides **✓ Arrivée effectuée** / **⚠ Retard ou
+souci** ainsi qu'un bouton **Effacer**. Toutes les arrivées se **remettent à
+zéro automatiquement chaque jour**, y compris les étapes modifiées
+ponctuellement au clic (les valeurs par défaut de Réglages, elles, restent
+inchangées).
+
+**Réglages par destination** : dans **⚙ Réglages → Arrivées**, chaque
+destination a son propre bloc (décalage d'arrivée par défaut, seuil de
+clignotement, étapes par défaut) — comme pour les familles FL/NL/AL des
+navettes. Le décalage par défaut (3h) est une estimation générique à ajuster
+selon la réalité du terrain pour chaque destination.
+
+**Ajouter une destination supplémentaire** : bouton **"+ Arrivée"** à la fin
+de la rangée — nom, couleur de cadre et étapes (dont la dernière définit
+l'arrivée), exactement comme une navette "Personnalisée". Ces arrivées
+ajoutées se suppriment depuis **⚙ Réglages** (liste "Arrivées ajoutées
+manuellement").
+
 ## 9. Modifier les 7 étapes
 
 - **Pour un train existant** : bouton "Modifier" sur sa vignette → chaque
