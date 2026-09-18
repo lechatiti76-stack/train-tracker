@@ -84,7 +84,7 @@ function summaryRowHTML(train) {
     </div>`;
 }
 
-export function trainCardTemplate(train, { readOnly = false } = {}) {
+export function trainCardTemplate(train, { readOnly = false, destination = null } = {}) {
   const status = computeTrainStatus(train);
   const stepsHTML = train.steps.map((_, i) => stepRowHTML(train, i, readOnly)).join('');
 
@@ -92,7 +92,7 @@ export function trainCardTemplate(train, { readOnly = false } = {}) {
     <article class="train-card" data-train-id="${train.id}" data-readonly="${readOnly}">
       <header class="card-header">
         ${readOnly ? '' : '<button type="button" class="card-handle" draggable="true" data-action="drag-handle" aria-label="Glisser pour réorganiser">⠿</button>'}
-        <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span></h3>
+        <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span>${destination ? `<span class="card-destination" data-role="train-destination"> — à destination de ${escapeHtml(destination)}</span>` : ''}</h3>
         <span class="source-badge" data-role="source-badge" title="Synchronisé depuis Google Sheets" ${train.source === 'sheet' ? '' : 'hidden'}>⇄ Sheet</span>
         <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
       </header>
