@@ -94,14 +94,14 @@ export function initStopwatch(root) {
 
   startBtn.addEventListener('click', () => {
     if (state.status === 'running') return;
-    state = { status: 'running', startedAt: new Date().toISOString(), elapsedMs: state.elapsedMs };
+    state = { status: 'running', startedAt: new Date().toISOString(), elapsedMs: state.elapsedMs, date: todayISO() };
     saveState(state);
     render();
   });
 
   stopBtn.addEventListener('click', () => {
     if (state.status !== 'running') return;
-    state = { status: 'stopped', startedAt: null, elapsedMs: currentElapsedMs(state) };
+    state = { status: 'stopped', startedAt: null, elapsedMs: currentElapsedMs(state), date: todayISO() };
     saveState(state);
     render();
   });
@@ -110,7 +110,7 @@ export function initStopwatch(root) {
     if (state.elapsedMs > 0 || state.status === 'running') {
       if (!confirm('Réinitialiser le chronomètre ?')) return;
     }
-    state = { status: 'idle', startedAt: null, elapsedMs: 0 };
+    state = { status: 'idle', startedAt: null, elapsedMs: 0, date: todayISO() };
     saveState(state);
     render();
   });
