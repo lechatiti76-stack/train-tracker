@@ -91,7 +91,8 @@ function renderGrid() {
       <div class="empty-state">
         <p>Aucun train pour aujourd'hui (${formatDateFR(currentDate)}).</p>
         <button type="button" class="btn btn-primary" data-action="add-train-empty">+ Ajouter un train</button>
-      </div>`;
+          </div>`;
+    renderQuickTrainsBar();
     return;
   }
 
