@@ -1193,10 +1193,34 @@ function wireInstallPrompt() {
   });
 }
 
+// IMPORTANT : sans ce qui suit, une fenêtre déjà ouverte (ou une PWA
+// installée qui n'a jamais été complètement refermée) continue d'exécuter
+// l'ancien code JS en mémoire indéfiniment, même une fois qu'un nouveau
+// Service Worker a fini de s'installer et de prendre le contrôle en
+// arrière-plan (self.skipWaiting() + self.clients.claim() côté
+// service-worker.js) : ça n'a jamais rechargé la page pour de vrai. C'est
+// ce qui explique qu'un correctif déployé ne "prenne" parfois qu'après
+// plusieurs fermetures/réouvertures complètes de l'app, voire jamais tant
+// que l'utilisateur ne vide pas le cache à la main. On répare ça une fois
+// pour toutes : dès que le nouveau Service Worker prend la main
+// (« controllerchange »), on recharge automatiquement la page — sauf si une
+// saisie est en cours dans une modale, pour ne pas la couper en plein
+// milieu (le rechargement se fera de toute façon au prochain changement de
+// visibilité, via refreshFromStorage()/wireVisibilityRefresh()).
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch((err) => console.warn('Service worker non enregistré', err));
+    navigator.serviceWorker.register('./service-worker.js')
+      .then((reg) => reg.update().catch(() => {}))
+      .catch((err) => console.warn('Service worker non enregistré', err));
+  });
+
+  let reloadedForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadedForUpdate) return;
+    if (document.body.classList.contains('modal-open')) return;
+    reloadedForUpdate = true;
+    window.location.reload();
   });
 }
 
