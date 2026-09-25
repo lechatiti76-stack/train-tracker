@@ -10,7 +10,7 @@ import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, par
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
-import { trainCardTemplate, updateCardDynamicParts, escapeHtml } from './card.js';
+import { trainCardTemplate, updateCardDynamicParts, escapeHtml, formatCompositionSummary } from './card.js';
 import { initStopwatch } from './stopwatch.js';
 
 let settings = loadSettings();
@@ -270,6 +270,66 @@ function openStepTimeEditor(train, stepIndex) {
   });
 }
 
+// ---------- Composition du train (wagons / poids / longueur / traction) ----------
+function openCompositionModal(train) {
+  const comp = train.composition || {};
+  openModal({
+    title: `Composition — Train ${escapeHtml(train.number)}`,
+    bodyHTML: `
+      <form id="compositionForm" class="stacked-form">
+        <label>Nombre de wagons
+          <input type="number" id="fCompWagons" min="0" step="1" value="${comp.wagons ?? ''}" placeholder="ex : 18">
+        </label>
+        <label>Poids (tonnes)
+          <input type="number" id="fCompWeight" min="0" step="0.1" value="${comp.weightTons ?? ''}" placeholder="ex : 950">
+        </label>
+        <label>Longueur (mètres)
+          <input type="number" id="fCompLength" min="0" step="1" value="${comp.lengthM ?? ''}" placeholder="ex : 420">
+        </label>
+        <label>Traction
+          <select id="fCompTraction">
+            <option value="" ${!comp.traction ? 'selected' : ''}>—</option>
+            <option value="electrique" ${comp.traction === 'electrique' ? 'selected' : ''}>Électrique</option>
+            <option value="thermique" ${comp.traction === 'thermique' ? 'selected' : ''}>Thermique</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnClearComposition">Effacer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      panel.querySelector('#compositionForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const wagons = panel.querySelector('#fCompWagons').value.trim();
+        const weightTons = panel.querySelector('#fCompWeight').value.trim();
+        const lengthM = panel.querySelector('#fCompLength').value.trim();
+        const traction = panel.querySelector('#fCompTraction').value;
+        const hasAny = wagons || weightTons || lengthM || traction;
+        train.composition = hasAny ? {
+          wagons: wagons ? Number(wagons) : null,
+          weightTons: weightTons ? Number(weightTons) : null,
+          lengthM: lengthM ? Number(lengthM) : null,
+          traction: traction || null,
+        } : null;
+        train.updatedAt = new Date().toISOString();
+        persist();
+        closeModal();
+        refreshTrainCard(train);
+        showToast('Composition enregistrée');
+      });
+      panel.querySelector('#btnClearComposition').addEventListener('click', () => {
+        train.composition = null;
+        train.updatedAt = new Date().toISOString();
+        persist();
+        closeModal();
+        refreshTrainCard(train);
+        showToast('Composition effacée');
+      });
+    },
+  });
+}
+
 function deleteTrain(train) {
   if (!confirm(`Supprimer définitivement le train ${train.number} ?`)) return;
   trains = trains.filter((t) => t.id !== train.id);
@@ -296,7 +356,16 @@ function buildTrainReportText(train) {
   const delays = computeAllStepDelays(train);
   const status = computeTrainStatus(train);
   const cause = computeMainCause(train);
-  const lines = [`TRAIN ${train.number}`, `Date : ${formatDateFR(train.date)}`, ''];
+  const lines = [`🚆 TRAIN ${train.number}`, `📅 Date : ${formatDateFR(train.date)}`, ''];
+
+  // Composition (wagons/poids/longueur/traction) : reprise dans le mail et
+  // la copie uniquement si elle a été renseignée (bouton "Composition" sur
+  // la vignette) — voir openCompositionModal.
+  const compositionSummary = formatCompositionSummary(train.composition);
+  if (compositionSummary) {
+    lines.push(`🚃 Composition : ${compositionSummary}`);
+    lines.push('');
+  }
 
   train.steps.forEach((step, i) => {
     const d = delays[i];
@@ -377,7 +446,8 @@ function onGridClick(e) {
       applySillonQuickFill(train, input?.value);
       break;
     }
-    default: break;
+      case 'open-composition': openCompositionModal(train); break;
+      default: break;
   }
 }
 
