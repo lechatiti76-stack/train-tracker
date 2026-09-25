@@ -11,6 +11,7 @@ img { max-width: 100%; display: block; }
 :root {
   --bg: #eef1f6;
   --bg-elevated: #f7f9fc;
+    
   --surface: #ffffff;
   --surface-2: #f1f4f9;
   --border: #dde3ec;
@@ -556,7 +557,10 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
   letter-spacing: 0.04em;
 }
 .sillon-lookup-row { display: flex; gap: 0.5rem; }
-.sillon-lookup-input { flex: 1 1 auto; min-width: 0; }
+/* Demandé : l'input d'heure ne doit plus s'étirer sur toute la largeur de la
+   vignette (ça donnait une longue barre vide) — largeur fixe, raisonnable
+   pour un champ "hh:mm". */
+.sillon-lookup-input { flex: 0 0 auto; width: 130px; min-width: 0; }
 .btn-sm { min-height: 40px; padding: 0.45rem 0.7rem; font-size: 0.8rem; flex: 0 0 auto; }
 .sillon-lookup-status {
   font-size: 0.76rem;
@@ -641,25 +645,25 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
   align-items: center;
   justify-content: flex-start;
   text-align: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.5rem;
+  gap: 0.25rem;
+  padding: 0.35rem 0.45rem;
   background: var(--surface-2);
   border-radius: var(--radius-sm);
   flex: 1 1 0;
   min-width: 122px;
 }
-.step-info { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; min-width: 0; }
+.step-info { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; min-width: 0; }
 .step-num {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--surface);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 700;
   color: var(--text-muted);
 }
@@ -682,8 +686,8 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
   color: #fff;
   border: none;
   border-radius: var(--radius-sm);
-  padding: 0.5rem 0.6rem;
-  min-height: 40px;
+  padding: 0.35rem 0.6rem;
+  min-height: 32px;
   width: 100%;
   font-weight: 700;
   font-size: 0.78rem;
