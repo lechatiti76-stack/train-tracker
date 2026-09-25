@@ -446,8 +446,8 @@ function onGridClick(e) {
       applySillonQuickFill(train, input?.value);
       break;
     }
-      case 'open-composition': openCompositionModal(train); break;
-      default: break;
+    case 'open-composition': openCompositionModal(train); break;
+    default: break;
   }
 }
 
