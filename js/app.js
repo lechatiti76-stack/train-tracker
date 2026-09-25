@@ -414,6 +414,100 @@ function emailTrainData(train) {
   window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+// ---------- Copie « stylée » (couleurs) pour coller dans un email ----------
+// Un lien mailto: ne peut transporter qu'un corps en texte brut (aucune mise
+// en forme HTML possible, quel que soit le client de messagerie) : c'est une
+// limite du protocole, pas de l'app. Pour permettre malgré tout une mise en
+// forme moderne avec couleurs, on écrit en parallèle une représentation
+// HTML dans le presse-papiers (API Clipboard, type MIME text/html) : collée
+// dans la zone de rédaction d'un client mail qui affiche du texte enrichi
+// (Gmail, Outlook, Apple Mail...), elle conserve couleurs et mise en forme.
+function delayColor(tone) {
+  switch (tone) {
+    case 'onTime': return { fg: '#16a34a', bg: '#dcfce7' };
+    case 'late':
+    case 'moderate': return { fg: '#d97706', bg: '#fef3c7' };
+    case 'severe': return { fg: '#dc2626', bg: '#fee2e2' };
+    case 'early': return { fg: '#0284c7', bg: '#e0f2fe' };
+    default: return { fg: '#5b6577', bg: '#eef1f6' };
+  }
+}
+
+function buildTrainReportHTML(train) {
+  const delays = computeAllStepDelays(train);
+  const status = computeTrainStatus(train);
+  const cause = computeMainCause(train);
+  const statusColor = delayColor(status.tone);
+  const causeColor = delayColor(cause.tone);
+  const compositionSummary = formatCompositionSummary(train.composition);
+  const font = "font-family:Arial,Helvetica,sans-serif;";
+
+  const stepsRows = train.steps.map((step, i) => {
+    const d = delays[i];
+    const c = delayColor(d.tone);
+    const ecartLabel = d.status === 'recorded' ? formatDelayLabel(d.diffMin, DELAY_THRESHOLDS) : '—';
+    return `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${escapeHtml(step.label)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#5b6577;">${escapeHtml(step.theoretical || 'Non renseignée')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${d.realDate ? escapeHtml(formatHHMM(d.realDate)) : 'Non enregistré'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;text-align:center;">
+          <span style="display:inline-block;padding:2px 8px;border-radius:999px;${font}font-size:12px;font-weight:700;background:${c.bg};color:${c.fg};">${escapeHtml(ecartLabel)}</span>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `<div style="${font}max-width:560px;border:1px solid #d7dce6;border-radius:10px;overflow:hidden;">
+  <div style="background:#0f1b33;color:#ffffff;padding:14px 16px;">
+    <div style="font-size:17px;font-weight:700;">🚆 TRAIN ${escapeHtml(train.number)}</div>
+    <div style="font-size:13px;color:#c7d2e8;margin-top:2px;">📅 ${escapeHtml(formatDateFR(train.date))}</div>
+  </div>
+  ${compositionSummary ? `<div style="padding:10px 16px;background:#f4f6fb;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#334155;">🚃 <strong>Composition :</strong> ${escapeHtml(compositionSummary)}</div>` : ''}
+  <table style="width:100%;border-collapse:collapse;">
+    <thead>
+      <tr style="background:#f4f6fb;">
+        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Étape</th>
+        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Théorique</th>
+        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Réel</th>
+        <th style="text-align:center;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Écart</th>
+      </tr>
+    </thead>
+    <tbody>${stepsRows}</tbody>
+  </table>
+  <div style="padding:12px 16px;border-top:1px solid #e5e9f2;">
+    <div style="${font}font-size:12px;color:#5b6577;text-transform:uppercase;letter-spacing:.03em;">⚠ Cause principale</div>
+    <div style="margin-top:4px;">
+      <span style="display:inline-block;padding:3px 10px;border-radius:999px;${font}font-size:13px;font-weight:700;background:${causeColor.bg};color:${causeColor.fg};">${escapeHtml(cause.cause)}</span>
+      ${cause.amountLabel && cause.amountLabel !== '--' ? ` <span style="${font}font-size:12px;color:#5b6577;">${escapeHtml(cause.amountLabel)}</span>` : ''}
+    </div>
+  </div>
+  <div style="padding:12px 16px;background:${statusColor.bg};">
+    <span style="${font}font-size:12px;color:#334155;">Statut global :</span>
+    <strong style="${font}font-size:14px;color:${statusColor.fg};margin-left:6px;">${escapeHtml(status.label)}</strong>
+  </div>
+</div>`;
+}
+
+async function copyTrainDataStyled(train) {
+  const html = buildTrainReportHTML(train);
+  const text = buildTrainReportText(train);
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      const item = new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      });
+      await navigator.clipboard.write([item]);
+      showToast('Résumé stylé copié ✓ (collez-le dans votre email)');
+      return;
+    }
+  } catch (err) {
+    // Repli ci-dessous si la copie HTML riche est indisponible/refusée par
+    // le navigateur (ex : ancien navigateur, contexte non sécurisé).
+  }
+  await copyTrainData(train);
+}
+
 // ---------- Délégation d'événements sur la grille ----------
 function onGridClick(e) {
   const emptyBtn = e.target.closest('[data-action="add-train-empty"]');
@@ -436,6 +530,7 @@ function onGridClick(e) {
     case 'reset-step-time': resetStepTime(train, stepIndex); break;
     case 'reset-all-steps': resetAllStepsForTrain(train); break;
     case 'copy-train': copyTrainData(train); break;
+    case 'copy-html-train': copyTrainDataStyled(train); break;
     case 'email-train': emailTrainData(train); break;
     case 'edit-train': openTrainModal(train); break;
     case 'delete-train': deleteTrain(train); break;
