@@ -140,6 +140,7 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
           <button type="button" class="btn btn-ghost btn-move" data-action="move-right" aria-label="Déplacer après">▶</button>
         `}
         <button type="button" class="btn" data-action="copy-train">Copier</button>
+        <button type="button" class="btn btn-outline" data-action="copy-html-train" title="Copier une version stylée avec couleurs, à coller dans un email">🎨 Copier stylé</button>
         <button type="button" class="btn" data-action="email-train">Email</button>
         ${readOnly ? '' : `
           <button type="button" class="btn btn-outline" data-action="reset-all-steps">↺ Réinitialiser les heures</button>
