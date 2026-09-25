@@ -15,6 +15,20 @@ function statusToneClass(tone) {
   return `tone-${tone || 'neutral'}`;
 }
 
+// Résumé affiché à côté du bouton "Composition" une fois les champs
+// renseignés (wagons / poids en tonnes / longueur en mètres / traction).
+// Chaque champ est optionnel : seuls ceux renseignés apparaissent, séparés
+// par " · ". Vide (chaîne vide) tant que rien n'a été saisi.
+export function formatCompositionSummary(composition) {
+  if (!composition) return '';
+  const parts = [];
+  if (composition.wagons) parts.push(`${composition.wagons} wagons`);
+  if (composition.weightTons) parts.push(`${composition.weightTons} t`);
+  if (composition.lengthM) parts.push(`${composition.lengthM} m`);
+  if (composition.traction) parts.push(composition.traction === 'electrique' ? 'Électrique' : composition.traction === 'thermique' ? 'Thermique' : '');
+  return parts.filter(Boolean).join(' · ');
+}
+
 function stepRowHTML(train, index, readOnly) {
   const step = train.steps[index];
   const delay = computeAllStepDelays(train)[index];
@@ -105,6 +119,10 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
             <button type="button" class="btn btn-outline btn-sm" data-action="apply-sillon">⚡ Remplir les 7 heures</button>
           </div>
           <p class="sillon-lookup-status" data-role="sillon-status"></p>
+                </div>
+        <div class="composition-row">
+          <button type="button" class="btn btn-outline btn-sm" data-action="open-composition">🚃 Composition</button>
+          <span class="composition-summary" data-role="composition-summary">${escapeHtml(formatCompositionSummary(train.composition))}</span>
         </div>`}
 
       <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
@@ -145,6 +163,9 @@ export function updateCardDynamicParts(cardEl, train) {
     statusEl.textContent = status.label;
     statusEl.className = `status-pill ${statusToneClass(status.tone)}`;
   }
+
+  const compositionSummaryEl = cardEl.querySelector('[data-role="composition-summary"]');
+  if (compositionSummaryEl) compositionSummaryEl.textContent = formatCompositionSummary(train.composition);
 
   const stepsList = cardEl.querySelector('[data-role="steps-list"]');
   if (stepsList) {
