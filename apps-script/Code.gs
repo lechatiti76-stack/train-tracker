@@ -31,14 +31,17 @@
  *
  * L'onglet "Journal" (écriture) est créé automatiquement avec les colonnes :
  *   Date | Train | Étape | Heure théorique | Heure réelle | Écart (min) |
- *   Cause | Mis à jour le
+ *   Cause | Wagons | Poids (t) | Longueur (m) | Traction | Mis à jour le
+ * Les colonnes Wagons/Poids/Longueur/Traction reprennent la composition du
+ * train saisie via le bouton "Composition" côté app (identique sur toutes
+ * les lignes d'un même train/jour, vide tant que rien n'a été renseigné).
  * Une ligne par (Date, Train, Étape) : un nouvel envoi met à jour la ligne
  * existante plutôt que d'en créer une autre (upsert).
  */
 
 const SHEET_NAME = 'Horaires';
 const JOURNAL_SHEET_NAME = 'Journal';
-const JOURNAL_HEADERS = ['Date', 'Train', 'Étape', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Cause', 'Mis à jour le'];
+const JOURNAL_HEADERS = ['Date', 'Train', 'Étape', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Cause', 'Wagons', 'Poids (t)', 'Longueur (m)', 'Traction', 'Mis à jour le'];
 
 function doGet(e) {
   try {
@@ -89,6 +92,10 @@ function upsertJournalRow_(payload) {
     payload.heureReelle || '',
     payload.ecartMin === '' || payload.ecartMin === undefined ? '' : Number(payload.ecartMin),
     payload.cause || '',
+    payload.wagons === '' || payload.wagons === undefined ? '' : Number(payload.wagons),
+    payload.poidsTonnes === '' || payload.poidsTonnes === undefined ? '' : Number(payload.poidsTonnes),
+    payload.longueurM === '' || payload.longueurM === undefined ? '' : Number(payload.longueurM),
+    payload.traction || '',
     payload.misAJour || new Date().toISOString(),
   ];
 
