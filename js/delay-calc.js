@@ -143,11 +143,25 @@ export function computeMainCause(train) {
     return { cause: 'AUCUN RETARD SIGNIFICATIF', amountLabel: formatDelayLabel(worst.diffMin, DELAY_THRESHOLDS), stepLabel: normalize(worst.step.label).toUpperCase(), tone: 'onTime' };
   }
 
-  const causeText = worst.step.cause && worst.step.cause.trim() ? worst.step.cause.trim() : 'CAUSE NON RENSEIGNÉE';
+  // Corrige un bug signalé : la cause principale restait "CAUSE NON
+  // RENSEIGNÉE" même après avoir saisi une cause, dès que ce n'était pas
+  // l'étape au plus gros écart qui la portait (ex : la cause du retard est
+  // notée sur l'étape "Retour du régulateur", mais c'est "Départ pour la
+  // ligne" qui a le plus gros écart, sans cause saisie dessus). On
+  // privilégie désormais, parmi les étapes réellement en retard (écart
+  // positif), celle qui a une cause renseignée — même si une autre étape a
+  // un écart plus important — plutôt que d'ignorer la cause saisie.
+  const late = recorded.filter((d) => d.diffMin > 0);
+  const withCause = late.filter((d) => d.step.cause && d.step.cause.trim());
+  const chosen = withCause.length
+    ? withCause.reduce((acc, cur) => (cur.diffMin > acc.diffMin ? cur : acc), withCause[0])
+    : worst;
+
+  const causeText = chosen.step.cause && chosen.step.cause.trim() ? chosen.step.cause.trim() : 'CAUSE NON RENSEIGNÉE';
   return {
     cause: normalize(causeText).toUpperCase(),
-    amountLabel: formatDelayLabel(worst.diffMin, DELAY_THRESHOLDS),
-    stepLabel: normalize(worst.step.label).toUpperCase(),
-    tone: worst.tone,
+    amountLabel: formatDelayLabel(chosen.diffMin, DELAY_THRESHOLDS),
+    stepLabel: normalize(chosen.step.label).toUpperCase(),
+    tone: chosen.tone,
   };
 }
