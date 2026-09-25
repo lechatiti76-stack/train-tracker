@@ -306,6 +306,15 @@ body {
 .shuttle-chip.state-arrived .shuttle-code { color: var(--text-faint); }
 .shuttle-chip.state-arrived .shuttle-state-label { color: var(--text-faint); }
 
+/* Demandé : dès qu'une heure de départ est renseignée, la puce se grise
+   pour indiquer "c'est fait" — sans attendre le calcul automatique de
+   progression. Pas appliqué sur "imminent" (qui doit rester bien visible,
+   clignotant) ni sur "arrived" (déjà grisée plus fort ci-dessus). */
+.shuttle-chip.has-departure:not(.state-imminent):not(.state-arrived) {
+  filter: grayscale(0.85);
+  opacity: 0.65;
+}
+
 /* Repère "retard / souci signalé" manuel : se superpose à n'importe quel état. */
 .shuttle-chip.has-delay { box-shadow: 0 0 0 2px #b91c1c inset; }
 .shuttle-delay-flag {
