@@ -202,6 +202,21 @@ async function postToSheet(webAppUrl, payload, { timeoutMs = 8000 } = {}) {
   }
 }
 
+// Composition (wagons/poids/longueur/traction) saisie via le bouton
+// "Composition" sur la vignette (voir openCompositionModal dans app.js) :
+// répétée sur chaque ligne du Journal pour ce train (elle n'est pas propre
+// à une étape), afin de rester visible quelle que soit l'étape consultée.
+// Champs vides tant que rien n'a été renseigné.
+function compositionFields(train) {
+  const comp = train.composition || {};
+  return {
+    wagons: comp.wagons ?? '',
+    poidsTonnes: comp.weightTons ?? '',
+    longueurM: comp.lengthM ?? '',
+    traction: comp.traction === 'electrique' ? 'Électrique' : comp.traction === 'thermique' ? 'Thermique' : '',
+  };
+}
+
 function stepLogPayload(train, stepIndex, delay) {
   const step = train.steps[stepIndex];
   return {
@@ -212,6 +227,7 @@ function stepLogPayload(train, stepIndex, delay) {
     heureTheorique: step.theoretical || '',
     heureReelle: delay.realDate ? `${String(delay.realDate.getHours()).padStart(2, '0')}:${String(delay.realDate.getMinutes()).padStart(2, '0')}:${String(delay.realDate.getSeconds()).padStart(2, '0')}` : '',
     ecartMin: delay.status === 'recorded' ? delay.diffMin : '',
+    ...compositionFields(train),
     cause: step.cause || '',
     misAJour: new Date().toISOString(),
   };
