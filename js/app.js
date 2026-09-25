@@ -2131,6 +2131,11 @@ function wireHeaderButtons() {
   el('btnSettings').addEventListener('click', openSettingsModal);
   el('btnHistory').addEventListener('click', openHistoryModal);
   el('btnSyncHeader').addEventListener('click', () => syncWithSheet());
+  // Bouton principal (point 4 demandé) : renvoie d'un coup toutes les heures
+  // déjà enregistrées aujourd'hui vers Google Sheets — reprend la même
+  // logique que le bouton "Renvoyer aujourd'hui vers Sheets" de Réglages
+  // (utile par ex. après une saisie faite hors-ligne).
+  el('btnPushTodayHeader').addEventListener('click', () => pushTodayToSheet());
 }
 
 // Une PWA installée peut rester "suspendue" en arrière-plan pendant des
