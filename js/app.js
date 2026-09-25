@@ -1317,8 +1317,14 @@ function shuttleChipInnerHTML(code) {
     <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
 
+// Demandé : dès qu'une heure de départ est renseignée pour une navette
+// (même avant que le calcul automatique de progression ne la fasse passer
+// par ses états "partie"/"en approche"/etc.), la puce doit apparaître
+// grisée pour signaler visuellement "c'est fait, l'heure est notée" — sans
+// attendre le calcul basé sur le temps écoulé (voir computeShuttleProgress).
 function shuttleChipClass(code) {
-  return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
+  const hasDeparture = Boolean(shuttles[code]?.departure);
+  return `shuttle-chip state-${computeShuttleProgress(code).state}${hasDeparture ? ' has-departure' : ''}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
 }
 
 function renderShuttlesBar() {
