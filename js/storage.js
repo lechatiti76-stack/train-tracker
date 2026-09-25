@@ -157,6 +157,10 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     order,
     source, // 'manual' | 'sheet'
     sillonTime: null, // 'HH:MM' — heure de référence pour le remplissage auto des 7 étapes
+    // Composition du train (wagons / poids / longueur / traction), saisie via
+    // le bouton "Composition" sur la vignette — voir openCompositionModal
+    // dans app.js. null tant que rien n'a été renseigné.
+    composition: null, // { wagons: number, weightTons: number, lengthM: number, traction: 'electrique'|'thermique' } | null
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
