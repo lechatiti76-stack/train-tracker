@@ -580,6 +580,20 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
 .sillon-lookup-status.status-error, .sillon-lookup-status.status-not-found { color: var(--danger); }
 .sillon-lookup-status.status-loading { color: var(--text-muted); }
 
+/* ---------- Composition du train (wagons/poids/longueur/traction) ---------- */
+.composition-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.composition-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 /* ---------- Panneau "cause principale" façon split-flap ---------- */
 .cause-panel {
   background: #0a0f1c;
