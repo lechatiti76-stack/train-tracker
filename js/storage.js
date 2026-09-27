@@ -143,6 +143,29 @@ export function saveArrivals(arrivals) {
   }
 }
 
+// Tableau rapide des départs navettes (case "Réserve" par famille FL/NL/AL,
+// à côté des vignettes navettes) : même remise à zéro quotidienne
+// automatique que loadShuttles/saveShuttles ci-dessus, et pour la même
+// raison. Forme des données : { FL: 'HH:MM'|null, NL: ..., AL: ... }.
+export function loadShuttleReserves() {
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.shuttleReserves), {});
+  if (raw && typeof raw === 'object' && 'date' in raw && 'data' in raw) {
+    if (raw.date !== todayISO()) return {};
+    return raw.data && typeof raw.data === 'object' ? raw.data : {};
+  }
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+export function saveShuttleReserves(shuttleReserves) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.shuttleReserves, JSON.stringify({ date: todayISO(), data: shuttleReserves }));
+    return true;
+  } catch (err) {
+    console.error('Impossible d\'enregistrer les réserves navettes.', err);
+    return false;
+  }
+}
+
 function uuid() {
   if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
