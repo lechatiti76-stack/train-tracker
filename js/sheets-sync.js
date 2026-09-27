@@ -163,7 +163,7 @@ function normalizeSheetDate(value) {
 // app une fois l'heure réelle enregistrée.
 function normalizeSheetTime(value) {
   const cleaned = String(value ?? '')
-    .replace(/ /g, ' ')
+        .replace(/ /g, ' ')
     .trim()
     .replace(/^(\d{1,2})\s*[hH]\s*(\d{0,2})/, (_, h, m) => `${h}:${m || '00'}`);
   const m = cleaned.match(/^(\d{1,2}):(\d{2})/);
