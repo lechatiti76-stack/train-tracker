@@ -5,9 +5,23 @@ export function pad2(n) {
   return String(Math.abs(n)).padStart(2, '0');
 }
 
+// Tolérant aux variantes de saisie courantes (copié-collé depuis Google
+// Sheets, saisie manuelle) : espaces superflus, espace insécable,
+// séparateur "h"/"H" au lieu de ":", secondes en trop ("08:00:00"). Sans
+// cette tolérance, une heure théorique légèrement mal formatée devient
+// silencieusement injouable : l'écart reste alors bloqué sur « — » même
+// quand une heure réelle est bien enregistrée (voir computeStepDelay dans
+// delay-calc.js, qui distingue ce cas via le statut 'badTheoretical').
 export function parseHHMM(hhmm) {
-  if (!hhmm || typeof hhmm !== 'string' || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
-  const [h, m] = hhmm.split(':').map(Number);
+  if (!hhmm || typeof hhmm !== 'string') return null;
+  const cleaned = hhmm
+    .replace(/ /g, ' ') // espace insécable -> espace normal
+    .trim()
+    .replace(/^(\d{1,2})\s*[hH]\s*(\d{0,2})$/, (_, h, m) => `${h}:${m || '00'}`); // "8h", "8h00", "8 H 00"
+  const match = cleaned.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/); // HH:MM ou HH:MM:SS
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
   if (h > 23 || m > 59) return null;
   return { h, m };
 }
