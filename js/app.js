@@ -4,7 +4,7 @@
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
 import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadArrivals, saveArrivals } from './storage.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals } from './storage.js';
 import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM } from './time-utils.js';
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet } from './sheets-sync.js';
@@ -17,6 +17,10 @@ let settings = loadSettings();
 let trains = loadTrains();
 let currentDate = todayISO();
 let shuttles = loadShuttles();
+// Tableau rapide des départs navettes (à côté des vignettes navettes) : une
+// case "Réserve" par famille FL/NL/AL, indépendante des vignettes elles-
+// mêmes — voir renderShuttleQuickboard/wireShuttleQuickboard plus bas.
+let shuttleReserves = loadShuttleReserves();
 let arrivals = loadArrivals();
 
 const chartsByTrainId = new Map();
@@ -1322,6 +1326,10 @@ function startClock() {
       shuttles = {};
       saveShuttles(shuttles);
       renderShuttlesBar();
+      // Idem pour le tableau rapide des départs navettes (réserves FL/NL/AL).
+      shuttleReserves = {};
+      saveShuttleReserves(shuttleReserves);
+      renderShuttleQuickboard();
       // Idem pour les arrivées : les étapes modifiées la veille depuis une
       // vignette ne valent que pour la journée en cours (voir
       // getArrivalEffectiveConfig) ; les valeurs par défaut de Réglages
@@ -1820,6 +1828,132 @@ function wireShuttlesBar() {
   setInterval(updateShuttleStates, 15000);
 }
 
+// ---------- Tableau rapide des départs navettes (demandé par l'utilisateur) ----------
+// Complément aux vignettes navettes ci-dessus, SANS toucher à leur logique
+// (arrivée estimée, passages intermédiaires, modale détaillée) : un simple
+// raccourci compact, à côté des vignettes, pour poser vite l'heure de
+// départ d'un code (clic = heure actuelle). Pour les codes réels
+// (FL/NL/AL), la donnée posée est exactement `shuttles[code].departure`,
+// donc les vignettes ci-dessus restent automatiquement synchronisées ; un
+// second clic rouvre la fiche navette existante (openShuttleModal) pour
+// corriger, sans dupliquer cette logique. Liste de codes volontairement
+// fixe (pas liée aux navettes personnalisées de Réglages), comme demandé.
+const SHUTTLE_QUICKBOARD_CODES = ['FL1', 'FL2', 'FL3', 'NL1', 'NL2', 'AL1', 'AL2'];
+const SHUTTLE_QUICKBOARD_RESERVE_FAMILIES = ['FL', 'NL', 'AL'];
+
+function quickboardPad(n) {
+  return String(n).padStart(2, '0');
+}
+
+function quickboardNowHHMM() {
+  const now = new Date();
+  return `${quickboardPad(now.getHours())}:${quickboardPad(now.getMinutes())}`;
+}
+
+function shuttleQuickboardCellHTML(code) {
+  const group = findShuttleGroup(code);
+  const time = shuttles[code]?.departure || null;
+  return `
+    <td>
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        <span class="quickboard-code">${escapeHtml(code)}</span>
+        <span class="quickboard-time">${time || '--:--'}</span>
+      </button>
+    </td>`;
+}
+
+function shuttleQuickboardReserveCellHTML(family) {
+  const group = getAllShuttleGroups().find((g) => g.id === family);
+  const time = shuttleReserves[family] || null;
+  return `
+    <td>
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-reserve="${escapeHtml(family)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        <span class="quickboard-code">Réserve ${escapeHtml(family)}</span>
+        <span class="quickboard-time">${time || '--:--'}</span>
+      </button>
+    </td>`;
+}
+
+function renderShuttleQuickboard() {
+  const container = el('shuttleQuickboard');
+  if (!container) return;
+  const cells = SHUTTLE_QUICKBOARD_CODES.map(shuttleQuickboardCellHTML).join('')
+    + SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.map(shuttleQuickboardReserveCellHTML).join('');
+  container.innerHTML = `<table class="shuttle-quickboard-table" aria-label="Tableau rapide des départs navettes"><tbody><tr>${cells}</tr></tbody></table>`;
+}
+
+function quickboardRecordCode(code) {
+  const rec = shuttles[code] || {};
+  if (!rec.departure) {
+    rec.departure = quickboardNowHHMM();
+    shuttles[code] = rec;
+    saveShuttles(shuttles);
+    renderShuttlesBar();
+    renderShuttleQuickboard();
+    showToast(`${code} : départ enregistré à ${rec.departure}`);
+  } else {
+    // Déjà renseignée : on rouvre la fiche navette existante (même modale
+    // que les vignettes) pour corriger si besoin, plutôt que de dupliquer
+    // cette logique ici.
+    openShuttleModal(code);
+  }
+}
+
+function openReserveTimeEditor(family) {
+  const current = shuttleReserves[family] || '';
+  openModal({
+    title: `Réserve ${family} — heure de départ`,
+    bodyHTML: `
+      <form id="reserveTimeForm" class="stacked-form">
+        <label>Heure de départ
+          <input type="time" id="fReserveTime" value="${escapeHtml(current)}">
+        </label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnReserveClear">Effacer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      panel.querySelector('#btnReserveClear').addEventListener('click', () => {
+        shuttleReserves[family] = null;
+        saveShuttleReserves(shuttleReserves);
+        renderShuttleQuickboard();
+        closeModal();
+      });
+      panel.querySelector('#reserveTimeForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const value = panel.querySelector('#fReserveTime').value;
+        shuttleReserves[family] = value || null;
+        saveShuttleReserves(shuttleReserves);
+        renderShuttleQuickboard();
+        closeModal();
+      });
+    },
+  });
+}
+
+function quickboardRecordReserve(family) {
+  if (!shuttleReserves[family]) {
+    shuttleReserves[family] = quickboardNowHHMM();
+    saveShuttleReserves(shuttleReserves);
+    renderShuttleQuickboard();
+    showToast(`Réserve ${family} : départ enregistré à ${shuttleReserves[family]}`);
+  } else {
+    openReserveTimeEditor(family);
+  }
+}
+
+function wireShuttleQuickboard() {
+  const container = el('shuttleQuickboard');
+  if (!container) return;
+  container.addEventListener('click', (e) => {
+    const codeBtn = e.target.closest('[data-quickboard-code]');
+    if (codeBtn) { quickboardRecordCode(codeBtn.dataset.quickboardCode); return; }
+    const resBtn = e.target.closest('[data-quickboard-reserve]');
+    if (resBtn) { quickboardRecordReserve(resBtn.dataset.quickboardReserve); return; }
+  });
+}
+
 // ---------- Arrivées (trains fret en provenance d'autres sites) ----------
 // Même principe que les navettes internes ci-dessus (getAllShuttleGroups…),
 // avec une différence : les étapes peuvent être modifiées directement
@@ -2249,12 +2383,14 @@ function refreshFromStorage() {
   settings = loadSettings();
   trains = loadTrains();
   shuttles = loadShuttles();
+  shuttleReserves = loadShuttleReserves();
   arrivals = loadArrivals();
   currentDate = todayISO();
   applyTheme();
   updateDateLabel();
   renderGrid();
   renderShuttlesBar();
+  renderShuttleQuickboard();
   renderArrivalsBar();
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');
   if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
@@ -2298,6 +2434,8 @@ function init() {
   initStopwatch(el('stopwatchWidget'));
   renderShuttlesBar();
   wireShuttlesBar();
+  renderShuttleQuickboard();
+  wireShuttleQuickboard();
   renderArrivalsBar();
   wireArrivalsBar();
   wireQuickTrainsBar();
