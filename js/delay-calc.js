@@ -82,6 +82,13 @@ export function computeStepDelay(train, stepIndex) {
   if (!realDate) return { status: 'pending', diffMin: null, realDate: null, tone: 'neutral' };
 
   const theoreticalDate = combineDateAndTime(train.date, step.theoretical);
+  if (!theoreticalDate) {
+    // L'heure théorique est renseignée (non vide) mais dans un format non
+    // reconnu par parseHHMM (souvent un import Google Sheets avec un format
+    // inhabituel) : on le signale explicitement plutôt que de laisser
+    // l'écart silencieusement bloqué sur « — » sans explication.
+    return { status: 'badTheoretical', diffMin: null, tone: 'neutral', theoreticalDate: null, realDate };
+  }
   const diffMin = diffMinutes(theoreticalDate, realDate);
   const tone = delayTone(diffMin, DELAY_THRESHOLDS);
   return { status: 'recorded', diffMin, tone, theoreticalDate, realDate };
