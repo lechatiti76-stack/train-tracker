@@ -100,7 +100,7 @@ function summaryRowHTML(train) {
   const arrivalDelay = delays[lastIndex];
   const theo = arrival.theoretical || '--:--';
   const real = arrivalDelay.status === 'recorded' ? formatHHMM(arrivalDelay.realDate) : '—';
-      const ecart = ecartLabel(arrivalDelay);
+  const ecart = ecartLabel(arrivalDelay);
   const tone = arrivalDelay.status === 'recorded' ? arrivalDelay.tone : 'neutral';
   return `
     <div class="summary-row">
