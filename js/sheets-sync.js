@@ -155,9 +155,18 @@ function normalizeSheetDate(value) {
   return str;
 }
 
+// Tolérant aux variantes de saisie dans le Sheet (texte libre plutôt qu'une
+// vraie cellule Heure) : espace insécable, séparateur "h"/"H" au lieu de
+// ":", secondes en trop. Même tolérance que parseHHMM côté app (voir
+// time-utils.js) : sans ça, une heure théorique mal formatée dans le Sheet
+// devient injouable, et l'écart reste silencieusement bloqué sur « — » côté
+// app une fois l'heure réelle enregistrée.
 function normalizeSheetTime(value) {
-  const str = String(value).trim();
-  const m = str.match(/^(\d{1,2}):(\d{2})/);
+  const cleaned = String(value ?? '')
+    .replace(/ /g, ' ')
+    .trim()
+    .replace(/^(\d{1,2})\s*[hH]\s*(\d{0,2})/, (_, h, m) => `${h}:${m || '00'}`);
+  const m = cleaned.match(/^(\d{1,2}):(\d{2})/);
   if (!m) return null;
   return `${m[1].padStart(2, '0')}:${m[2]}`;
 }
