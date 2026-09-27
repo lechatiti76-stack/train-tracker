@@ -328,6 +328,33 @@ body {
 .shuttle-quick-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .shuttle-quick-actions .btn { flex: 1 1 auto; }
 
+/* ---------- Tableau rapide des départs navettes (FL/NL/AL + réserves) ----------
+   Complément aux vignettes navettes ci-dessus : ne modifie ni ne duplique
+   leur logique (arrivée estimée, passages intermédiaires) — juste un
+   raccourci compact pour poser vite une heure de départ (voir
+   renderShuttleQuickboard/wireShuttleQuickboard dans app.js). */
+.shuttle-quickboard-bar { max-width: 1600px; margin: 0.4rem auto 0; padding: 0 1.25rem; }
+.shuttle-quickboard-table { border-collapse: separate; border-spacing: 0.4rem 0; width: 100%; table-layout: fixed; }
+.quickboard-cell {
+  --shuttle-color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  width: 100%;
+  background: var(--surface);
+  border: 2px dashed var(--shuttle-color);
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.4rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.quickboard-cell:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--shuttle-color) 20%, transparent); }
+.quickboard-cell:active { transform: scale(0.96); }
+.quickboard-cell.is-set { border-style: solid; }
+.quickboard-code { font-weight: 800; font-size: 0.68rem; letter-spacing: 0.02em; color: var(--shuttle-color); white-space: nowrap; }
+.quickboard-time { font-family: var(--font-mono); font-size: 0.92rem; font-weight: 700; }
+
 /* ---------- Passages intermédiaires (informatif) ---------- */
 .shuttle-stops { display: flex; flex-direction: column; gap: 0.4rem; }
 .shuttle-stops-list { display: flex; flex-direction: column; gap: 0.3rem; }
