@@ -176,4 +176,9 @@ export const STORAGE_KEYS = {
   settings: 'traintrack:settings:v1',
   shuttles: 'traintrack:shuttles:v1',
   arrivals: 'traintrack:arrivals:v1',
+  // Tableau rapide des départs navettes (FL/NL/AL + 1 réserve par famille),
+  // à côté des vignettes navettes — voir loadShuttleReserves/
+  // saveShuttleReserves dans storage.js. Remise à zéro quotidienne comme
+  // shuttles/arrivals ci-dessus.
+  shuttleReserves: 'traintrack:shuttleReserves:v1',
 };
