@@ -15,6 +15,18 @@ function statusToneClass(tone) {
   return `tone-${tone || 'neutral'}`;
 }
 
+// Libellé de l'écart affiché : distingue les cas où le calcul est
+// impossible (voir computeStepDelay dans delay-calc.js), pour ne jamais
+// laisser un « — » ambigu sans explication — notamment 'badTheoretical'
+// (heure théorique renseignée mais dans un format non reconnu), qui sinon
+// se traduit par un écart silencieusement vide en permanence.
+function ecartLabel(delay) {
+  if (delay.status === 'recorded') return formatDelayLabel(delay.diffMin, DELAY_THRESHOLDS);
+  if (delay.status === 'badTheoretical') return 'Théo. illisible';
+  if (delay.status === 'noTheoretical') return 'Théo. manquante';
+  return '—';
+}
+
 // Résumé affiché à côté du bouton "Composition" une fois les champs
 // renseignés (wagons / poids en tonnes / longueur en mètres / traction).
 // Chaque champ est optionnel : seuls ceux renseignés apparaissent, séparés
@@ -39,14 +51,14 @@ function stepRowHTML(train, index, readOnly) {
     actionHTML = hasReal
       ? `<div class="step-recorded ${statusToneClass(delay.tone)}">
            <span class="step-real-time">${formatHHMM(delay.realDate)}</span>
-           <span class="step-delay-badge">${formatDelayLabel(delay.diffMin, DELAY_THRESHOLDS)}</span>
+           <span class="step-delay-badge">${ecartLabel(delay)}</span>
          </div>`
       : `<span class="step-empty">Non enregistré</span>`;
   } else if (hasReal) {
     actionHTML = `
       <div class="step-recorded ${statusToneClass(delay.tone)}">
         <span class="step-real-time">${formatHHMM(delay.realDate)}</span>
-        <span class="step-delay-badge">${formatDelayLabel(delay.diffMin, DELAY_THRESHOLDS)}</span>
+        <span class="step-delay-badge">${ecartLabel(delay)}</span>
         <div class="step-tools">
           <button type="button" class="icon-btn" data-action="edit-step-time" aria-label="Corriger l'heure">✎</button>
           <button type="button" class="icon-btn" data-action="reset-step-time" aria-label="Réinitialiser l'heure">↺</button>
@@ -88,7 +100,7 @@ function summaryRowHTML(train) {
   const arrivalDelay = delays[lastIndex];
   const theo = arrival.theoretical || '--:--';
   const real = arrivalDelay.status === 'recorded' ? formatHHMM(arrivalDelay.realDate) : '—';
-  const ecart = arrivalDelay.status === 'recorded' ? formatDelayLabel(arrivalDelay.diffMin, DELAY_THRESHOLDS) : '—';
+    const ecart = ecartLabel(arrivalDelay);
   const tone = arrivalDelay.status === 'recorded' ? arrivalDelay.tone : 'neutral';
   return `
     <div class="summary-row">
