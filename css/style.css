@@ -306,13 +306,16 @@ body {
 .shuttle-chip.state-arrived .shuttle-code { color: var(--text-faint); }
 .shuttle-chip.state-arrived .shuttle-state-label { color: var(--text-faint); }
 
-/* Demandé : dès qu'une heure de départ est renseignée, la puce se grise
-   pour indiquer "c'est fait" — sans attendre le calcul automatique de
-   progression. Pas appliqué sur "imminent" (qui doit rester bien visible,
-   clignotant) ni sur "arrived" (déjà grisée plus fort ci-dessus). */
-.shuttle-chip.has-departure:not(.state-imminent):not(.state-arrived) {
-  filter: grayscale(0.85);
-  opacity: 0.65;
+/* Le grisage immédiat "dès que l'heure est renseignée" a été retiré : il
+   masquait les passages intermédiaires et le clignotement. La vignette ne
+   grise plus qu'à l'état "arrived" ci-dessus (arrivée réelle), comme avant
+   le tableau rapide des départs. Décompte du temps restant avant l'arrivée
+   estimée (masqué une fois arrivée ou tant qu'aucun départ n'est saisi). */
+.shuttle-countdown {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 /* Repère "retard / souci signalé" manuel : se superpose à n'importe quel état. */
@@ -328,10 +331,11 @@ body {
 .shuttle-quick-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .shuttle-quick-actions .btn { flex: 1 1 auto; }
 
-/* ---------- Tableau rapide des départs navettes (FL/NL/AL + réserves) ----------
-   Complément aux vignettes navettes ci-dessus : ne modifie ni ne duplique
-   leur logique (arrivée estimée, passages intermédiaires) — juste un
-   raccourci compact pour poser vite une heure de départ (voir
+/* ---------- Tableau rapide des départs navettes (sens retour : LF/LN/AL + réserves) ----------
+   Départs dans l'autre sens, indépendants des vignettes navettes ci-dessus
+   (pas d'arrivée estimée ni de passages intermédiaires ici) : juste un
+   raccourci pour poser vite une heure de départ, avec un grisage dès que
+   c'est fait pour voir d'un coup d'œil ce qui est parti ou non (voir
    renderShuttleQuickboard/wireShuttleQuickboard dans app.js). */
 .shuttle-quickboard-bar { max-width: 1600px; margin: 0.4rem auto 0; padding: 0 1.25rem; }
 .shuttle-quickboard-table { border-collapse: separate; border-spacing: 0.4rem 0; width: 100%; table-layout: fixed; }
@@ -351,7 +355,9 @@ body {
 }
 .quickboard-cell:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--shuttle-color) 20%, transparent); }
 .quickboard-cell:active { transform: scale(0.96); }
-.quickboard-cell.is-set { border-style: solid; }
+/* "C'est parti" : grisée dès que l'heure est enregistrée — le seul état qui
+   compte pour ce bandeau (pas de suivi d'arrivée). */
+.quickboard-cell.is-set { border-style: solid; filter: grayscale(0.85); opacity: 0.65; }
 .quickboard-code { font-weight: 800; font-size: 0.68rem; letter-spacing: 0.02em; color: var(--shuttle-color); white-space: nowrap; }
 .quickboard-time { font-family: var(--font-mono); font-size: 0.92rem; font-weight: 700; }
 
