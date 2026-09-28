@@ -15,7 +15,7 @@ export function pad2(n) {
 export function parseHHMM(hhmm) {
   if (!hhmm || typeof hhmm !== 'string') return null;
   const cleaned = hhmm
-    .replace(/ /g, ' ') // espace insécable -> espace normal
+    .replace(/\u00A0/g, ' ') // espace insécable -> espace normal
     .trim()
     .replace(/^(\d{1,2})\s*[hH]\s*(\d{0,2})$/, (_, h, m) => `${h}:${m || '00'}`); // "8h", "8h00", "8 H 00"
   const match = cleaned.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/); // HH:MM ou HH:MM:SS
