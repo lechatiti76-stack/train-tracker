@@ -1476,28 +1476,47 @@ function shuttleHasDelayFlag(code) {
   return Boolean(shuttles[code]?.delayFlag);
 }
 
+// Minutes restantes avant l'arrivée estimée (départ + group.offsetMinutes),
+// pour le décompte affiché sur la vignette. null tant qu'aucun départ n'est
+// enregistré ou une fois la navette arrivée (le décompte n'a alors plus de
+// sens et le libellé d'état s'en charge déjà).
+function computeShuttleRemainingMin(code) {
+  if (shuttles[code]?.arrivedManually) return null;
+  const group = findShuttleGroup(code);
+  const departure = shuttles[code]?.departure;
+  if (!group || !departure) return null;
+  const parsedDeparture = parseHHMM(departure);
+  if (!parsedDeparture) return null;
+  const now = new Date();
+  const departureDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedDeparture.h, parsedDeparture.m, 0, 0);
+  const elapsedMin = (now.getTime() - departureDate.getTime()) / 60000;
+  if (elapsedMin >= group.offsetMinutes) return null;
+  return Math.max(0, Math.round(group.offsetMinutes - elapsedMin));
+}
+
 function shuttleChipInnerHTML(code) {
   const departure = shuttles[code]?.departure;
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
   const progress = computeShuttleProgress(code);
   const delayFlag = shuttleHasDelayFlag(code);
+  const remainingMin = computeShuttleRemainingMin(code);
   return `
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
     ${progress.label ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
+    <span class="shuttle-countdown" data-role="shuttle-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
     <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
 
-// Demandé : dès qu'une heure de départ est renseignée pour une navette
-// (même avant que le calcul automatique de progression ne la fasse passer
-// par ses états "partie"/"en approche"/etc.), la puce doit apparaître
-// grisée pour signaler visuellement "c'est fait, l'heure est notée" — sans
-// attendre le calcul basé sur le temps écoulé (voir computeShuttleProgress).
+// Le grisage immédiat "dès que l'heure est renseignée" a été retiré : il
+// masquait les passages intermédiaires et le clignotement "imminente" dès
+// la saisie du départ, alors que la vignette doit rester colorée pendant
+// toute la progression et ne griser qu'une fois réellement arrivée (voir
+// computeShuttleProgress et .shuttle-chip.state-arrived dans style.css).
 function shuttleChipClass(code) {
-  const hasDeparture = Boolean(shuttles[code]?.departure);
-  return `shuttle-chip state-${computeShuttleProgress(code).state}${hasDeparture ? ' has-departure' : ''}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
+  return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
 }
 
 function renderShuttlesBar() {
@@ -1530,6 +1549,13 @@ function updateShuttleStates() {
     }
     const delayEl = chip.querySelector('[data-role="shuttle-delay-flag"]');
     if (delayEl) delayEl.hidden = !shuttleHasDelayFlag(code);
+    const countdownEl = chip.querySelector('[data-role="shuttle-countdown"]');
+    if (countdownEl) {
+      const remainingMin = computeShuttleRemainingMin(code);
+      const text = remainingMin === null ? '' : `⏳ ${remainingMin} min`;
+      if (countdownEl.textContent !== text) countdownEl.textContent = text;
+      countdownEl.hidden = remainingMin === null;
+    }
   });
 }
 
@@ -1828,18 +1854,29 @@ function wireShuttlesBar() {
   setInterval(updateShuttleStates, 15000);
 }
 
-// ---------- Tableau rapide des départs navettes (demandé par l'utilisateur) ----------
-// Complément aux vignettes navettes ci-dessus, SANS toucher à leur logique
-// (arrivée estimée, passages intermédiaires, modale détaillée) : un simple
-// raccourci compact, à côté des vignettes, pour poser vite l'heure de
-// départ d'un code (clic = heure actuelle). Pour les codes réels
-// (FL/NL/AL), la donnée posée est exactement `shuttles[code].departure`,
-// donc les vignettes ci-dessus restent automatiquement synchronisées ; un
-// second clic rouvre la fiche navette existante (openShuttleModal) pour
-// corriger, sans dupliquer cette logique. Liste de codes volontairement
-// fixe (pas liée aux navettes personnalisées de Réglages), comme demandé.
-const SHUTTLE_QUICKBOARD_CODES = ['FL1', 'FL2', 'FL3', 'NL1', 'NL2', 'AL1', 'AL2'];
-const SHUTTLE_QUICKBOARD_RESERVE_FAMILIES = ['FL', 'NL', 'AL'];
+// ---------- Tableau rapide des départs navettes (sens retour) ----------
+// Départs "dans l'autre sens" (codes LF/LN/AL), DISTINCTS des navettes
+// suivies par les vignettes ci-dessus (codes FL/NL/AL) : stockage totalement
+// indépendant (shuttleReserves, malgré son nom historique — voir
+// STORAGE_KEYS.shuttleReserves dans config.js), pour ne jamais interférer
+// avec le suivi détaillé des vignettes (arrivée estimée, passages
+// intermédiaires, modale). Besoin volontairement minimal pour ce sens :
+// cliquer pose l'heure actuelle, la case grise pour indiquer "c'est
+// parti" (voir .quickboard-cell.is-set dans style.css), un second clic
+// permet de corriger ou d'effacer via un petit éditeur dédié. Pas de suivi
+// d'arrivée/passages intermédiaires ici — on veut juste savoir si c'est
+// parti ou non.
+const SHUTTLE_QUICKBOARD_GROUPS = [
+  { id: 'LF', codes: ['LF1', 'LF2', 'LF3'], color: '#f59e0b' },
+  { id: 'LN', codes: ['LN1', 'LN2'], color: '#1e3a8a' },
+  { id: 'AL', codes: ['AL1', 'AL2'], color: '#eab308' },
+];
+const SHUTTLE_QUICKBOARD_CODES = SHUTTLE_QUICKBOARD_GROUPS.flatMap((g) => g.codes);
+const SHUTTLE_QUICKBOARD_RESERVE_FAMILIES = SHUTTLE_QUICKBOARD_GROUPS.map((g) => g.id);
+
+function quickboardGroupOf(codeOrFamily) {
+  return SHUTTLE_QUICKBOARD_GROUPS.find((g) => g.codes.includes(codeOrFamily) || g.id === codeOrFamily);
+}
 
 function quickboardPad(n) {
   return String(n).padStart(2, '0');
@@ -1851,8 +1888,8 @@ function quickboardNowHHMM() {
 }
 
 function shuttleQuickboardCellHTML(code) {
-  const group = findShuttleGroup(code);
-  const time = shuttles[code]?.departure || null;
+  const group = quickboardGroupOf(code);
+  const time = shuttleReserves[code] || null;
   return `
     <td>
       <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
@@ -1863,7 +1900,7 @@ function shuttleQuickboardCellHTML(code) {
 }
 
 function shuttleQuickboardReserveCellHTML(family) {
-  const group = getAllShuttleGroups().find((g) => g.id === family);
+  const group = quickboardGroupOf(family);
   const time = shuttleReserves[family] || null;
   return `
     <td>
@@ -1879,57 +1916,54 @@ function renderShuttleQuickboard() {
   if (!container) return;
   const cells = SHUTTLE_QUICKBOARD_CODES.map(shuttleQuickboardCellHTML).join('')
     + SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.map(shuttleQuickboardReserveCellHTML).join('');
-  container.innerHTML = `<table class="shuttle-quickboard-table" aria-label="Tableau rapide des départs navettes"><tbody><tr>${cells}</tr></tbody></table>`;
+  container.innerHTML = `<table class="shuttle-quickboard-table" aria-label="Tableau rapide des départs navettes (sens retour)"><tbody><tr>${cells}</tr></tbody></table>`;
 }
 
-function quickboardRecordCode(code) {
-  const rec = shuttles[code] || {};
-  if (!rec.departure) {
-    rec.departure = quickboardNowHHMM();
-    shuttles[code] = rec;
-    saveShuttles(shuttles);
-    renderShuttlesBar();
-    renderShuttleQuickboard();
-    showToast(`${code} : départ enregistré à ${rec.departure}`);
-  } else {
-    // Déjà renseignée : on rouvre la fiche navette existante (même modale
-    // que les vignettes) pour corriger si besoin, plutôt que de dupliquer
-    // cette logique ici.
-    openShuttleModal(code);
-  }
-}
-
-function openReserveTimeEditor(family) {
-  const current = shuttleReserves[family] || '';
+// Éditeur minimal (heure + effacer) partagé par les codes principaux et les
+// réserves du tableau rapide : `key` est la clé dans shuttleReserves (un
+// code comme "LF1", ou une famille comme "LF" pour sa réserve).
+function openQuickboardTimeEditor(key, label) {
+  const current = shuttleReserves[key] || '';
   openModal({
-    title: `Réserve ${family} — heure de départ`,
+    title: `${label} — heure de départ`,
     bodyHTML: `
-      <form id="reserveTimeForm" class="stacked-form">
+      <form id="quickboardTimeForm" class="stacked-form">
         <label>Heure de départ
-          <input type="time" id="fReserveTime" value="${escapeHtml(current)}">
+          <input type="time" id="fQuickboardTime" value="${escapeHtml(current)}">
         </label>
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnReserveClear">Effacer</button>
+          <button type="button" class="btn btn-outline" id="btnQuickboardClear">Effacer</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
     onMount: (panel) => {
-      panel.querySelector('#btnReserveClear').addEventListener('click', () => {
-        shuttleReserves[family] = null;
+      panel.querySelector('#btnQuickboardClear').addEventListener('click', () => {
+        shuttleReserves[key] = null;
         saveShuttleReserves(shuttleReserves);
         renderShuttleQuickboard();
         closeModal();
       });
-      panel.querySelector('#reserveTimeForm').addEventListener('submit', (e) => {
+      panel.querySelector('#quickboardTimeForm').addEventListener('submit', (e) => {
         e.preventDefault();
-        const value = panel.querySelector('#fReserveTime').value;
-        shuttleReserves[family] = value || null;
+        const value = panel.querySelector('#fQuickboardTime').value;
+        shuttleReserves[key] = value || null;
         saveShuttleReserves(shuttleReserves);
         renderShuttleQuickboard();
         closeModal();
       });
     },
   });
+}
+
+function quickboardRecordCode(code) {
+  if (!shuttleReserves[code]) {
+    shuttleReserves[code] = quickboardNowHHMM();
+    saveShuttleReserves(shuttleReserves);
+    renderShuttleQuickboard();
+    showToast(`${code} : départ enregistré à ${shuttleReserves[code]}`);
+  } else {
+    openQuickboardTimeEditor(code, code);
+  }
 }
 
 function quickboardRecordReserve(family) {
@@ -1939,7 +1973,7 @@ function quickboardRecordReserve(family) {
     renderShuttleQuickboard();
     showToast(`Réserve ${family} : départ enregistré à ${shuttleReserves[family]}`);
   } else {
-    openReserveTimeEditor(family);
+    openQuickboardTimeEditor(family, `Réserve ${family}`);
   }
 }
 
