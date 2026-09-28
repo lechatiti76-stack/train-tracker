@@ -18,7 +18,7 @@ let trains = loadTrains();
 let currentDate = todayISO();
 let shuttles = loadShuttles();
 // Tableau rapide des départs navettes (à côté des vignettes navettes) : une
-// case "Réserve" par famille FL/NL/AL, indépendante des vignettes elles-
+// case "Réserve" par famille LF/LN/LA, indépendante des vignettes elles-
 // mêmes — voir renderShuttleQuickboard/wireShuttleQuickboard plus bas.
 let shuttleReserves = loadShuttleReserves();
 let arrivals = loadArrivals();
@@ -1855,8 +1855,11 @@ function wireShuttlesBar() {
 }
 
 // ---------- Tableau rapide des départs navettes (sens retour) ----------
-// Départs "dans l'autre sens" (codes LF/LN/AL), DISTINCTS des navettes
-// suivies par les vignettes ci-dessus (codes FL/NL/AL) : stockage totalement
+// Départs "dans l'autre sens" (codes LF/LN/LA), DISTINCTS des navettes
+// suivies par les vignettes ci-dessus (codes FL/NL/AL) — y compris pour la
+// famille AL, volontairement renommée LA ici pour qu'aucun code ne soit
+// jamais partagé entre les deux bandeaux (source de confusion sinon, un
+// clic sur l'un pouvant être pris pour l'autre) : stockage totalement
 // indépendant (shuttleReserves, malgré son nom historique — voir
 // STORAGE_KEYS.shuttleReserves dans config.js), pour ne jamais interférer
 // avec le suivi détaillé des vignettes (arrivée estimée, passages
@@ -1869,7 +1872,7 @@ function wireShuttlesBar() {
 const SHUTTLE_QUICKBOARD_GROUPS = [
   { id: 'LF', codes: ['LF1', 'LF2', 'LF3'], color: '#f59e0b' },
   { id: 'LN', codes: ['LN1', 'LN2'], color: '#1e3a8a' },
-  { id: 'AL', codes: ['AL1', 'AL2'], color: '#eab308' },
+  { id: 'LA', codes: ['LA1', 'LA2'], color: '#eab308' },
 ];
 const SHUTTLE_QUICKBOARD_CODES = SHUTTLE_QUICKBOARD_GROUPS.flatMap((g) => g.codes);
 const SHUTTLE_QUICKBOARD_RESERVE_FAMILIES = SHUTTLE_QUICKBOARD_GROUPS.map((g) => g.id);
