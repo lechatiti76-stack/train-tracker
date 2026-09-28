@@ -331,7 +331,7 @@ body {
 .shuttle-quick-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .shuttle-quick-actions .btn { flex: 1 1 auto; }
 
-/* ---------- Tableau rapide des départs navettes (sens retour : LF/LN/AL + réserves) ----------
+/* ---------- Tableau rapide des départs navettes (sens retour : LF/LN/LA + réserves) ----------
    Départs dans l'autre sens, indépendants des vignettes navettes ci-dessus
    (pas d'arrivée estimée ni de passages intermédiaires ici) : juste un
    raccourci pour poser vite une heure de départ, avec un grisage dès que
