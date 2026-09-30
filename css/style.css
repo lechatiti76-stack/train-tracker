@@ -240,7 +240,7 @@ body {
 .stopwatch-controls .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------- Navettes internes ---------- */
-.shuttles-bar { max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
+.shuttles-bar { position: relative; max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
 .shuttles-bar-inner { display: flex; flex-wrap: wrap; gap: 0.6rem; }
 .shuttle-chip {
   --shuttle-color: #94a3b8;
@@ -337,7 +337,7 @@ body {
    raccourci pour poser vite une heure de départ, avec un grisage dès que
    c'est fait pour voir d'un coup d'œil ce qui est parti ou non (voir
    renderShuttleQuickboard/wireShuttleQuickboard dans app.js). */
-.shuttle-quickboard-bar { max-width: 1600px; margin: 0.4rem auto 0; padding: 0 1.25rem; }
+.shuttle-quickboard-bar { position: relative; max-width: 1600px; margin: 0.4rem auto 0; padding: 0 1.25rem; }
 .shuttle-quickboard-table { border-collapse: separate; border-spacing: 0.4rem 0; width: 100%; table-layout: fixed; }
 .quickboard-cell {
   --shuttle-color: #94a3b8;
@@ -374,6 +374,12 @@ body {
   border-radius: var(--radius-sm);
 }
 .shuttle-stops-list li span:last-child { font-family: var(--font-mono); font-weight: 700; }
+.shuttle-stops-list li .shuttle-stop-label {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--shuttle-color, var(--text));
+  letter-spacing: 0.01em;
+}
 
 /* ---------- Chip "+ Ajouter une navette" ---------- */
 .shuttle-chip.shuttle-chip-add {
@@ -397,8 +403,50 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
    ne pas dupliquer ces styles déjà validés. Seul le cadre coloré (une
    couleur fixe par destination plutôt qu'un état de progression) et le
    mini-rail animé sont propres aux arrivées. */
-.arrivals-bar { max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
+.arrivals-bar { position: relative; max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
 .arrivals-bar-inner { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+/* ---------- Bouton masquer/afficher une ligne (navettes / tableau rapide /
+   arrivées) ----------
+   Un petit bouton flottant en haut à droite de chaque bandeau, pour le
+   masquer/réafficher manuellement (meilleur visuel quand on n'a pas besoin
+   de tout voir en permanence). Les bandeaux "navettes" et "arrivées" ont en
+   plus une logique de réapparition automatique (voir updateShuttleStates/
+   updateArrivalStates dans app.js) : si masqué manuellement, le bandeau
+   réapparaît tout seul dès qu'un élément dedans devient imminent (même
+   seuil que le clignotement "Arrivée imminente"), pour ne pas rater la
+   séquence finale. Le tableau rapide (LF/LN/LA) n'a pas cette notion de
+   temps restant : une fois masqué, il reste masqué jusqu'au prochain clic. */
+.bar-toggle-btn {
+  position: absolute;
+  top: 0.15rem;
+  right: 1.25rem;
+  z-index: 2;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.bar-toggle-btn:hover { background: var(--surface-3, var(--surface-2)); color: var(--text); }
+.shuttles-bar.is-collapsed .shuttles-bar-inner,
+.shuttle-quickboard-bar.is-collapsed .shuttle-quickboard,
+.arrivals-bar.is-collapsed .arrivals-bar-inner {
+  display: none;
+}
+.shuttles-bar.is-collapsed,
+.shuttle-quickboard-bar.is-collapsed,
+.arrivals-bar.is-collapsed {
+  min-height: 2.3rem;
+}
+.bar-toggle-btn[aria-pressed="true"] { transform: rotate(-90deg); }
 .arrival-chip {
   --arrival-color: #94a3b8;
   display: flex;
@@ -580,6 +628,57 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
 .status-pill.tone-severe { background: var(--danger-bg); color: var(--danger); }
 .status-pill.tone-early { background: var(--early-bg); color: var(--early); }
 .status-pill.tone-neutral { background: var(--neutral-bg); color: var(--text-muted); }
+
+/* ---------- Réduction d'une vignette une fois le départ pour la ligne
+   enregistré (étape 7) ----------
+   Une fois la dernière étape validée, la vignette se réduit automatiquement
+   à une seule ligne (voir maybeCollapseAfterLastStep dans app.js) pour
+   désencombrer visuellement le tableau — un clic dessus la ré-ouvre à sa
+   taille d'origine, et un petit bouton ▾ dans l'en-tête permet de la
+   réduire à nouveau manuellement sans repasser par là. */
+.card-collapse-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.card-collapse-btn[hidden] { display: none; }
+.train-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.train-card-body[hidden] { display: none; }
+.train-card-collapsed-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.train-card-collapsed-strip[hidden] { display: none; }
+.train-card-collapsed-number { font-weight: 800; font-size: 1rem; }
+.train-card-collapsed-number span { color: var(--accent); }
+.train-card-collapsed-text { font-weight: 700; color: var(--text-muted); font-family: var(--font-mono); }
+.train-card-collapsed-hint { color: var(--text-faint); font-size: 0.85rem; flex-shrink: 0; }
+.train-card.is-collapsed { padding: 0.7rem 1.1rem; gap: 0; }
 
 /* ---------- Recherche de sillon par heure d'arrivée ---------- */
 .sillon-lookup {
