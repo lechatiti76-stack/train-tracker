@@ -184,6 +184,11 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     // le bouton "Composition" sur la vignette — voir openCompositionModal
     // dans app.js. null tant que rien n'a été renseigné.
     composition: null, // { wagons: number, weightTons: number, lengthM: number, traction: 'electrique'|'thermique' } | null
+    // Vignette réduite à une ligne ("{numéro} départ à HH:MM") une fois la
+    // dernière étape validée — voir setCardCollapsed/maybeCollapseAfterLastStep
+    // dans app.js, et .train-card.is-collapsed dans style.css. Sans effet
+    // tant que la dernière étape n'a pas d'heure réelle enregistrée.
+    collapsed: false,
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
