@@ -84,19 +84,19 @@ export const DEFAULT_SETTINGS = {
   // storage.js.
   quickTrainsEnrichedV2: false,
   // Bandeaux masqués manuellement (bouton ▾ en haut de chaque ligne) : true
-// = actuellement masqué. Les bandeaux "shuttles" (navettes internes) et
-// "arrivals" (arrivées) réapparaissent tout seuls dès qu'un élément
-// dedans devient imminent, même masqués (voir updateShuttleStates/
-// updateArrivalStates dans app.js) — "quickboard" (tableau rapide des
-// départs navettes LF/LN/LA) n'a pas cette logique : une fois masqué, il
-// reste masqué jusqu'au prochain clic manuel.
-panelHidden: { shuttles: false, quickboard: false, arrivals: false },
-// Seuils de retard personnalisés (minutes), réglables dans Réglages —
-// fusionnés sur DELAY_THRESHOLDS_DEFAULTS ci-dessus (voir
-// applyEffectiveDelayThresholds dans app.js). null/absent = valeur par
-// défaut de l'application. "onTime" n'est volontairement pas réglable ici
-// (ce n'est pas un vrai palier de sévérité, juste le seuil "quasiment à
-// l'heure").
+  // = actuellement masqué. Les bandeaux "shuttles" (navettes internes) et
+  // "arrivals" (arrivées) réapparaissent tout seuls dès qu'un élément
+  // dedans devient imminent, même masqués (voir updateShuttleStates/
+  // updateArrivalStates dans app.js) — "quickboard" (tableau rapide des
+  // départs navettes LF/LN/LA) n'a pas cette logique : une fois masqué, il
+  // reste masqué jusqu'au prochain clic manuel.
+  panelHidden: { shuttles: false, quickboard: false, arrivals: false },
+  // Seuils de retard personnalisés (minutes), réglables dans Réglages —
+  // fusionnés sur DELAY_THRESHOLDS_DEFAULTS ci-dessus (voir
+  // applyEffectiveDelayThresholds dans app.js). null/absent = valeur par
+  // défaut de l'application. "onTime" n'est volontairement pas réglable ici
+  // (ce n'est pas un vrai palier de sévérité, juste le seuil "quasiment à
+  // l'heure").
 delayThresholds: { moderate: null, severe: null },
 };
 
