@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS = {
   // défaut de l'application. "onTime" n'est volontairement pas réglable ici
   // (ce n'est pas un vrai palier de sévérité, juste le seuil "quasiment à
   // l'heure").
-delayThresholds: { moderate: null, severe: null },
+  delayThresholds: { moderate: null, severe: null },
 };
 
 export const STEP_COUNT = 7;
