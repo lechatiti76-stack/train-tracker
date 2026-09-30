@@ -3,7 +3,7 @@
 // DOM (delay-calc, time-utils, storage, sheets-sync) ni à l'état global
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
-import { DELAY_THRESHOLDS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
+import { DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
 import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals } from './storage.js';
 import { computeAllStepDelays, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM } from './time-utils.js';
@@ -14,6 +14,21 @@ import { trainCardTemplate, updateCardDynamicParts, escapeHtml, formatCompositio
 import { initStopwatch } from './stopwatch.js';
 
 let settings = loadSettings();
+// Applique les seuils de retard personnalisés (settings.delayThresholds,
+// réglables dans Réglages) par-dessus DELAY_THRESHOLDS_DEFAULTS, en
+// mutant DELAY_THRESHOLDS en place (voir le commentaire sur cet objet dans
+// config.js) : tous les modules qui l'importent (delay-calc.js, card.js)
+// voient le changement sans code supplémentaire de leur côté. Un seuil non
+// renseigné (null/undefined/<=0) retombe sur la valeur par défaut.
+function applyEffectiveDelayThresholds() {
+  const override = settings.delayThresholds || {};
+  const moderate = Number(override.moderate);
+  const severe = Number(override.severe);
+  DELAY_THRESHOLDS.onTime = DELAY_THRESHOLDS_DEFAULTS.onTime;
+  DELAY_THRESHOLDS.moderate = Number.isFinite(moderate) && moderate > 0 ? moderate : DELAY_THRESHOLDS_DEFAULTS.moderate;
+  DELAY_THRESHOLDS.severe = Number.isFinite(severe) && severe > 0 ? severe : DELAY_THRESHOLDS_DEFAULTS.severe;
+}
+applyEffectiveDelayThresholds();
 let trains = loadTrains();
 let currentDate = todayISO();
 let shuttles = loadShuttles();
@@ -204,6 +219,27 @@ function refreshTrainCard(train) {
 }
 
 // ---------- Actions sur une vignette ----------
+// Réduit/agrandit une vignette (voir train.collapsed, .train-card.is-
+// collapsed dans style.css, et trainCardTemplate/updateCardDynamicParts
+// dans card.js). Le contenu complet (steps-list, graphique, flap-boards...)
+// reste en place dans le DOM, simplement masqué via l'attribut `hidden` :
+// refreshTrainCard (updateCardDynamicParts) suffit donc à basculer
+// l'affichage, sans recréer le graphique ni les flap-boards.
+function setCardCollapsed(train, collapsed) {
+  train.collapsed = collapsed;
+  persist();
+  refreshTrainCard(train);
+}
+
+// Une fois la dernière étape ("Départ pour la ligne" par défaut, bouton 7)
+// validée, la vignette se réduit automatiquement à une ligne pour
+// désencombrer le tableau — voir .train-card.is-collapsed dans style.css.
+// Un clic dessus (ou le bouton ▾ de l'en-tête) la ré-ouvre/la réduit à
+// nouveau manuellement ensuite.
+function maybeCollapseAfterLastStep(train, stepIndex) {
+  if (stepIndex === train.steps.length - 1) setCardCollapsed(train, true);
+}
+
 function recordStepNow(train, stepIndex) {
   const step = train.steps[stepIndex];
   step.real = nowLocalISOWithSeconds();
@@ -212,12 +248,16 @@ function recordStepNow(train, stepIndex) {
   refreshTrainCard(train);
   pushStepIfConfigured(train, stepIndex);
   showToast(`${step.label} enregistré à ${formatHHMMSS(new Date(step.real))}`);
+  maybeCollapseAfterLastStep(train, stepIndex);
 }
 
 function resetStepTime(train, stepIndex) {
   if (!confirm("Réinitialiser l'heure enregistrée pour cette étape ?")) return;
   train.steps[stepIndex].real = null;
   train.updatedAt = new Date().toISOString();
+  if (stepIndex === train.steps.length - 1 && train.collapsed) {
+    train.collapsed = false;
+  }
   persist();
   refreshTrainCard(train);
   pushStepIfConfigured(train, stepIndex);
@@ -232,6 +272,7 @@ function resetAllStepsForTrain(train) {
   }
   if (!confirm(`Réinitialiser les ${recordedCount} heure(s) enregistrée(s) pour le train ${train.number} ?`)) return;
   train.steps.forEach((s, i) => { s.real = null; pushStepIfConfigured(train, i); });
+  train.collapsed = false;
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
@@ -437,7 +478,22 @@ function delayColor(tone) {
   }
 }
 
-function buildTrainReportHTML(train) {
+// Étape la plus avancée ayant une heure réelle enregistrée (voir la même
+// logique dans computeTrainStatus/delay-calc.js, non exportée telle
+// quelle) : c'est elle qui alimente la phrase d'en-tête de l'email stylé
+// ("... vient de faire l'étape « X » à ..."), pour rester correcte quel que
+// soit l'avancement du train (pas forcément l'arrivée).
+function lastRecordedStepInfo(train, delays) {
+  for (let i = train.steps.length - 1; i >= 0; i--) {
+    if (delays[i].status === 'recorded') return { index: i, step: train.steps[i], delay: delays[i] };
+  }
+  return null;
+}
+
+// `destination` (optionnelle) vient des trains à accès rapide déjà
+// configurés dans Réglages (settings.quickTrains) — voir
+// getQuickTrainDestination, appelé depuis copyTrainDataStyled.
+function buildTrainReportHTML(train, destination) {
   const delays = computeAllStepDelays(train);
   const status = computeTrainStatus(train);
   const cause = computeMainCause(train);
@@ -446,34 +502,46 @@ function buildTrainReportHTML(train) {
   const compositionSummary = formatCompositionSummary(train.composition);
   const font = "font-family:Arial,Helvetica,sans-serif;";
 
+  const last = lastRecordedStepInfo(train, delays);
+  const lastTime = last?.delay?.realDate ? formatHHMM(last.delay.realDate) : null;
+  const numberHTML = `<strong style="color:${statusColor.fg};">N° ${escapeHtml(train.number)}</strong>`;
+  const destinationHTML = destination ? ` à destination de <strong style="color:${statusColor.fg};">${escapeHtml(destination)}</strong>` : '';
+  const timeHTML = lastTime ? `<strong style="color:${statusColor.fg};">${escapeHtml(lastTime)}</strong>` : null;
+
+  // Message d'en-tête : reprend le libellé réel de la dernière étape
+  // enregistrée (ex : "Mise en tête", "Départ pour la ligne"...) plutôt
+  // qu'un lieu figé, pour rester juste quel que soit l'avancement.
+  const headerMessage = last && timeHTML
+    ? `Je vous informe que votre train ${numberHTML}${destinationHTML} vient de faire l'étape « ${escapeHtml(last.step.label)} » à ${timeHTML}.`
+    : `Suivi du train ${numberHTML}${destinationHTML} : aucune étape enregistrée pour l'instant.`;
+
   const stepsRows = train.steps.map((step, i) => {
     const d = delays[i];
     const c = delayColor(d.tone);
-    const ecartLabel = d.status === 'recorded' ? formatDelayLabel(d.diffMin, DELAY_THRESHOLDS) : '—';
+    const ecartLabel = d.status === 'recorded' ? formatDelayLabel(d.diffMin, DELAY_THRESHOLDS) : null;
+    const realText = d.realDate ? escapeHtml(formatHHMM(d.realDate)) : 'Non enregistré';
     return `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${escapeHtml(step.label)}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#5b6577;">${escapeHtml(step.theoretical || 'Non renseignée')}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${d.realDate ? escapeHtml(formatHHMM(d.realDate)) : 'Non enregistré'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e9f2;text-align:center;">
-          <span style="display:inline-block;padding:2px 8px;border-radius:999px;${font}font-size:12px;font-weight:700;background:${c.bg};color:${c.fg};">${escapeHtml(ecartLabel)}</span>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${escapeHtml(step.label)}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:12px;color:#5b6577;">${escapeHtml(step.theoretical || '--:--')}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;white-space:nowrap;">
+          ${realText}${ecartLabel ? ` <span style="${font}font-size:11px;font-weight:700;color:${c.fg};">(${escapeHtml(ecartLabel)})</span>` : ''}
         </td>
       </tr>`;
   }).join('');
 
   return `<div style="${font}max-width:560px;border:1px solid #d7dce6;border-radius:10px;overflow:hidden;">
-  <div style="background:#0f1b33;color:#ffffff;padding:14px 16px;">
-    <div style="font-size:17px;font-weight:700;">🚆 TRAIN ${escapeHtml(train.number)}</div>
-    <div style="font-size:13px;color:#c7d2e8;margin-top:2px;">📅 ${escapeHtml(formatDateFR(train.date))}</div>
+  <div style="background:${statusColor.bg};padding:14px 16px;border-bottom:2px solid ${statusColor.fg};">
+    <div style="${font}font-size:14px;line-height:1.55;color:#1f2937;">🚆 ${headerMessage}</div>
+    <div style="${font}font-size:12px;color:#5b6577;margin-top:4px;">📅 ${escapeHtml(formatDateFR(train.date))}</div>
   </div>
   ${compositionSummary ? `<div style="padding:10px 16px;background:#f4f6fb;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#334155;">🚃 <strong>Composition :</strong> ${escapeHtml(compositionSummary)}</div>` : ''}
   <table style="width:100%;border-collapse:collapse;">
     <thead>
       <tr style="background:#f4f6fb;">
-        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Étape</th>
-        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Théorique</th>
-        <th style="text-align:left;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Réel</th>
-        <th style="text-align:center;padding:8px 10px;${font}font-size:12px;color:#5b6577;">Écart</th>
+        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Étape</th>
+        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Théorique</th>
+        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Réel (écart)</th>
       </tr>
     </thead>
     <tbody>${stepsRows}</tbody>
@@ -485,15 +553,11 @@ function buildTrainReportHTML(train) {
       ${cause.amountLabel && cause.amountLabel !== '--' ? ` <span style="${font}font-size:12px;color:#5b6577;">${escapeHtml(cause.amountLabel)}</span>` : ''}
     </div>
   </div>
-  <div style="padding:12px 16px;background:${statusColor.bg};">
-    <span style="${font}font-size:12px;color:#334155;">Statut global :</span>
-    <strong style="${font}font-size:14px;color:${statusColor.fg};margin-left:6px;">${escapeHtml(status.label)}</strong>
-  </div>
 </div>`;
 }
 
 async function copyTrainDataStyled(train) {
-  const html = buildTrainReportHTML(train);
+  const html = buildTrainReportHTML(train, getQuickTrainDestination(train.number));
   const text = buildTrainReportText(train);
   try {
     if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
@@ -546,6 +610,8 @@ function onGridClick(e) {
       break;
     }
     case 'open-composition': openCompositionModal(train); break;
+    case 'collapse-card': setCardCollapsed(train, true); break;
+    case 'expand-card': setCardCollapsed(train, false); break;
     default: break;
   }
 }
@@ -725,13 +791,26 @@ function openTrainModal(train) {
       });
       panel.querySelectorAll('.fStepCauseSuggestBtn').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const i = btn.dataset.i;
+          const i = Number(btn.dataset.i);
           const fieldset = btn.closest('.step-form-row');
           const labelInput = fieldset?.querySelector('.fStepLabel');
           const causeInput = fieldset?.querySelector('.fStepCause');
           if (!causeInput) return;
           const suggestion = suggestCauseForLabel(labelInput?.value || btn.dataset.label);
-          if (suggestion) causeInput.value = suggestion;
+          if (!suggestion) return;
+          causeInput.value = suggestion;
+          // Enregistre tout de suite (sans attendre le clic sur "Enregistrer
+          // les modifications") : uniquement possible pour un train déjà
+          // existant, puisqu'un train en cours de création n'existe pas
+          // encore en mémoire tant que le formulaire n'a pas été soumis.
+          if (train && train.steps[i]) {
+            train.steps[i].cause = suggestion;
+            train.updatedAt = new Date().toISOString();
+            persist();
+            refreshTrainCard(train);
+            pushStepIfConfigured(train, i);
+            showToast(`Cause « ${suggestion} » enregistrée pour ${train.steps[i].label}`);
+          }
         });
       });
       const addDateBtn = panel.querySelector('#btnAddDateRow');
@@ -925,6 +1004,25 @@ function settingsBodyHTML() {
 
       <div class="steps-form-list">
         <p class="help-text">
+          Seuils de retard — au-delà de "orange", l'écart est affiché en
+          orange (léger retard) ; au-delà de "rouge", en rouge (retard
+          important). Utilisés partout : statut de la vignette, écarts par
+          étape, cause principale, et l'email stylé (numéro de train/étape en
+          couleur selon l'écart).
+        </p>
+        <div class="form-row">
+          <label>Seuil orange (min)
+            <input type="number" id="sDelayModerate" min="1" step="1" value="${settings.delayThresholds?.moderate ?? DELAY_THRESHOLDS_DEFAULTS.moderate}">
+          </label>
+          <label>Seuil rouge (min)
+            <input type="number" id="sDelaySevere" min="1" step="1" value="${settings.delayThresholds?.severe ?? DELAY_THRESHOLDS_DEFAULTS.severe}">
+          </label>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnResetDelayThresholds">↺ Réinitialiser aux valeurs par défaut</button>
+      </div>
+
+      <div class="steps-form-list">
+        <p class="help-text">
           Navettes internes — réglages par famille. Les horaires de FL/NL/AL
           sont identiques par défaut ; ajustez-les ici indépendamment selon
           vos observations, ça se sauvegarde pour toutes les navettes de la
@@ -1045,6 +1143,11 @@ function openSettingsModal() {
         });
         showToast('Décalages réinitialisés — pensez à Enregistrer');
       });
+      panel.querySelector('#btnResetDelayThresholds').addEventListener('click', () => {
+        panel.querySelector('#sDelayModerate').value = DELAY_THRESHOLDS_DEFAULTS.moderate;
+        panel.querySelector('#sDelaySevere').value = DELAY_THRESHOLDS_DEFAULTS.severe;
+        showToast('Seuils de retard réinitialisés — pensez à Enregistrer');
+      });
 
       // ---- Trains à accès rapide (lignes numéro/opérateur/destination) ----
       const quickTrainsContainer = panel.querySelector('#sQuickTrainsContainer');
@@ -1131,12 +1234,19 @@ function openSettingsModal() {
         });
         settings.arrivalTimings = arrivalTimings;
 
+        settings.delayThresholds = {
+          moderate: Number(panel.querySelector('#sDelayModerate').value) || null,
+          severe: Number(panel.querySelector('#sDelaySevere').value) || null,
+        };
+        applyEffectiveDelayThresholds();
+
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
         renderQuickTrainsBar();
         renderShuttlesBar();
         renderArrivalsBar();
+        renderGrid();
         closeModal();
         showToast('Réglages enregistrés');
       });
@@ -1519,6 +1629,75 @@ function shuttleChipClass(code) {
   return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
 }
 
+// ---------- Masquer/afficher un bandeau (navettes / tableau rapide /
+// arrivées) ----------
+// Bouton ▾ commun aux 3 bandeaux (voir index.html, .bar-toggle-btn dans
+// style.css). Persisté dans settings.panelHidden pour survivre à un
+// rechargement de page. "shuttles" et "arrivals" réapparaissent tout seuls
+// une fois masqués si un élément dedans devient imminent (voir
+// maybeAutoRevealShuttlesBar/maybeAutoRevealArrivalsBar, appelées depuis
+// updateShuttleStates/updateArrivalStates) ; "quickboard" reste masqué
+// jusqu'au prochain clic manuel (pas de notion de temps restant pour ce
+// bandeau-là).
+const BAR_SECTION_SELECTOR = {
+  shuttles: '.shuttles-bar',
+  quickboard: '.shuttle-quickboard-bar',
+  arrivals: '.arrivals-bar',
+};
+
+function applyPanelVisibility() {
+  const state = settings.panelHidden || {};
+  Object.entries(BAR_SECTION_SELECTOR).forEach(([key, selector]) => {
+    const section = document.querySelector(selector);
+    if (!section) return;
+    const hidden = Boolean(state[key]);
+    section.classList.toggle('is-collapsed', hidden);
+    const btn = section.querySelector('.bar-toggle-btn');
+    if (btn) btn.setAttribute('aria-pressed', String(hidden));
+  });
+}
+
+function setPanelHidden(key, hidden) {
+  settings.panelHidden = { ...settings.panelHidden, [key]: hidden };
+  saveSettings(settings);
+  applyPanelVisibility();
+}
+
+function wireBarToggles() {
+  document.querySelectorAll('.bar-toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.barToggle;
+      const currentlyHidden = Boolean(settings.panelHidden?.[key]);
+      setPanelHidden(key, !currentlyHidden);
+    });
+  });
+}
+
+// Réaffiche automatiquement le bandeau "navettes internes" s'il est masqué
+// et qu'au moins une navette suivie devient imminente ou vient d'arriver
+// (même seuil que le clignotement "Arrivée imminente" / group.imminentMin),
+// pour ne jamais faire rater la séquence finale d'un départ validé pendant
+// que le bandeau était masqué. Ne fait rien si le bandeau n'est pas masqué.
+function maybeAutoRevealShuttlesBar() {
+  if (!settings.panelHidden?.shuttles) return;
+  const codes = getAllShuttleGroups().flatMap((g) => g.codes);
+  const shouldReveal = codes.some((code) => {
+    const state = computeShuttleProgress(code).state;
+    return state === 'imminent' || state === 'arrived';
+  });
+  if (shouldReveal) setPanelHidden('shuttles', false);
+}
+
+// Équivalent pour le bandeau "arrivées" — voir maybeAutoRevealShuttlesBar.
+function maybeAutoRevealArrivalsBar() {
+  if (!settings.panelHidden?.arrivals) return;
+  const shouldReveal = getAllArrivalGroups().some((group) => {
+    const state = computeArrivalProgress(group.id).state;
+    return state === 'imminent' || state === 'arrived';
+  });
+  if (shouldReveal) setPanelHidden('arrivals', false);
+}
+
 function renderShuttlesBar() {
   const container = el('shuttlesBar');
   if (!container) return;
@@ -1557,6 +1736,7 @@ function updateShuttleStates() {
       countdownEl.hidden = remainingMin === null;
     }
   });
+    maybeAutoRevealShuttlesBar();
 }
 
 function shuttleQuickStatusText(arrivedManually, delayFlag) {
@@ -1588,10 +1768,10 @@ function openShuttleModal(code) {
         <p class="shuttle-arrival-preview" data-role="shuttle-arrival">${departure ? computeShuttleArrival(code, departure) : '--:--'}</p>
 
         ${group.stops && group.stops.length ? `
-          <div class="shuttle-stops">
+          <div class="shuttle-stops" style="--shuttle-color:${group.color}">
             <p class="help-text">Passages (calculés depuis l'heure de départ ci-dessus) :</p>
             <ul class="shuttle-stops-list" data-role="shuttle-stops-list">
-              ${group.stops.map((s) => `<li><span>${escapeHtml(s.label)}</span><span data-offset="${s.offsetMin}">--:--</span></li>`).join('')}
+              ${group.stops.map((s) => `<li><span class="shuttle-stop-label">${escapeHtml(s.label)}</span><span data-offset="${s.offsetMin}">--:--</span></li>`).join('')}
             </ul>
           </div>` : ''}
 
@@ -2163,6 +2343,7 @@ function updateArrivalStates() {
       if (timeEl) timeEl.textContent = s.reached && s.time ? s.time : '';
     });
   });
+    maybeAutoRevealArrivalsBar();
 }
 
 function arrivalQuickStatusText(arrivedManually, delayFlag) {
@@ -2475,6 +2656,8 @@ function init() {
   wireShuttleQuickboard();
   renderArrivalsBar();
   wireArrivalsBar();
+  wireBarToggles();
+  applyPanelVisibility();
   wireQuickTrainsBar();
   wireInstallPrompt();
   registerServiceWorker();
