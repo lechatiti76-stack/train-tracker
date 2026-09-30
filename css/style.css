@@ -405,6 +405,7 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
    mini-rail animé sont propres aux arrivées. */
 .arrivals-bar { position: relative; max-width: 1600px; margin: 0.75rem auto 0; padding: 0 1.25rem; }
 .arrivals-bar-inner { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+
 /* ---------- Bouton masquer/afficher une ligne (navettes / tableau rapide /
    arrivées) ----------
    Un petit bouton flottant en haut à droite de chaque bandeau, pour le
