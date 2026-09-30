@@ -1736,7 +1736,7 @@ function updateShuttleStates() {
       countdownEl.hidden = remainingMin === null;
     }
   });
-    maybeAutoRevealShuttlesBar();
+  maybeAutoRevealShuttlesBar();
 }
 
 function shuttleQuickStatusText(arrivedManually, delayFlag) {
@@ -2343,7 +2343,7 @@ function updateArrivalStates() {
       if (timeEl) timeEl.textContent = s.reached && s.time ? s.time : '';
     });
   });
-    maybeAutoRevealArrivalsBar();
+  maybeAutoRevealArrivalsBar();
 }
 
 function arrivalQuickStatusText(arrivedManually, delayFlag) {
