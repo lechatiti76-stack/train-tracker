@@ -83,6 +83,21 @@ export const DEFAULT_SETTINGS = {
   // format enrichi (opérateur/destination) — voir loadSettings() dans
   // storage.js.
   quickTrainsEnrichedV2: false,
+  // Bandeaux masqués manuellement (bouton ▾ en haut de chaque ligne) : true
+// = actuellement masqué. Les bandeaux "shuttles" (navettes internes) et
+// "arrivals" (arrivées) réapparaissent tout seuls dès qu'un élément
+// dedans devient imminent, même masqués (voir updateShuttleStates/
+// updateArrivalStates dans app.js) — "quickboard" (tableau rapide des
+// départs navettes LF/LN/LA) n'a pas cette logique : une fois masqué, il
+// reste masqué jusqu'au prochain clic manuel.
+panelHidden: { shuttles: false, quickboard: false, arrivals: false },
+// Seuils de retard personnalisés (minutes), réglables dans Réglages —
+// fusionnés sur DELAY_THRESHOLDS_DEFAULTS ci-dessus (voir
+// applyEffectiveDelayThresholds dans app.js). null/absent = valeur par
+// défaut de l'application. "onTime" n'est volontairement pas réglable ici
+// (ce n'est pas un vrai palier de sévérité, juste le seuil "quasiment à
+// l'heure").
+delayThresholds: { moderate: null, severe: null },
 };
 
 export const STEP_COUNT = 7;
@@ -164,12 +179,22 @@ export const QUICK_TRAIN_OPERATOR_COLORS = {
   FERROVERGNE: '#ea580c',
 };
 
-// Seuils (en minutes) utilisés pour la sévérité visuelle des écarts.
+// Seuils (en minutes) utilisés pour la sévérité visuelle des écarts. Objet
+// volontairement mutable (jamais réassigné, seulement ses propriétés
+// modifiées en place) : voir applyEffectiveDelayThresholds dans app.js, qui
+// les met à jour selon settings.delayThresholds (réglable dans Réglages).
+// Comme tous les modules important DELAY_THRESHOLDS partagent la même
+// référence d'objet, ils voient le changement immédiatement sans qu'il soit
+// nécessaire de leur passer un paramètre supplémentaire (delay-calc.js,
+// card.js...).
 export const DELAY_THRESHOLDS = {
   onTime: 1, // |écart| < 1 min => "à l'heure"
   moderate: 5, // écart >= 5 min => palier "orange"
   severe: 10, // écart >= 10 min => palier "rouge"
 };
+// Copie figée des valeurs d'origine ci-dessus, pour revenir aux valeurs par
+// défaut de l'application si l'utilisateur efface son réglage personnalisé.
+export const DELAY_THRESHOLDS_DEFAULTS = { ...DELAY_THRESHOLDS };
 
 export const STORAGE_KEYS = {
   trains: 'traintrack:trains:v1',
