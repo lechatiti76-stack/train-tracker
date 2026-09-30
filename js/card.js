@@ -110,56 +110,79 @@ function summaryRowHTML(train) {
     </div>`;
 }
 
+// Libellé affiché sur la vignette réduite : "{numéro} départ à {HH:MM}"
+// (heure réelle de la dernière étape, "Départ pour la ligne" par défaut).
+function collapsedStripLabel(train) {
+  const lastStep = train.steps[train.steps.length - 1];
+  const real = lastStep?.real ? formatHHMM(new Date(lastStep.real)) : '--:--';
+  return `départ à ${real}`;
+}
+
 export function trainCardTemplate(train, { readOnly = false, destination = null } = {}) {
   const status = computeTrainStatus(train);
   const stepsHTML = train.steps.map((_, i) => stepRowHTML(train, i, readOnly)).join('');
+  const lastStep = train.steps[train.steps.length - 1];
+  // Réduction possible seulement une fois la dernière étape ("Départ pour
+  // la ligne", par défaut) enregistrée — voir maybeCollapseAfterLastStep
+  // dans app.js, qui bascule train.collapsed automatiquement à ce moment.
+  const isCollapsible = !readOnly && Boolean(lastStep?.real);
+  const isCollapsed = isCollapsible && Boolean(train.collapsed);
 
   return `
-    <article class="train-card" data-train-id="${train.id}" data-readonly="${readOnly}">
-      <header class="card-header">
-        ${readOnly ? '' : '<button type="button" class="card-handle" draggable="true" data-action="drag-handle" aria-label="Glisser pour réorganiser">⠿</button>'}
-        <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span>${destination ? `<span class="card-destination" data-role="train-destination"> — à destination de ${escapeHtml(destination)}</span>` : ''}</h3>
-        <span class="source-badge" data-role="source-badge" title="Synchronisé depuis Google Sheets" ${train.source === 'sheet' ? '' : 'hidden'}>⇄ Sheet</span>
-        <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
-      </header>
-
+    <article class="train-card${isCollapsed ? ' is-collapsed' : ''}" data-train-id="${train.id}" data-readonly="${readOnly}">
       ${readOnly ? '' : `
-        <div class="sillon-lookup">
-          <label class="sillon-lookup-label" for="sillon-${train.id}">Heure du sillon (départ pour la ligne + 15 min)</label>
-          <div class="sillon-lookup-row">
-            <input type="time" id="sillon-${train.id}" class="sillon-lookup-input" data-role="sillon-time" value="${train.sillonTime || ''}">
-            <button type="button" class="btn btn-outline btn-sm" data-action="apply-sillon">⚡ Remplir les 7 heures</button>
-          </div>
-          <p class="sillon-lookup-status" data-role="sillon-status"></p>
-                </div>
-        <div class="composition-row">
-          <button type="button" class="btn btn-outline btn-sm" data-action="open-composition">🚃 Composition</button>
-          <span class="composition-summary" data-role="composition-summary">${escapeHtml(formatCompositionSummary(train.composition))}</span>
-        </div>`}
+      <button type="button" class="train-card-collapsed-strip" data-role="collapsed-strip" data-action="expand-card" ${isCollapsed ? '' : 'hidden'}>
+        <span class="train-card-collapsed-number">TRAIN <span data-role="collapsed-number">${escapeHtml(train.number)}</span></span>
+        <span class="train-card-collapsed-text" data-role="collapsed-text">${escapeHtml(collapsedStripLabel(train))}</span>
+        <span class="train-card-collapsed-hint" aria-hidden="true">▸ tout afficher</span>
+      </button>`}
+      <div class="train-card-body" data-role="card-body" ${isCollapsed ? 'hidden' : ''}>
+        <header class="card-header">
+          ${readOnly ? '' : '<button type="button" class="card-handle" draggable="true" data-action="drag-handle" aria-label="Glisser pour réorganiser">⠿</button>'}
+          <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span>${destination ? `<span class="card-destination" data-role="train-destination"> — à destination de ${escapeHtml(destination)}</span>` : ''}</h3>
+          <span class="source-badge" data-role="source-badge" title="Synchronisé depuis Google Sheets" ${train.source === 'sheet' ? '' : 'hidden'}>⇄ Sheet</span>
+          <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
+          ${readOnly ? '' : `<button type="button" class="card-collapse-btn" data-action="collapse-card" data-role="collapse-btn" title="Réduire cette vignette" aria-label="Réduire cette vignette" ${isCollapsible ? '' : 'hidden'}>▾</button>`}
+        </header>
 
-      <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
+        ${readOnly ? '' : `
+          <div class="sillon-lookup">
+            <label class="sillon-lookup-label" for="sillon-${train.id}">Heure du sillon (départ pour la ligne + 15 min)</label>
+            <div class="sillon-lookup-row">
+              <input type="time" id="sillon-${train.id}" class="sillon-lookup-input" data-role="sillon-time" value="${train.sillonTime || ''}">
+              <button type="button" class="btn btn-outline btn-sm" data-action="apply-sillon">⚡ Remplir les 7 heures</button>
+            </div>
+            <p class="sillon-lookup-status" data-role="sillon-status"></p>
+                  </div>
+          <div class="composition-row">
+            <button type="button" class="btn btn-outline btn-sm" data-action="open-composition">🚃 Composition</button>
+            <span class="composition-summary" data-role="composition-summary">${escapeHtml(formatCompositionSummary(train.composition))}</span>
+          </div>`}
 
-      ${midRowHTML(train)}
+        <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
 
-      <div class="chart-wrap">
-        <div class="chart-title">Théorique / Réel — au fil des étapes</div>
-        <div class="chart-canvas-holder"><canvas data-role="chart"></canvas></div>
+        ${midRowHTML(train)}
+
+        <div class="chart-wrap">
+          <div class="chart-title">Théorique / Réel — au fil des étapes</div>
+          <div class="chart-canvas-holder"><canvas data-role="chart"></canvas></div>
+        </div>
+
+        <footer class="card-actions">
+          ${readOnly ? '' : `
+            <button type="button" class="btn btn-ghost btn-move" data-action="move-left" aria-label="Déplacer avant">◀</button>
+            <button type="button" class="btn btn-ghost btn-move" data-action="move-right" aria-label="Déplacer après">▶</button>
+          `}
+          <button type="button" class="btn" data-action="copy-train">Copier</button>
+          <button type="button" class="btn btn-outline" data-action="copy-html-train" title="Copier une version stylée avec couleurs, à coller dans un email">🎨 Copier stylé</button>
+          <button type="button" class="btn" data-action="email-train">Email</button>
+          ${readOnly ? '' : `
+            <button type="button" class="btn btn-outline" data-action="reset-all-steps">↺ Réinitialiser les heures</button>
+            <button type="button" class="btn btn-outline" data-action="edit-train">Modifier</button>
+            <button type="button" class="btn btn-danger" data-action="delete-train" aria-label="Supprimer">✕</button>
+          `}
+        </footer>
       </div>
-
-      <footer class="card-actions">
-        ${readOnly ? '' : `
-          <button type="button" class="btn btn-ghost btn-move" data-action="move-left" aria-label="Déplacer avant">◀</button>
-          <button type="button" class="btn btn-ghost btn-move" data-action="move-right" aria-label="Déplacer après">▶</button>
-        `}
-        <button type="button" class="btn" data-action="copy-train">Copier</button>
-        <button type="button" class="btn btn-outline" data-action="copy-html-train" title="Copier une version stylée avec couleurs, à coller dans un email">🎨 Copier stylé</button>
-        <button type="button" class="btn" data-action="email-train">Email</button>
-        ${readOnly ? '' : `
-          <button type="button" class="btn btn-outline" data-action="reset-all-steps">↺ Réinitialiser les heures</button>
-          <button type="button" class="btn btn-outline" data-action="edit-train">Modifier</button>
-          <button type="button" class="btn btn-danger" data-action="delete-train" aria-label="Supprimer">✕</button>
-        `}
-      </footer>
     </article>`;
 }
 
@@ -188,6 +211,24 @@ export function updateCardDynamicParts(cardEl, train) {
 
   const summary = cardEl.querySelector('[data-role="summary"]');
   if (summary) summary.innerHTML = summaryRowHTML(train);
+
+  const lastStep = train.steps[train.steps.length - 1];
+  const isCollapsible = cardEl.dataset.readonly !== 'true' && Boolean(lastStep?.real);
+  const isCollapsed = isCollapsible && Boolean(train.collapsed);
+  cardEl.classList.toggle('is-collapsed', isCollapsed);
+
+  const stripEl = cardEl.querySelector('[data-role="collapsed-strip"]');
+  if (stripEl) {
+    stripEl.hidden = !isCollapsed;
+    const numberEl = stripEl.querySelector('[data-role="collapsed-number"]');
+    if (numberEl) numberEl.textContent = train.number;
+    const textEl = stripEl.querySelector('[data-role="collapsed-text"]');
+    if (textEl) textEl.textContent = collapsedStripLabel(train);
+  }
+  const bodyEl = cardEl.querySelector('[data-role="card-body"]');
+  if (bodyEl) bodyEl.hidden = isCollapsed;
+  const collapseBtn = cardEl.querySelector('[data-role="collapse-btn"]');
+  if (collapseBtn) collapseBtn.hidden = !isCollapsible;
 
   return computeMainCause(train);
 }
