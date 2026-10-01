@@ -75,6 +75,13 @@ export const DEFAULT_SETTINGS = {
   // valent que pour la journée en cours — voir loadArrivals/saveArrivals
   // dans storage.js.
   arrivalTimings: {},
+  // Heure théorique de départ (HH:MM) par famille de navette (FL/NL/AL),
+  // saisie dans Réglages → "Navettes" (tableau rapide), utilisée pour
+  // calculer l'écart réel/théorique affiché sous forme de badge coloré sur
+  // le tableau rapide des départs navettes — voir computeQuickboardDelta
+  // dans app.js. Absente/vide pour une famille = pas de badge affiché (pas
+  // assez d'information pour calculer un écart).
+  quickboardTimings: {},
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
