@@ -187,8 +187,25 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     // Vignette réduite à une ligne ("{numéro} départ à HH:MM") une fois la
     // dernière étape validée — voir setCardCollapsed/maybeCollapseAfterLastStep
     // dans app.js, et .train-card.is-collapsed dans style.css. Sans effet
-    // tant que la dernière étape n'a pas d'heure réelle enregistrée.
+    // tant que la dernière étape n'a pas d'heure réelle enregistrée (sauf
+    // train SLOT en départ FA, voir `slot` ci-dessous, qui force aussi la
+    // réduction).
     collapsed: false,
+    // "Train complet" (suivi classique des 7 étapes, défaut) ou "Train avec
+    // slots" (en plus de la composition) — bascule à côté du bouton
+    // Composition, voir openSlotModal dans app.js.
+    trainType: 'complet', // 'complet' | 'slots'
+    // Renseigné uniquement si trainType === 'slots' (fenêtre "Infos SLOT") :
+    // { type: 'TDF'|'TN'|'ATL', wagons: number|null, arrivalTime: 'HH:MM'|null,
+    //   recompositionTime: 'HH:MM'|null, departure: 'FA'|'LHTE'|null }.
+    // `departure` distingue QUI gère le train à partir de là : 'FA' = le
+    // train complet repart de l'autre site ("chez eux") — ce n'est plus la
+    // responsabilité de l'utilisateur, donc la vignette se réduit
+    // automatiquement (comme après la case 7). 'LHTE' = départ depuis le
+    // site de l'utilisateur ("chez moi") — le suivi complet (7 étapes +
+    // graphique) reste nécessaire, et ces infos SLOT s'affichent en plus, à
+    // côté de Composition. null tant que la fenêtre n'a pas été validée.
+    slot: null,
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
