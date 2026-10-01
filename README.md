@@ -131,8 +131,10 @@ avec la même URL :
 - **lecture** (comme avant) : horaires théoriques depuis l'onglet `Horaires` ;
 - **écriture** (nouveau) : chaque heure réelle enregistrée/corrigée/
   réinitialisée dans l'app est automatiquement envoyée vers un onglet
-  `Journal` séparé, créé automatiquement — l'onglet `Horaires` n'est jamais
-  modifié par cet envoi.
+  `Journal` séparé (heures de train), créé automatiquement, et un onglet
+  `Navettes` séparé (navettes internes, tableau rapide des départs
+  LF/LN/LA, et arrivées) — l'onglet `Horaires` n'est jamais modifié par ces
+  envois.
 
 ### 6.1. Préparer la feuille
 
@@ -177,9 +179,17 @@ Déployer**. L'URL `/exec` ne change pas.
 
 Optionnel : dans l'éditeur Apps Script, sélectionnez la fonction
 `setupSheets` dans le menu déroulant en haut puis cliquez sur **▶
-Exécuter** (autorisez les permissions demandées) pour créer l'onglet
-`Journal` à l'avance — sinon il se crée tout seul dès le premier envoi
-depuis l'app.
+Exécuter** (autorisez les permissions demandées) pour créer les onglets
+`Journal` et `Navettes` à l'avance — sinon ils se créent tout seuls dès le
+premier envoi depuis l'app.
+
+**Si vous avez déjà déployé une version précédente de `Code.gs`** (avant
+l'onglet `Navettes`) : recollez le contenu à jour de
+[`apps-script/Code.gs`](apps-script/Code.gs) dans l'éditeur Apps Script,
+puis créez une **nouvelle version** du déploiement (voir l'avertissement en
+gras ci-dessus) — sans cette étape, les navettes/arrivées/quickboard ne
+seront jamais envoyées, même si l'app affiche l'envoi comme réussi côté
+Journal des trains.
 
 ### 6.3. Renseigner l'URL dans l'application
 
