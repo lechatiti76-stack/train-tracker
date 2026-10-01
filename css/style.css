@@ -318,6 +318,26 @@ body {
   color: var(--text-muted);
 }
 
+/* ---------- Écart réel/théorique (petit badge coloré) ----------
+   Affiché sur les navettes (vignettes et tableau rapide) une fois une
+   heure réelle observée disponible — voir computeShuttleArrivalDelta et
+   computeQuickboardDelta dans app.js. Réutilise les mêmes noms de palier
+   ("tone") que .status-pill (onTime/late/moderate/severe/early/neutral),
+   juste en plus petit pour tenir sur une ligne de navette. */
+.shuttle-delta-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+.shuttle-delta-badge.tone-onTime { background: var(--success-bg); color: var(--success); }
+.shuttle-delta-badge.tone-late, .shuttle-delta-badge.tone-moderate { background: var(--warning-bg); color: var(--warning); }
+.shuttle-delta-badge.tone-severe { background: var(--danger-bg); color: var(--danger); }
+.shuttle-delta-badge.tone-early { background: var(--early-bg); color: var(--early); }
+.shuttle-delta-badge.tone-neutral { background: var(--neutral-bg); color: var(--text-muted); }
+
 /* Repère "retard / souci signalé" manuel : se superpose à n'importe quel état. */
 .shuttle-chip.has-delay { box-shadow: 0 0 0 2px #b91c1c inset; }
 .shuttle-delay-flag {
@@ -722,6 +742,37 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
   margin-top: 0.5rem;
 }
 .composition-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ---------- "Train complet" / "Train avec slots" (en plus de Composition) ---------- */
+.train-type-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.train-type-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.train-type-btn {
+  background: var(--surface-2);
+  border: 0;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.train-type-btn + .train-type-btn { border-left: 1px solid var(--border); }
+.train-type-btn.is-active { background: var(--accent); color: #fff; }
+.slot-summary {
   font-size: 0.8rem;
   color: var(--text-muted);
   font-weight: 600;
