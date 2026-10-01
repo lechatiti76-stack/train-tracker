@@ -41,6 +41,21 @@ export function formatCompositionSummary(composition) {
   return parts.filter(Boolean).join(' · ');
 }
 
+// Résumé affiché à côté du bouton "Infos SLOT" une fois la fenêtre
+// renseignée (type SLOT / wagons / heure d'arrivée / heure de
+// recomposition / départ FA ou LHTE) — voir openSlotModal dans app.js.
+// Vide tant que rien n'a été saisi (train.slot === null).
+export function formatSlotSummary(slot) {
+  if (!slot) return '';
+  const parts = [];
+  if (slot.type) parts.push(`SLOT ${slot.type}`);
+  if (slot.wagons) parts.push(`${slot.wagons} wagons`);
+  if (slot.arrivalTime) parts.push(`Arr. ${slot.arrivalTime}`);
+  if (slot.recompositionTime) parts.push(`Recomp. ${slot.recompositionTime}`);
+  if (slot.departure) parts.push(slot.departure);
+  return parts.filter(Boolean).join(' · ');
+}
+
 function stepRowHTML(train, index, readOnly) {
   const step = train.steps[index];
   const delay = computeAllStepDelays(train)[index];
@@ -111,21 +126,29 @@ function summaryRowHTML(train) {
 }
 
 // Libellé affiché sur la vignette réduite : "{numéro} départ à {HH:MM}"
-// (heure réelle de la dernière étape, "Départ pour la ligne" par défaut).
+// (heure réelle de la dernière étape, "Départ pour la ligne" par défaut) —
+// ou, pour un train SLOT parti en FA sans aucune étape encore enregistrée,
+// un libellé dédié expliquant pourquoi la vignette est réduite.
 function collapsedStripLabel(train) {
   const lastStep = train.steps[train.steps.length - 1];
-  const real = lastStep?.real ? formatHHMM(new Date(lastStep.real)) : '--:--';
-  return `départ à ${real}`;
+  if (lastStep?.real) return `départ à ${formatHHMM(new Date(lastStep.real))}`;
+  if (train.trainType === 'slots' && train.slot?.departure === 'FA') return 'SLOT FA — repart de chez eux, plus suivi ici';
+  return 'départ à --:--';
 }
 
 export function trainCardTemplate(train, { readOnly = false, destination = null } = {}) {
   const status = computeTrainStatus(train);
   const stepsHTML = train.steps.map((_, i) => stepRowHTML(train, i, readOnly)).join('');
   const lastStep = train.steps[train.steps.length - 1];
-  // Réduction possible seulement une fois la dernière étape ("Départ pour
-  // la ligne", par défaut) enregistrée — voir maybeCollapseAfterLastStep
-  // dans app.js, qui bascule train.collapsed automatiquement à ce moment.
-  const isCollapsible = !readOnly && Boolean(lastStep?.real);
+  // Réduction possible une fois la dernière étape ("Départ pour la ligne",
+  // par défaut) enregistrée — voir maybeCollapseAfterLastStep dans app.js,
+  // qui bascule train.collapsed automatiquement à ce moment — OU dès qu'un
+  // train SLOT est renseigné avec un départ "FA" (voir openSlotModal dans
+  // app.js) : le train repart alors de l'autre site et n'est plus suivi ici,
+  // donc la vignette se réduit immédiatement, même sans aucune étape
+  // enregistrée.
+  const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
+  const isCollapsible = !readOnly && (Boolean(lastStep?.real) || isSlotFA);
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
 
   return `
@@ -157,6 +180,16 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
           <div class="composition-row">
             <button type="button" class="btn btn-outline btn-sm" data-action="open-composition">🚃 Composition</button>
             <span class="composition-summary" data-role="composition-summary">${escapeHtml(formatCompositionSummary(train.composition))}</span>
+          </div>
+          <div class="train-type-row" data-role="train-type-row">
+            <div class="train-type-toggle" role="group" aria-label="Type de train" data-role="train-type-toggle">
+              <button type="button" class="train-type-btn${train.trainType === 'slots' ? '' : ' is-active'}" data-action="set-train-type" data-type="complet">Train complet</button>
+              <button type="button" class="train-type-btn${train.trainType === 'slots' ? ' is-active' : ''}" data-action="set-train-type" data-type="slots">Train avec slots</button>
+            </div>
+            <span data-role="slot-tools" ${train.trainType === 'slots' ? '' : 'hidden'}>
+              <button type="button" class="btn btn-outline btn-sm" data-action="open-slot">🎰 Infos SLOT</button>
+              <span class="slot-summary" data-role="slot-summary">${escapeHtml(formatSlotSummary(train.slot))}</span>
+            </span>
           </div>`}
 
         <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
@@ -203,6 +236,17 @@ export function updateCardDynamicParts(cardEl, train) {
   const compositionSummaryEl = cardEl.querySelector('[data-role="composition-summary"]');
   if (compositionSummaryEl) compositionSummaryEl.textContent = formatCompositionSummary(train.composition);
 
+  const typeToggleEl = cardEl.querySelector('[data-role="train-type-toggle"]');
+  if (typeToggleEl) {
+    typeToggleEl.querySelectorAll('.train-type-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.type === (train.trainType === 'slots' ? 'slots' : 'complet'));
+    });
+  }
+  const slotToolsEl = cardEl.querySelector('[data-role="slot-tools"]');
+  if (slotToolsEl) slotToolsEl.hidden = train.trainType !== 'slots';
+  const slotSummaryEl = cardEl.querySelector('[data-role="slot-summary"]');
+  if (slotSummaryEl) slotSummaryEl.textContent = formatSlotSummary(train.slot);
+
   const stepsList = cardEl.querySelector('[data-role="steps-list"]');
   if (stepsList) {
     const readOnly = cardEl.dataset.readonly === 'true';
@@ -213,7 +257,8 @@ export function updateCardDynamicParts(cardEl, train) {
   if (summary) summary.innerHTML = summaryRowHTML(train);
 
   const lastStep = train.steps[train.steps.length - 1];
-  const isCollapsible = cardEl.dataset.readonly !== 'true' && Boolean(lastStep?.real);
+  const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
+  const isCollapsible = cardEl.dataset.readonly !== 'true' && (Boolean(lastStep?.real) || isSlotFA);
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
   cardEl.classList.toggle('is-collapsed', isCollapsed);
 
