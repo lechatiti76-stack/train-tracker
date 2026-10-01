@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v27';
+const CACHE_NAME = 'traintrack-cache-v28';
 
 const APP_SHELL = [
   './',
@@ -32,7 +32,12 @@ const APP_SHELL = [
   './assets/icons/favicon-16.png',
 ];
 
-const CDN_ASSETS = ['https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js'];
+const CDN_ASSETS = [
+  'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js',
+  // jsPDF : génère le PDF récap du jour (bouton "📄 PDF récap") entièrement
+  // côté client, sans backend — voir generateDailyRecapPDF dans js/app.js.
+  'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
