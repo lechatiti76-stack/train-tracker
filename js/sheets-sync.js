@@ -247,6 +247,34 @@ export async function pushStepToSheet(webAppUrl, train, stepIndex, computeAllSte
   return postToSheet(webAppUrl, stepLogPayload(train, stepIndex, delays[stepIndex]));
 }
 
+// ---------- Écriture vers Google Sheets (journal des navettes/arrivées) ----------
+// Même principe que stepLogPayload/pushStepToSheet ci-dessus, mais pour les
+// navettes internes (ligne 1), le tableau rapide des départs (ligne 2,
+// "quickboard") et les arrivées (trains fret), qui n'ont pas de train/étape
+// au sens de l'onglet "Journal" — écrit dans un onglet séparé "Navettes"
+// côté Apps Script (action 'logShuttle'), une ligne par (Date, Type, Code).
+// `code` doit être unique par ligne du jour : un départ et une arrivée pour
+// le même élément utilisent deux codes distincts (voir pushShuttleLogIfConfigured
+// dans app.js, par ex. "FL1" pour le départ et "FL1-arr" pour l'arrivée) afin
+// de ne jamais s'écraser l'un l'autre.
+function shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin) {
+  return {
+    action: 'logShuttle',
+    date: dateISO,
+    type,
+    code,
+    libelle: label || '',
+    heureTheorique: theoreticalHHMM || '',
+    heureReelle: realHHMM || '',
+    ecartMin: diffMin === null || diffMin === undefined ? '' : diffMin,
+    misAJour: new Date().toISOString(),
+  };
+}
+
+export async function pushShuttleLogToSheet(webAppUrl, dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin) {
+  return postToSheet(webAppUrl, shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin));
+}
+
 export async function pushAllStepsToSheet(webAppUrl, train, computeAllStepDelaysFn) {
   const delays = computeAllStepDelaysFn(train);
   const results = [];
