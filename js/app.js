@@ -1222,16 +1222,25 @@ function settingsBodyHTML() {
       <div class="steps-form-list">
         <p class="help-text">
           Tableau rapide des départs navettes (LF/LN/LA) — heure théorique de
-          départ par famille, utilisée pour calculer l'écart avec l'heure
-          réelle enregistrée (badge coloré vert/orange/rouge sur chaque
-          case). Laissez vide pour ne pas afficher d'écart.
+          départ réglable navette par navette (chaque navette a son propre
+          horaire), utilisée pour calculer l'écart avec l'heure réelle
+          enregistrée (badge coloré vert/orange/rouge sur chaque case).
+          "Réserve" est la case supplémentaire de secours de la famille.
+          Laissez vide pour ne pas afficher d'écart sur une case.
         </p>
-        <div class="form-row">
-          ${SHUTTLE_QUICKBOARD_GROUPS.map((g) => `
-            <label style="color:${escapeHtml(g.color)}">${escapeHtml(g.id)} — heure théorique
-              <input type="time" class="sQuickboardTheoretical" data-family="${escapeHtml(g.id)}" value="${escapeHtml(settings.quickboardTimings?.[g.id] || '')}">
-            </label>`).join('')}
-        </div>
+        ${SHUTTLE_QUICKBOARD_GROUPS.map((g) => `
+          <fieldset class="shuttle-timing-fieldset" style="border-color:${escapeHtml(g.color)}">
+            <legend style="color:${escapeHtml(g.color)}">${escapeHtml(g.id)} — ${escapeHtml(g.codes.join(', '))}, Réserve ${escapeHtml(g.id)}</legend>
+            <div class="form-row">
+              ${g.codes.map((code) => `
+                <label>${escapeHtml(code)} — heure théorique
+                  <input type="time" class="sQuickboardTheoretical" data-family="${escapeHtml(code)}" value="${escapeHtml(settings.quickboardTimings?.[code] || '')}">
+                </label>`).join('')}
+              <label>Réserve ${escapeHtml(g.id)} — heure théorique
+                <input type="time" class="sQuickboardTheoretical" data-family="${escapeHtml(g.id)}" value="${escapeHtml(settings.quickboardTimings?.[g.id] || '')}">
+              </label>
+            </div>
+          </fieldset>`).join('')}
       </div>
 
       ${(settings.customShuttleGroups || []).length ? `
@@ -2335,14 +2344,15 @@ function quickboardNowHHMM() {
   return `${quickboardPad(now.getHours())}:${quickboardPad(now.getMinutes())}`;
 }
 
-// Écart entre l'heure théorique (settings.quickboardTimings, réglable par
-// famille LF/LN/LA dans Réglages) et l'heure réelle cliquée — même palier
-// de couleur (DELAY_THRESHOLDS) que partout ailleurs dans l'app. null tant
-// qu'aucune heure théorique n'est réglée pour cette famille, ou qu'aucun
-// départ n'a encore été cliqué.
+// Écart entre l'heure théorique (settings.quickboardTimings, réglable
+// navette par navette dans Réglages) et l'heure réelle cliquée — même
+// palier de couleur (DELAY_THRESHOLDS) que partout ailleurs dans l'app.
+// `key` est soit un code précis ("LF1"), soit une famille ("LF") pour sa
+// case Réserve — chacun a sa propre heure théorique dans
+// settings.quickboardTimings. null tant qu'aucune heure théorique n'est
+// réglée pour cette clé, ou qu'aucun départ n'a encore été cliqué.
 function computeQuickboardDelta(key) {
-  const group = quickboardGroupOf(key);
-  const theoretical = group ? settings.quickboardTimings?.[group.id] : null;
+  const theoretical = settings.quickboardTimings?.[key];
   const real = shuttleReserves[key];
   if (!theoretical || !real) return null;
   const parsedTheo = parseHHMM(theoretical);
@@ -2429,12 +2439,11 @@ function openQuickboardTimeEditor(key, label) {
 // "quickboard") vers l'onglet "Navettes" — voir pushShuttleLogIfConfigured.
 // `key` est la clé dans shuttleReserves (un code comme "LF1", ou une
 // famille comme "LF" pour sa réserve) ; l'heure théorique vient de
-// settings.quickboardTimings (réglable par famille dans Réglages), et
-// l'écart de computeQuickboardDelta, déjà utilisé pour le badge affiché sur
-// la vignette.
+// settings.quickboardTimings (réglable navette par navette dans Réglages),
+// et l'écart de computeQuickboardDelta, déjà utilisé pour le badge affiché
+// sur la vignette.
 function pushQuickboardLog(key, label) {
-  const group = quickboardGroupOf(key);
-  const theoretical = group ? settings.quickboardTimings?.[group.id] : null;
+  const theoretical = settings.quickboardTimings?.[key];
   const delta = computeQuickboardDelta(key);
   pushShuttleLogIfConfigured('Quickboard', key, label, theoretical || null, shuttleReserves[key] || null, delta?.diffMin ?? null);
 }
@@ -3003,8 +3012,7 @@ function generateDailyRecapPDF() {
   writeSectionTitle('⏱ Tableau rapide des départs navettes (ligne 2)');
   const quickboardKeys = [...SHUTTLE_QUICKBOARD_CODES, ...SHUTTLE_QUICKBOARD_RESERVE_FAMILIES];
   quickboardKeys.forEach((key) => {
-    const group = quickboardGroupOf(key);
-    const theoretical = group ? settings.quickboardTimings?.[group.id] : null;
+    const theoretical = settings.quickboardTimings?.[key];
     const real = shuttleReserves[key];
     const delta = computeQuickboardDelta(key);
     const label = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key) ? `Réserve ${key}` : key;
@@ -3083,7 +3091,46 @@ function wireVisibilityRefresh() {
   });
 }
 
+// ---------- Animation d'introduction (3-4 s au lancement) ----------
+// Overlay purement cosmétique défini dans index.html (#introSplash) et
+// css/style.css (.intro-*) : logo, nom, slogan des fonctionnalités clés et
+// un petit train de fret animé en CSS pur. Ne bloque jamais l'app en
+// dessous (déjà en cours d'initialisation juste après, voir init()) ni
+// l'utilisateur : cliquer/toucher l'overlay, le bouton "Passer", ou
+// Échap/Entrée/Espace le fait disparaître immédiatement. Raccourcie
+// automatiquement si le système demande de réduire les animations
+// (prefers-reduced-motion), par respect de ce réglage d'accessibilité.
+function playIntroSplash() {
+  const splash = document.getElementById('introSplash');
+  if (!splash) return;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.body.classList.add('intro-active');
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    splash.classList.add('is-leaving');
+    document.body.classList.remove('intro-active');
+    splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+    // Filet de sécurité si transitionend ne se déclenche jamais (onglet en
+    // arrière-plan au moment du timeout, etc.) : l'overlay doit disparaître
+    // coûte que coûte pour ne jamais bloquer l'accès à l'app.
+    setTimeout(() => splash.remove(), 700);
+  };
+
+  splash.addEventListener('click', dismiss);
+  splash.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
+  });
+  const skipBtn = document.getElementById('introSkipBtn');
+  if (skipBtn) skipBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+
+  setTimeout(dismiss, reduceMotion ? 600 : 3600);
+}
+
 function init() {
+  playIntroSplash();
   applyTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (settings.theme === 'auto') applyTheme();
