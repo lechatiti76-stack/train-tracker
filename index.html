@@ -18,6 +18,56 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <!-- Animation d'introduction (3-4 s au lancement) : logo, slogan des
+       fonctionnalités clés et un petit train de fret animé en CSS pur. Ne
+       bloque jamais l'app en dessous (déjà en cours de chargement) — voir
+       playIntroSplash() dans js/app.js et les styles .intro-* dans
+       css/style.css. Retirée du DOM automatiquement après son animation. -->
+  <div id="introSplash" class="intro-splash" role="presentation" aria-hidden="true" tabindex="-1">
+    <div class="intro-sky" aria-hidden="true"></div>
+    <div class="intro-content">
+      <div class="intro-logo-wrap">
+        <span class="intro-logo-glow" aria-hidden="true"></span>
+        <img src="assets/icons/icon-512.png" alt="" class="intro-logo">
+      </div>
+      <h1 class="intro-title">Suivi&nbsp;Trains</h1>
+      <p class="intro-subtitle">Tableau de bord temps réel</p>
+      <ul class="intro-features">
+        <li class="intro-feature" style="--d:0s">🚆 Départs &amp; arrivées des trains fret</li>
+        <li class="intro-feature" style="--d:.35s">🚐 Navettes &amp; tableau rapide des départs</li>
+        <li class="intro-feature" style="--d:.7s">📊 Écarts, causes, export Sheets &amp; PDF récap</li>
+      </ul>
+    </div>
+    <div class="intro-track" aria-hidden="true">
+      <div class="intro-train">
+        <div class="intro-wagon intro-loco">
+          <span class="intro-chimney"></span>
+          <span class="intro-smoke intro-smoke-1"></span>
+          <span class="intro-smoke intro-smoke-2"></span>
+          <span class="intro-smoke intro-smoke-3"></span>
+          <span class="intro-cab"></span>
+          <span class="intro-stripe"></span>
+          <span class="intro-wheel intro-wheel-a"></span>
+          <span class="intro-wheel intro-wheel-b"></span>
+        </div>
+        <div class="intro-wagon intro-wagon-fret">
+          <span class="intro-window"></span>
+          <span class="intro-window"></span>
+          <span class="intro-wheel intro-wheel-a"></span>
+          <span class="intro-wheel intro-wheel-b"></span>
+        </div>
+        <div class="intro-wagon intro-wagon-fret">
+          <span class="intro-window"></span>
+          <span class="intro-window"></span>
+          <span class="intro-wheel intro-wheel-a"></span>
+          <span class="intro-wheel intro-wheel-b"></span>
+        </div>
+      </div>
+      <div class="intro-rail"></div>
+    </div>
+    <button type="button" class="intro-skip" id="introSkipBtn">Passer ›</button>
+  </div>
+
   <a class="skip-link" href="#mainContent">Aller au contenu</a>
 
   <header class="app-header">
