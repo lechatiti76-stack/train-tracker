@@ -298,6 +298,49 @@ body {
   }
 }
 
+/* "overdue" : l'heure d'arrivée estimée est dépassée mais personne n'a
+   encore cliqué "✓ Navette arrivée" — ne grise plus automatiquement (c'était
+   le bug signalé : la vignette grisait dès l'heure estimée dépassée, même
+   si la navette avait du retard et n'était pas vraiment là). Clignote en
+   rouge plus intensément que "imminent", avec un compteur de retard
+   croissant (voir .shuttle-overdue-badge ci-dessous et
+   computeShuttleOverdueMin/computeArrivalOverdueMin dans app.js). Reste
+   dans cet état jusqu'à confirmation manuelle. */
+.shuttle-chip.state-overdue {
+  border-color: #dc2626;
+  animation: shuttleOverdueBlink 1s ease-in-out infinite;
+}
+.shuttle-chip.state-overdue .shuttle-state-label { color: #dc2626; font-weight: 900; }
+@keyframes shuttleOverdueBlink {
+  0%, 100% { background: var(--surface); box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.35); }
+  50% { background: rgba(220, 38, 38, 0.22); box-shadow: 0 0 18px 4px rgba(220, 38, 38, 0.65); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shuttle-chip.state-overdue {
+    animation: none;
+    background: rgba(220, 38, 38, 0.14);
+    box-shadow: 0 0 12px 3px rgba(220, 38, 38, 0.55);
+  }
+}
+.shuttle-overdue-badge {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #fff;
+  background: #dc2626;
+  padding: 0.08rem 0.5rem;
+  border-radius: 999px;
+  display: inline-block;
+  animation: shuttleOverdueBadgePulse 1s ease-in-out infinite;
+}
+@keyframes shuttleOverdueBadgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shuttle-overdue-badge { animation: none; }
+}
+
 .shuttle-chip.state-arrived {
   border-color: var(--border);
   filter: grayscale(1);
@@ -308,9 +351,11 @@ body {
 
 /* Le grisage immédiat "dès que l'heure est renseignée" a été retiré : il
    masquait les passages intermédiaires et le clignotement. La vignette ne
-   grise plus qu'à l'état "arrived" ci-dessus (arrivée réelle), comme avant
-   le tableau rapide des départs. Décompte du temps restant avant l'arrivée
-   estimée (masqué une fois arrivée ou tant qu'aucun départ n'est saisi). */
+   grise qu'à l'état "arrived" ci-dessus, atteint uniquement par confirmation
+   manuelle ("✓ Navette arrivée") — jamais automatiquement par simple
+   écoulement du temps, qui mène désormais à "overdue" ci-dessus. Décompte du
+   temps restant avant l'arrivée estimée (masqué une fois en retard, arrivée,
+   ou tant qu'aucun départ n'est saisi). */
 .shuttle-countdown {
   font-family: var(--font-mono);
   font-size: 0.72rem;
@@ -495,6 +540,26 @@ input[type="color"] { padding: 0.2rem; height: 44px; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .arrival-chip.state-imminent { animation: none; box-shadow: 0 0 10px 2px rgba(239, 68, 68, 0.55); }
 }
+
+/* "overdue" — même correctif que les navettes internes (voir le commentaire
+   détaillé sur .shuttle-chip.state-overdue plus haut) : l'heure d'arrivée
+   estimée est dépassée sans confirmation ("✓ Arrivée effectuée"), la
+   vignette clignote en rouge avec un compteur de retard croissant plutôt que
+   de griser automatiquement. Réutilise les mêmes keyframes/badge que les
+   navettes internes. */
+.arrival-chip.state-overdue {
+  border-color: #dc2626;
+  animation: shuttleOverdueBlink 1s ease-in-out infinite;
+}
+.arrival-chip.state-overdue .shuttle-state-label { color: #dc2626; font-weight: 900; }
+@media (prefers-reduced-motion: reduce) {
+  .arrival-chip.state-overdue {
+    animation: none;
+    background: rgba(220, 38, 38, 0.14);
+    box-shadow: 0 0 12px 3px rgba(220, 38, 38, 0.55);
+  }
+}
+
 .arrival-chip.state-arrived {
   border-color: var(--border);
   filter: grayscale(1);
