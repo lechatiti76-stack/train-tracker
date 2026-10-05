@@ -1773,14 +1773,20 @@ function computeShuttleArrival(code, departureHHMM) {
 // approche"/"arrivée") :
 //   vide -> partie du Terminal -> [passage intermédiaire atteint] (répété,
 //   un par un, selon `group.stops`) -> imminente (clignote, à `imminentMin`
-//   minutes de l'arrivée estimée) -> arrivée (grisée).
+//   minutes de l'arrivée estimée) -> en retard (clignote en rouge, temps de
+//   retard affiché) -> arrivée (grisée, uniquement après confirmation).
 // Exemple (FL, départ validé à 10:19, arrivée = +35 min = 10:54,
 // imminentMin = 10) : 10:19-10:20 "Partie du Terminal", 10:21 "Départ FS"
 // (passage à +2 min), 10:24 "CV 1474" (+5), 10:34 "Entrée GB" (+15), 10:42
-// "Sortie GB" (+23), puis dès 10:44 (10:54 - 10 min) "⚠ Arrivée imminente"
-// clignotante, et "Arrivée effectuée" (grisée) à partir de 10:54.
-// "arrivedManually" (bouton "Navette arrivée") court-circuite ce calcul :
-// utile quand l'heure réelle ne correspond pas à l'estimation automatique.
+// "Sortie GB" (+23), dès 10:44 (10:54 - 10 min) "⚠ Arrivée imminente"
+// clignotante, puis à partir de 10:54 (heure estimée dépassée) "⏱ En retard,
+// confirmez l'arrivée" clignotant en rouge avec un compteur qui augmente
+// ("+1 min", "+2 min"...) tant que personne n'a cliqué "✓ Navette arrivée" —
+// corrige un bug signalé où la vignette grisait automatiquement dès l'heure
+// estimée dépassée, alors que la navette n'était pas forcément arrivée pour
+// de vrai (retard non détecté). Seul un clic sur "Navette arrivée" fait
+// passer à "Arrivée effectuée" (grisée) : voir "arrivedManually" ci-dessous,
+// qui court-circuite tout ce calcul.
 function computeShuttleProgress(code) {
   if (shuttles[code]?.arrivedManually) return { state: 'arrived', label: 'Arrivée effectuée' };
   const group = findShuttleGroup(code);
@@ -1796,7 +1802,7 @@ function computeShuttleProgress(code) {
   const arrivalOffset = group.offsetMinutes;
   const imminentMin = group.imminentMin ?? SHUTTLE_DEFAULT_IMMINENT_MIN;
 
-  if (elapsedMin >= arrivalOffset) return { state: 'arrived', label: 'Arrivée effectuée' };
+  if (elapsedMin >= arrivalOffset) return { state: 'overdue', label: "⏱ En retard, confirmez l'arrivée" };
   if (elapsedMin >= arrivalOffset - imminentMin) return { state: 'imminent', label: '⚠ Arrivée imminente' };
   if (elapsedMin < 0) return { state: 'scheduled', label: '' };
 
@@ -1832,6 +1838,25 @@ function computeShuttleRemainingMin(code) {
   return Math.max(0, Math.round(group.offsetMinutes - elapsedMin));
 }
 
+// Minutes de retard écoulées au-delà de l'heure d'arrivée estimée (départ +
+// group.offsetMinutes), affichées en compteur croissant sur la vignette tant
+// que la navette est à l'état "overdue" (voir computeShuttleProgress) et que
+// personne n'a cliqué "✓ Navette arrivée" — null tant que l'heure estimée
+// n'est pas dépassée, ou une fois l'arrivée confirmée manuellement.
+function computeShuttleOverdueMin(code) {
+  if (shuttles[code]?.arrivedManually) return null;
+  const group = findShuttleGroup(code);
+  const departure = shuttles[code]?.departure;
+  if (!group || !departure) return null;
+  const parsedDeparture = parseHHMM(departure);
+  if (!parsedDeparture) return null;
+  const now = new Date();
+  const departureDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedDeparture.h, parsedDeparture.m, 0, 0);
+  const elapsedMin = (now.getTime() - departureDate.getTime()) / 60000;
+  if (elapsedMin < group.offsetMinutes) return null;
+  return Math.max(0, Math.round(elapsedMin - group.offsetMinutes));
+}
+
 // Écart entre l'arrivée estimée (départ + group.offsetMinutes) et l'heure
 // réelle observée — uniquement disponible quand la navette a été marquée
 // "Navette arrivée" à la main (current.arrivedAt, capturé au clic) :
@@ -1862,6 +1887,7 @@ function shuttleChipInnerHTML(code) {
   const progress = computeShuttleProgress(code);
   const delayFlag = shuttleHasDelayFlag(code);
   const remainingMin = computeShuttleRemainingMin(code);
+  const overdueMin = computeShuttleOverdueMin(code);
   const delta = computeShuttleArrivalDelta(code);
   return `
     <span class="shuttle-code">${escapeHtml(code)}</span>
@@ -1870,6 +1896,7 @@ function shuttleChipInnerHTML(code) {
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
     ${progress.label ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
     <span class="shuttle-countdown" data-role="shuttle-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
+    <span class="shuttle-overdue-badge" data-role="shuttle-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
     ${shuttleDeltaBadgeHTML(delta)}
     <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
@@ -1933,22 +1960,26 @@ function wireBarToggles() {
 // pour ne jamais faire rater la séquence finale d'un départ validé pendant
 // que le bandeau était masqué. Ne fait rien si le bandeau n'est pas masqué.
 // Corrige un bug signalé : en déclenchant aussi sur l'état "arrivé" (en
-// plus de "imminent"), le bandeau redevenait impossible à masquer une fois
-// une navette arrivée — "arrivé" est un état définitif pour le reste de la
-// journée, donc il forçait la réouverture en permanence. Seul "imminent"
-// (transitoire, juste avant l'arrivée) doit forcer la réouverture ; une
-// fois arrivé, le bandeau peut à nouveau être masqué durablement.
+// plus de "imminent"/"overdue"), le bandeau redevenait impossible à masquer
+// une fois une navette arrivée — "arrivé" est un état définitif pour le
+// reste de la journée (uniquement atteint après confirmation manuelle),
+// donc il forçait la réouverture en permanence. "imminent" (transitoire,
+// juste avant l'arrivée) et "overdue" (heure estimée dépassée sans
+// confirmation, voir computeShuttleProgress) doivent au contraire forcer la
+// réouverture — on ne veut jamais rater une navette en retard non
+// confirmée. Une fois arrivée (confirmée), le bandeau peut à nouveau être
+// masqué durablement.
 function maybeAutoRevealShuttlesBar() {
   if (!settings.panelHidden?.shuttles) return;
   const codes = getAllShuttleGroups().flatMap((g) => g.codes);
-  const shouldReveal = codes.some((code) => computeShuttleProgress(code).state === 'imminent');
+  const shouldReveal = codes.some((code) => ['imminent', 'overdue'].includes(computeShuttleProgress(code).state));
   if (shouldReveal) setPanelHidden('shuttles', false);
 }
 
 // Équivalent pour le bandeau "arrivées" — voir maybeAutoRevealShuttlesBar.
 function maybeAutoRevealArrivalsBar() {
   if (!settings.panelHidden?.arrivals) return;
-  const shouldReveal = getAllArrivalGroups().some((group) => computeArrivalProgress(group.id).state === 'imminent');
+  const shouldReveal = getAllArrivalGroups().some((group) => ['imminent', 'overdue'].includes(computeArrivalProgress(group.id).state));
   if (shouldReveal) setPanelHidden('arrivals', false);
 }
 
@@ -1988,6 +2019,13 @@ function updateShuttleStates() {
       const text = remainingMin === null ? '' : `⏳ ${remainingMin} min`;
       if (countdownEl.textContent !== text) countdownEl.textContent = text;
       countdownEl.hidden = remainingMin === null;
+    }
+    const overdueEl = chip.querySelector('[data-role="shuttle-overdue"]');
+    if (overdueEl) {
+      const overdueMin = computeShuttleOverdueMin(code);
+      const text = overdueMin === null ? '' : `⏱ +${overdueMin} min`;
+      if (overdueEl.textContent !== text) overdueEl.textContent = text;
+      overdueEl.hidden = overdueMin === null;
     }
     const deltaEl = chip.querySelector('[data-role="shuttle-delta"]');
     if (deltaEl) {
@@ -2565,7 +2603,14 @@ function computeArrivalProgress(id) {
     time: formatHHMM(new Date(departureDate.getTime() + s.offsetMin * 60000)),
   }));
 
-  if (elapsedMin >= totalMin) return { state: 'arrived', label: 'Arrivée effectuée', pct: 100, stops };
+  // Heure estimée dépassée sans confirmation manuelle : reste à l'état
+  // "overdue" (clignote en rouge, compteur de retard croissant — voir
+  // computeArrivalOverdueMin) plutôt que de griser automatiquement, pour ne
+  // pas afficher "arrivée" avant d'en être sûr (même correctif que les
+  // navettes internes, voir computeShuttleProgress). Le train reste affiché
+  // en bout de rail (pct à 100) et continue de "chuguer" (voir .chugging
+  // dans updateArrivalStates) tant que ce n'est pas confirmé.
+  if (elapsedMin >= totalMin) return { state: 'overdue', label: "⏱ En retard, confirmez l'arrivée", pct: 100, stops };
   if (elapsedMin >= totalMin - imminentMin) return { state: 'imminent', label: '⚠ Arrivée imminente', pct, stops };
   if (elapsedMin < 0) return { state: 'scheduled', label: '', pct: 0, stops };
   return { state: 'enroute', label: 'En approche', pct, stops };
@@ -2587,6 +2632,23 @@ function computeArrivalRemainingMin(id) {
   const totalMin = group.offsetMinutes || 1;
   if (elapsedMin >= totalMin) return null;
   return Math.max(0, Math.round(totalMin - elapsedMin));
+}
+
+// Minutes de retard écoulées au-delà de l'heure d'arrivée estimée, même
+// logique que computeShuttleOverdueMin ci-dessus pour les navettes.
+function computeArrivalOverdueMin(id) {
+  if (arrivals[id]?.arrivedManually) return null;
+  const group = getArrivalEffectiveConfig(id);
+  const departure = arrivals[id]?.departure;
+  if (!group || !departure) return null;
+  const parsedDeparture = parseHHMM(departure);
+  if (!parsedDeparture) return null;
+  const now = new Date();
+  const departureDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parsedDeparture.h, parsedDeparture.m, 0, 0);
+  const elapsedMin = (now.getTime() - departureDate.getTime()) / 60000;
+  const totalMin = group.offsetMinutes || 1;
+  if (elapsedMin < totalMin) return null;
+  return Math.max(0, Math.round(elapsedMin - totalMin));
 }
 
 // Mini-rail animé : ligne, repères d'étape (révélant l'heure de passage une
@@ -2614,6 +2676,7 @@ function arrivalChipInnerHTML(id) {
   const progress = computeArrivalProgress(id);
   const delayFlag = arrivalHasDelayFlag(id);
   const remainingMin = computeArrivalRemainingMin(id);
+  const overdueMin = computeArrivalOverdueMin(id);
   return `
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
@@ -2622,6 +2685,7 @@ function arrivalChipInnerHTML(id) {
     ${arrivalTrackHTML(progress)}
     ${progress.label ? `<span class="shuttle-state-label" data-role="arrival-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="arrival-state-label" hidden></span>'}
     <span class="shuttle-countdown" data-role="arrival-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
+    <span class="shuttle-overdue-badge" data-role="arrival-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
     <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
 
@@ -2668,11 +2732,18 @@ function updateArrivalStates() {
       if (countdownEl.textContent !== text) countdownEl.textContent = text;
       countdownEl.hidden = remainingMin === null;
     }
+    const overdueEl = chip.querySelector('[data-role="arrival-overdue"]');
+    if (overdueEl) {
+      const overdueMin = computeArrivalOverdueMin(id);
+      const text = overdueMin === null ? '' : `⏱ +${overdueMin} min`;
+      if (overdueEl.textContent !== text) overdueEl.textContent = text;
+      overdueEl.hidden = overdueMin === null;
+    }
 
     const icon = chip.querySelector('.arrival-track-icon');
     if (icon) {
       icon.style.left = `${progress.pct}%`;
-      icon.classList.toggle('chugging', progress.state === 'enroute');
+      icon.classList.toggle('chugging', progress.state === 'enroute' || progress.state === 'overdue');
     }
     const ticks = chip.querySelectorAll('.arrival-tick');
     progress.stops.forEach((s, i) => {
