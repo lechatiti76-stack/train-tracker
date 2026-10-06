@@ -12,6 +12,7 @@ import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
 import { initStopwatch } from './stopwatch.js';
+import { saveArchivePdf, listArchivePdfs, getArchivePdf, deleteArchivePdf, pruneOldArchives } from './archives.js';
 
 let settings = loadSettings();
 // Applique les seuils de retard personnalisés (settings.delayThresholds,
@@ -1654,6 +1655,22 @@ function startClock() {
     clockEl.textContent = formatHHMMSS(new Date());
     const iso = todayISO();
     if (iso !== currentDate) {
+      // Archive silencieusement (sans téléchargement) le PDF récap de la
+      // journée qui se termine, AVANT de remettre à zéro navettes/réserves/
+      // arrivées juste en dessous — sauvegarde régulière demandée. Capture
+      // explicite d'un instantané de cette journée (date + trains de ce
+      // jour-là + copies des navettes/réserves/arrivées), puisque les
+      // variables globales basculent sur le nouveau jour juste après — voir
+      // archiveDailyRecapSilently, qui ignore silencieusement les jours sans
+      // aucune activité.
+      const endingDate = currentDate;
+      archiveDailyRecapSilently(endingDate, {
+        trainsForDate: trains.filter((t) => t.date === endingDate),
+        shuttlesSnapshot: { ...shuttles },
+        shuttleReservesSnapshot: { ...shuttleReserves },
+        arrivalsSnapshot: { ...arrivals },
+      });
+
       currentDate = iso;
       updateDateLabel();
       renderGrid();
@@ -1863,10 +1880,14 @@ function computeShuttleOverdueMin(code) {
 // l'arrivée automatique (par simple écoulement du temps) n'a rien de réel
 // à comparer, donc null dans ce cas. null aussi tant qu'aucun départ n'est
 // renseigné.
-function computeShuttleArrivalDelta(code) {
-  const rec = shuttles[code];
+// Calcule l'écart entre l'arrivée estimée et l'heure réelle observée à
+// partir d'un enregistrement générique { departure, arrivedManually,
+// arrivedAt } et d'un groupe { offsetMinutes } — factorisé pour être
+// utilisé par les navettes (computeShuttleArrivalDelta) ET les arrivées
+// (computeArrivalArrivalDelta) ci-dessous, ainsi que par le PDF récap qui
+// travaille sur un instantané figé des données (voir buildRecapPdfDoc).
+function computeArrivalDeltaFromRecord(rec, group) {
   if (!rec?.arrivedManually || !rec.arrivedAt) return null;
-  const group = findShuttleGroup(code);
   const parsedDeparture = parseHHMM(rec.departure);
   if (!group || !parsedDeparture) return null;
   const now = new Date();
@@ -1876,23 +1897,34 @@ function computeShuttleArrivalDelta(code) {
   return { diffMin, tone: delayTone(diffMin, DELAY_THRESHOLDS) };
 }
 
+function computeShuttleArrivalDelta(code) {
+  return computeArrivalDeltaFromRecord(shuttles[code], findShuttleGroup(code));
+}
+
 function shuttleDeltaBadgeHTML(delta) {
   if (!delta) return '<span class="shuttle-delta-badge" data-role="shuttle-delta" hidden></span>';
   return `<span class="shuttle-delta-badge tone-${delta.tone}" data-role="shuttle-delta">${escapeHtml(formatDelayLabel(delta.diffMin, DELAY_THRESHOLDS))}</span>`;
 }
 
 function shuttleChipInnerHTML(code) {
-  const departure = shuttles[code]?.departure;
+  const rec = shuttles[code];
+  const departure = rec?.departure;
   const arrival = departure ? computeShuttleArrival(code, departure) : null;
   const progress = computeShuttleProgress(code);
   const delayFlag = shuttleHasDelayFlag(code);
   const remainingMin = computeShuttleRemainingMin(code);
   const overdueMin = computeShuttleOverdueMin(code);
   const delta = computeShuttleArrivalDelta(code);
+  // Une fois confirmée ("✓ Navette arrivée"), on affiche l'heure RÉELLE
+  // d'arrivée (rec.arrivedAt) à la place de l'heure estimée — l'heure
+  // estimée n'a plus d'intérêt une fois l'arrivée confirmée, et le badge
+  // d'écart (shuttleDeltaBadgeHTML) montre déjà la différence avec l'heure
+  // théorique.
+  const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
   return `
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
-      ? `<span class="shuttle-times">Dép ${departure} → Arr ${arrival}</span>`
+      ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || arrival}</span>`
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
     ${progress.label ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
     <span class="shuttle-countdown" data-role="shuttle-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
@@ -2669,23 +2701,45 @@ function arrivalTrackHTML(progress) {
     </div>`;
 }
 
+// Même principe que computeShuttleArrivalDelta ci-dessus, pour les
+// arrivées (trains fret) — voir le bouton "✓ Arrivée effectuée" dans
+// openArrivalModal, qui capture désormais aussi arrivedAt.
+function computeArrivalArrivalDelta(id) {
+  return computeArrivalDeltaFromRecord(arrivals[id], getArrivalEffectiveConfig(id));
+}
+
+// Variante de shuttleDeltaBadgeHTML avec un data-role dédié aux arrivées,
+// pour ne jamais être confondue avec le badge d'écart des navettes lors
+// d'un querySelector ciblé (voir updateArrivalStates).
+function arrivalDeltaBadgeHTML(delta) {
+  if (!delta) return '<span class="shuttle-delta-badge" data-role="arrival-delta" hidden></span>';
+  return `<span class="shuttle-delta-badge tone-${delta.tone}" data-role="arrival-delta">${escapeHtml(formatDelayLabel(delta.diffMin, DELAY_THRESHOLDS))}</span>`;
+}
+
 function arrivalChipInnerHTML(id) {
   const group = findArrivalGroup(id);
-  const departure = arrivals[id]?.departure;
+  const rec = arrivals[id];
+  const departure = rec?.departure;
   const eta = departure ? computeArrivalETA(id, departure) : null;
   const progress = computeArrivalProgress(id);
   const delayFlag = arrivalHasDelayFlag(id);
   const remainingMin = computeArrivalRemainingMin(id);
   const overdueMin = computeArrivalOverdueMin(id);
+  const delta = computeArrivalArrivalDelta(id);
+  // Même logique que shuttleChipInnerHTML ci-dessus : une fois confirmée
+  // ("✓ Arrivée effectuée"), on affiche l'heure RÉELLE d'arrivée plutôt
+  // que l'heure estimée.
+  const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
   return `
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
-      ? `<span class="shuttle-times">Dép ${departure} → Arr ${eta}</span>`
+      ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || eta}</span>`
       : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
     ${arrivalTrackHTML(progress)}
     ${progress.label ? `<span class="shuttle-state-label" data-role="arrival-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="arrival-state-label" hidden></span>'}
     <span class="shuttle-countdown" data-role="arrival-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
     <span class="shuttle-overdue-badge" data-role="arrival-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
+    ${arrivalDeltaBadgeHTML(delta)}
     <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
 }
 
@@ -2738,6 +2792,15 @@ function updateArrivalStates() {
       const text = overdueMin === null ? '' : `⏱ +${overdueMin} min`;
       if (overdueEl.textContent !== text) overdueEl.textContent = text;
       overdueEl.hidden = overdueMin === null;
+    }
+    const deltaEl = chip.querySelector('[data-role="arrival-delta"]');
+    if (deltaEl) {
+      const delta = computeArrivalArrivalDelta(id);
+      deltaEl.hidden = !delta;
+      if (delta) {
+        deltaEl.className = `shuttle-delta-badge tone-${delta.tone}`;
+        deltaEl.textContent = formatDelayLabel(delta.diffMin, DELAY_THRESHOLDS);
+      }
     }
 
     const icon = chip.querySelector('.arrival-track-icon');
@@ -2871,12 +2934,18 @@ function openArrivalModal(id) {
       arrivedBtn.addEventListener('click', () => {
         const current = arrivals[id] || {};
         current.arrivedManually = !current.arrivedManually;
+        // Capture l'instant du clic comme heure réelle d'arrivée (même
+        // logique que les navettes, voir computeArrivalArrivalDelta et
+        // arrivalChipInnerHTML qui affiche désormais cette heure réelle à
+        // la place de l'heure estimée une fois confirmée).
+        current.arrivedAt = current.arrivedManually ? new Date().toISOString() : null;
         arrivals[id] = current;
         saveArrivals(arrivals);
         renderArrivalsBar();
         refreshQuickButtons();
-        if (current.arrivedManually) {
-          pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, current.departure ? computeArrivalETA(id, current.departure) : null, formatHHMM(new Date()), null);
+        if (current.arrivedManually && current.arrivedAt) {
+          const delta = computeArrivalArrivalDelta(id);
+          pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, current.departure ? computeArrivalETA(id, current.departure) : null, formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
         }
         showToast(current.arrivedManually ? `${group.label} marquée arrivée` : `${group.label} réactivée`);
       });
@@ -2988,22 +3057,27 @@ function wireArrivalsBar() {
   setInterval(updateArrivalStates, 1000);
 }
 
-// ---------- PDF récap du jour (bouton "📄 PDF récap") ----------
+// ---------- PDF récap du jour (bouton "📄 PDF récap") + archives ----------
 // Génère entièrement côté client (PWA, pas de backend) via jsPDF, chargé
 // en CDN dans index.html (window.jspdf.jsPDF) et mis en cache par le
 // Service Worker comme chart.js — voir CDN_ASSETS dans service-worker.js.
 // Reprend toutes les infos utiles du jour : trains (étapes, écarts, cause,
 // composition/slot), navettes (ligne 1), tableau rapide des départs
 // (ligne 2) et arrivées — sans toucher au stockage ni au Sheet.
+//
+// buildRecapPdfDoc() construit le document jsPDF à partir d'un instantané
+// explicite (date + trains/navettes/réserves/arrivées de CE jour-là),
+// plutôt que de lire directement les variables globales "aujourd'hui" :
+// c'est ce qui permet de régénérer le PDF d'une journée qui vient de se
+// terminer (archivage automatique silencieux à minuit, voir
+// archiveDailyRecapSilently plus bas) sans dépendre de currentDate, qui a
+// déjà basculé sur le nouveau jour à ce moment-là.
 function pdfEcart(diffMin) {
   return diffMin === null || diffMin === undefined ? '—' : formatDelayLabel(diffMin, DELAY_THRESHOLDS);
 }
 
-function generateDailyRecapPDF() {
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    showToast("Génération PDF indisponible (bibliothèque non chargée — vérifiez la connexion réseau au premier chargement)", 'error');
-    return;
-  }
+function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleReservesSnapshot, arrivalsSnapshot }) {
+  if (!window.jspdf || !window.jspdf.jsPDF) return null;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -3032,16 +3106,15 @@ function generateDailyRecapPDF() {
     writeLine(text, { size: 13, style: 'bold', gap: 7 });
   };
 
-  writeLine(`Récap du jour — ${formatDateFR(currentDate)}`, { size: 17, style: 'bold', gap: 9 });
+  writeLine(`Récap du jour — ${formatDateFR(dateISO)}`, { size: 17, style: 'bold', gap: 9 });
   writeLine(`Généré le ${formatDateFR(todayISO())} à ${formatHHMMSS(new Date())}`, { size: 9, style: 'italic', gap: 7 });
 
   // ---- Trains ----
   writeSectionTitle('🚆 Trains');
-  const todays = getTodayTrains();
-  if (todays.length === 0) {
-    writeLine('Aucun train pour aujourd\'hui.', { size: 10, style: 'italic' });
+  if (trainsForDate.length === 0) {
+    writeLine('Aucun train pour cette date.', { size: 10, style: 'italic' });
   }
-  todays.forEach((train) => {
+  trainsForDate.forEach((train) => {
     const delays = computeAllStepDelays(train);
     const status = computeTrainStatus(train);
     const cause = computeMainCause(train);
@@ -3068,9 +3141,9 @@ function generateDailyRecapPDF() {
   const shuttleCodes = getAllShuttleGroups().flatMap((g) => g.codes);
   if (shuttleCodes.length === 0) writeLine('Aucune navette configurée.', { size: 10, style: 'italic' });
   shuttleCodes.forEach((code) => {
-    const rec = shuttles[code] || {};
+    const rec = shuttlesSnapshot[code] || {};
     const eta = rec.departure ? computeShuttleArrival(code, rec.departure) : null;
-    const delta = computeShuttleArrivalDelta(code);
+    const delta = computeArrivalDeltaFromRecord(rec, findShuttleGroup(code));
     const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
     writeLine(
       `${code} — départ ${rec.departure || '--:--'} / arrivée estimée ${eta || '--:--'}` +
@@ -3084,8 +3157,16 @@ function generateDailyRecapPDF() {
   const quickboardKeys = [...SHUTTLE_QUICKBOARD_CODES, ...SHUTTLE_QUICKBOARD_RESERVE_FAMILIES];
   quickboardKeys.forEach((key) => {
     const theoretical = settings.quickboardTimings?.[key];
-    const real = shuttleReserves[key];
-    const delta = computeQuickboardDelta(key);
+    const real = shuttleReservesSnapshot[key];
+    const parsedTheo = parseHHMM(theoretical);
+    const parsedReal = parseHHMM(real);
+    let delta = null;
+    if (parsedTheo && parsedReal) {
+      const theoDate = new Date(2000, 0, 1, parsedTheo.h, parsedTheo.m, 0, 0);
+      const realDate = new Date(2000, 0, 1, parsedReal.h, parsedReal.m, 0, 0);
+      const diffMin = diffMinutes(theoDate, realDate);
+      delta = { diffMin, tone: delayTone(diffMin, DELAY_THRESHOLDS) };
+    }
     const label = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key) ? `Réserve ${key}` : key;
     writeLine(`${label} — théorique ${theoretical || '--:--'} / réel ${real || '--:--'} / écart ${pdfEcart(delta?.diffMin)}`, { size: 9.5, gap: 4.8, indent: 4 });
   });
@@ -3095,14 +3176,136 @@ function generateDailyRecapPDF() {
   const arrivalGroups = getAllArrivalGroups();
   if (arrivalGroups.length === 0) writeLine('Aucune arrivée configurée.', { size: 10, style: 'italic' });
   arrivalGroups.forEach((group) => {
-    const rec = arrivals[group.id] || {};
+    const rec = arrivalsSnapshot[group.id] || {};
     const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
+    const delta = computeArrivalDeltaFromRecord(rec, getArrivalEffectiveConfig(group.id));
+    const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
     const statusText = rec.arrivedManually ? 'Arrivée effectuée' : (rec.delayFlag ? '⚠ Retard / souci signalé' : 'En attente');
-    writeLine(`${group.label} — départ ${rec.departure || '--:--'} / ETA ${eta || '--:--'} / ${statusText}`, { size: 9.5, gap: 4.8, indent: 4 });
+    writeLine(
+      `${group.label} — départ ${rec.departure || '--:--'} / ETA ${eta || '--:--'}` +
+      `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''} / ${statusText}`,
+      { size: 9.5, gap: 4.8, indent: 4 },
+    );
   });
 
-  doc.save(`recap-${todayISO()}.pdf`);
-  showToast('PDF récap généré ✓');
+  return doc;
+}
+
+// Bouton "📄 PDF récap" : génère le PDF du jour EN COURS à partir de
+// l'état actuel (en mémoire), le télécharge comme avant, et en garde aussi
+// une copie dans les archives (voir js/archives.js et le bouton
+// "🗄 Archives" ci-dessous) — écrase l'archive du jour si déjà générée
+// aujourd'hui.
+function generateDailyRecapPDF() {
+  const doc = buildRecapPdfDoc(currentDate, {
+    trainsForDate: getTodayTrains(),
+    shuttlesSnapshot: shuttles,
+    shuttleReservesSnapshot: shuttleReserves,
+    arrivalsSnapshot: arrivals,
+  });
+  if (!doc) {
+    showToast("Génération PDF indisponible (bibliothèque non chargée — vérifiez la connexion réseau au premier chargement)", 'error');
+    return;
+  }
+  doc.save(`recap-${currentDate}.pdf`);
+  saveArchivePdf(currentDate, doc.output('blob')).catch((err) => console.warn('Archivage PDF échoué', err));
+  showToast('PDF récap généré ✓ (et archivé)');
+}
+
+// Archivage automatique et silencieux (pas de téléchargement) de la
+// journée qui vient de se terminer — appelé juste avant la remise à zéro
+// de minuit dans startClock. `snapshot` doit être capturé AVANT cette
+// remise à zéro (shuttles/shuttleReserves/arrivals passent à {} juste
+// après). Ne fait rien si la journée n'a eu aucune activité (aucun train,
+// aucune navette, aucune arrivée), pour ne pas accumuler des archives
+// vides tous les jours. Erreurs avalées (fire-and-forget) : un souci
+// d'archivage ne doit jamais empêcher la bascule de minuit de se dérouler
+// normalement.
+async function archiveDailyRecapSilently(dateISO, snapshot) {
+  try {
+    const hasActivity = snapshot.trainsForDate.length > 0
+      || Object.keys(snapshot.shuttlesSnapshot || {}).length > 0
+      || Object.keys(snapshot.arrivalsSnapshot || {}).length > 0;
+    if (!hasActivity) return;
+    const doc = buildRecapPdfDoc(dateISO, snapshot);
+    if (!doc) return;
+    await saveArchivePdf(dateISO, doc.output('blob'));
+    await pruneOldArchives();
+  } catch (err) {
+    console.warn('Archivage automatique du PDF échoué', err);
+  }
+}
+
+function archiveSizeLabel(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes < 1024) return `${bytes} o`;
+  return `${(bytes / 1024).toFixed(0)} Ko`;
+}
+
+// ---------- Archives (bouton "🗄 Archives") ----------
+// Liste les PDF récap archivés (voir js/archives.js, IndexedDB) : un par
+// jour, régénérable/écrasable à tout moment via "📄 PDF récap" pour
+// aujourd'hui, ou créé automatiquement à minuit pour les jours passés
+// (voir archiveDailyRecapSilently). Fonctionne hors-ligne (stockage local
+// du navigateur, propre à cet appareil) ; purement consultatif, ne touche
+// jamais aux données trains/navettes/arrivées elles-mêmes.
+async function archivesBodyListHTML() {
+  const entries = await listArchivePdfs();
+  if (entries.length === 0) {
+    return '<p class="help-text">Aucun PDF archivé pour l\'instant. Un PDF est ajouté ici automatiquement chaque jour (s\'il y a eu de l\'activité), ou dès que vous cliquez sur "📄 PDF récap".</p>';
+  }
+  return `
+    <table class="history-table">
+      <thead><tr><th>Date</th><th>Taille</th><th>Généré le</th><th></th><th></th></tr></thead>
+      <tbody>
+        ${entries.map((e) => `
+          <tr>
+            <td>${escapeHtml(formatDateFR(e.date))}</td>
+            <td>${escapeHtml(archiveSizeLabel(e.size))}</td>
+            <td>${e.generatedAt ? escapeHtml(formatHHMM(new Date(e.generatedAt))) : '—'}</td>
+            <td><button type="button" class="btn btn-ghost" data-archive-download="${escapeHtml(e.date)}">Télécharger</button></td>
+            <td><button type="button" class="icon-btn" data-archive-delete="${escapeHtml(e.date)}" aria-label="Supprimer cette archive">✕</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openArchivesModal() {
+  openModal({
+    title: '🗄 Archives des PDF récap',
+    wide: true,
+    bodyHTML: '<div id="archivesListContainer"><p class="help-text">Chargement…</p></div>',
+    onMount: (panel) => {
+      const container = panel.querySelector('#archivesListContainer');
+      const refresh = async () => {
+        container.innerHTML = await archivesBodyListHTML();
+        container.querySelectorAll('[data-archive-download]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const dateISO = btn.dataset.archiveDownload;
+            const entry = await getArchivePdf(dateISO);
+            if (!entry) { showToast('Archive introuvable', 'error'); return; }
+            const url = URL.createObjectURL(entry.blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recap-${dateISO}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+          });
+        });
+        container.querySelectorAll('[data-archive-delete]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const dateISO = btn.dataset.archiveDelete;
+            if (!confirm(`Supprimer l'archive du ${formatDateFR(dateISO)} ?`)) return;
+            await deleteArchivePdf(dateISO);
+            refresh();
+          });
+        });
+      };
+      refresh();
+    },
+  });
 }
 
 function wireHeaderButtons() {
@@ -3119,6 +3322,10 @@ function wireHeaderButtons() {
   // journée (trains, navettes, tableau rapide, arrivées) — voir
   // generateDailyRecapPDF ci-dessus.
   el('btnDailyRecapPdf').addEventListener('click', generateDailyRecapPDF);
+  // Bouton "🗄 Archives" : ouvre la liste des PDF récap archivés — voir
+  // openArchivesModal ci-dessus.
+  const archivesBtn = el('btnArchives');
+  if (archivesBtn) archivesBtn.addEventListener('click', openArchivesModal);
 }
 
 // Une PWA installée peut rester "suspendue" en arrière-plan pendant des
@@ -3217,6 +3424,7 @@ function init() {
   updateDateLabel();
   renderGrid();
   startClock();
+  pruneOldArchives().catch(() => {});
 
   const grid = el('trainsGrid');
   grid.addEventListener('click', onGridClick);
