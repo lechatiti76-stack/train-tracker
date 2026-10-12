@@ -3369,42 +3369,128 @@ function wireVisibilityRefresh() {
   });
 }
 
-// ---------- Animation d'introduction (3-4 s au lancement) ----------
+// ---------- Animation d'introduction (~7 s au lancement) ----------
 // Overlay purement cosmétique défini dans index.html (#introSplash) et
-// css/style.css (.intro-*) : logo, nom, slogan des fonctionnalités clés et
-// un petit train de fret animé en CSS pur. Ne bloque jamais l'app en
-// dessous (déjà en cours d'initialisation juste après, voir init()) ni
-// l'utilisateur : cliquer/toucher l'overlay, le bouton "Passer", ou
-// Échap/Entrée/Espace le fait disparaître immédiatement. Raccourcie
-// automatiquement si le système demande de réduire les animations
-// (prefers-reduced-motion), par respect de ce réglage d'accessibilité.
+// css/style.css (.intro-*) : vidéo du logo LHTE avec musique
+// (assets/lhte-intro.mp4). Ne bloque jamais l'app en dessous (déjà en
+// cours d'initialisation juste après, voir init()) ni l'utilisateur :
+// cliquer/toucher l'overlay, le bouton "Passer", ou Échap/Entrée/Espace la
+// fait disparaître immédiatement. Disparaît aussi toute seule à la fin de
+// la vidéo, ou très vite si la vidéo ne peut pas démarrer (fichier absent,
+// format non supporté...) pour ne jamais laisser un écran figé.
+//
+// Son : les navigateurs interdisent souvent de lancer du son sans action de
+// l'utilisateur (sauf, en général, quand l'app est installée en PWA). On
+// tente donc la lecture AVEC le son ; si c'est refusé, la vidéo se lance
+// sans le son et un bouton "🔊 Activer le son" apparaît. Le bouton permet
+// aussi de couper le son ; ce choix est mémorisé sur l'appareil.
+// Si le système demande de réduire les animations (prefers-reduced-motion),
+// l'intro n'est pas jouée du tout, par respect de ce réglage.
+const INTRO_SOUND_PREF_KEY = 'traintrack.introSoundMuted';
+const INTRO_START_TIMEOUT_MS = 2500;
+
+function readIntroMutedPref() {
+  try { return localStorage.getItem(INTRO_SOUND_PREF_KEY) === '1'; } catch (err) { return false; }
+}
+function writeIntroMutedPref(muted) {
+  try { localStorage.setItem(INTRO_SOUND_PREF_KEY, muted ? '1' : '0'); } catch (err) { /* stockage indisponible */ }
+}
+
 function playIntroSplash() {
   const splash = document.getElementById('introSplash');
   if (!splash) return;
+  const video = document.getElementById('introVideo');
+  const soundBtn = document.getElementById('introSoundBtn');
+  const skipBtn = document.getElementById('introSkipBtn');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  document.body.classList.add('intro-active');
 
+  if (reduceMotion || !video || typeof video.play !== 'function') {
+    if (video) video.removeAttribute('src');
+    splash.remove();
+    return;
+  }
+
+  document.body.classList.add('intro-active');
   let dismissed = false;
+  let safetyTimer = null;
+
+  const updateSoundBtn = () => {
+    if (!soundBtn) return;
+    soundBtn.hidden = false;
+    soundBtn.textContent = video.muted ? '🔊 Activer le son' : '🔇 Couper le son';
+  };
+
   const dismiss = () => {
     if (dismissed) return;
     dismissed = true;
+    clearTimeout(safetyTimer);
     splash.classList.add('is-leaving');
     document.body.classList.remove('intro-active');
-    splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+    // Petit fondu du son pendant le fondu de l'image (ignoré sur iOS, où le
+    // volume n'est pas pilotable : la vidéo est alors simplement stoppée).
+    const startVolume = video.volume;
+    const fadeStart = performance.now();
+    const fadeAudio = (now) => {
+      const k = Math.min(1, (now - fadeStart) / 450);
+      try { video.volume = startVolume * (1 - k); } catch (err) { /* lecture seule */ }
+      if (k < 1 && splash.isConnected) requestAnimationFrame(fadeAudio);
+    };
+    requestAnimationFrame(fadeAudio);
+    const cleanup = () => {
+      if (!splash.isConnected) return;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      splash.remove();
+    };
+    splash.addEventListener('transitionend', cleanup, { once: true });
     // Filet de sécurité si transitionend ne se déclenche jamais (onglet en
-    // arrière-plan au moment du timeout, etc.) : l'overlay doit disparaître
-    // coûte que coûte pour ne jamais bloquer l'accès à l'app.
-    setTimeout(() => splash.remove(), 700);
+    // arrière-plan, etc.) : l'overlay doit disparaître coûte que coûte pour
+    // ne jamais bloquer l'accès à l'app.
+    setTimeout(cleanup, 700);
   };
 
   splash.addEventListener('click', dismiss);
   splash.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') dismiss();
   });
-  const skipBtn = document.getElementById('introSkipBtn');
   if (skipBtn) skipBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+  if (soundBtn) {
+    soundBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      video.muted = !video.muted;
+      writeIntroMutedPref(video.muted);
+      // Ce clic est une action de l'utilisateur : le navigateur autorise
+      // maintenant le son, on relance la lecture au cas où elle aurait été
+      // suspendue.
+      if (video.paused) video.play().catch(() => {});
+      updateSoundBtn();
+    });
+  }
 
-  setTimeout(dismiss, reduceMotion ? 600 : 3600);
+  video.addEventListener('ended', dismiss);
+  video.addEventListener('error', dismiss);
+  // Une fois la lecture réellement lancée, filet de sécurité calé sur la
+  // durée de la vidéo (au cas où l'événement "ended" ne viendrait jamais).
+  video.addEventListener('playing', () => {
+    clearTimeout(safetyTimer);
+    const remaining = Number.isFinite(video.duration) ? (video.duration - video.currentTime) : 8;
+    safetyTimer = setTimeout(dismiss, Math.max(1, remaining) * 1000 + 1500);
+  }, { once: true });
+  // Vidéo qui ne démarre pas (hors-ligne sans cache, décodage impossible...).
+  safetyTimer = setTimeout(dismiss, INTRO_START_TIMEOUT_MS);
+
+  video.muted = readIntroMutedPref();
+  video.play().then(updateSoundBtn).catch((err) => {
+    if (dismissed) return;
+    if (err && err.name === 'NotAllowedError' && !video.muted) {
+      // Son refusé par le navigateur : on joue sans le son.
+      video.muted = true;
+      video.play().then(updateSoundBtn).catch(dismiss);
+    } else {
+      dismiss();
+    }
+  });
 }
 
 function init() {
