@@ -7,7 +7,9 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v32';
+const CACHE_NAME = 'traintrack-cache-v33';
+
+const INTRO_VIDEO_PATH = './assets/lhte-intro.mp4';
 
 const APP_SHELL = [
   './',
@@ -31,6 +33,9 @@ const APP_SHELL = [
   './assets/icons/apple-touch-icon-180.png',
   './assets/icons/favicon-32.png',
   './assets/icons/favicon-16.png',
+  // Vidéo de l'animation d'introduction (logo LHTE + musique), voir
+  // playIntroSplash dans js/app.js et respondWithMedia ci-dessous.
+  INTRO_VIDEO_PATH,
 ];
 
 const CDN_ASSETS = [
@@ -72,6 +77,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Vidéos (.mp4) : les navigateurs (Safari/iOS surtout) les demandent par
+  // morceaux (en-tête Range) et refusent de les lire si on leur renvoie le
+  // fichier entier à la place. On sert donc le morceau demandé à partir de
+  // la copie complète en cache (réponse 206), ce qui permet aussi de jouer
+  // l'intro hors-ligne.
+  if (new URL(req.url).pathname.endsWith('.mp4')) {
+    event.respondWith(respondWithMedia(req));
+    return;
+  }
+
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
@@ -100,3 +115,48 @@ self.addEventListener('fetch', (event) => {
     }
   })());
 });
+
+async function respondWithMedia(req) {
+  const cache = await caches.open(CACHE_NAME);
+  let full = await cache.match(req.url);
+  if (!full) {
+    try {
+      // Requête SANS Range pour récupérer (et mettre en cache) le fichier
+      // complet, réutilisable ensuite pour n'importe quel morceau.
+      const fresh = await fetch(req.url);
+      if (!fresh.ok) return fresh;
+      await cache.put(req.url, fresh.clone());
+      full = fresh;
+    } catch (err) {
+      return Response.error();
+    }
+  }
+  const range = req.headers.get('range');
+  if (!range) return full;
+  const buf = await full.arrayBuffer();
+  const size = buf.byteLength;
+  const m = /bytes=(\d*)-(\d*)/.exec(range);
+  let start = 0;
+  let end = size - 1;
+  if (m) {
+    if (m[1] === '' && m[2] !== '') {
+      start = Math.max(0, size - Number(m[2]));
+    } else {
+      start = Number(m[1] || 0);
+      if (m[2] !== '') end = Math.min(Number(m[2]), size - 1);
+    }
+  }
+  if (start >= size || start > end) {
+    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+  }
+  return new Response(buf.slice(start, end + 1), {
+    status: 206,
+    statusText: 'Partial Content',
+    headers: {
+      'Content-Type': full.headers.get('Content-Type') || 'video/mp4',
+      'Content-Range': `bytes ${start}-${end}/${size}`,
+      'Content-Length': String(end - start + 1),
+      'Accept-Ranges': 'bytes',
+    },
+  });
+}
