@@ -333,6 +333,69 @@ function openStepTimeEditor(train, stepIndex) {
   });
 }
 
+// ---------- Train calé / Observation ----------
+// "⛔ Train calé" : valide le train même si la séquence n'est pas finie.
+// L'état devient "TRAIN CALÉ À HH:MM" (voir computeTrainStatus), les étapes
+// déjà enregistrées restent affichées (et reprises dans le mail / PDF), et
+// la vignette se réduit comme un train parti. Un second clic annule.
+function toggleTrainStalled(train) {
+  if (train.stalled) {
+    if (!confirm(`Annuler l'état « calé » du train ${train.number} ?`)) return;
+    train.stalled = false;
+    train.stalledAt = null;
+    train.collapsed = false;
+    showToast(`Train ${train.number} : état calé annulé`);
+  } else {
+    const done = train.steps.filter((s) => s.real).length;
+    if (!confirm(`Déclarer le train ${train.number} CALÉ ?\n\nIl sera validé même si la séquence n'est pas finie (${done}/${train.steps.length} étape(s) faite(s)) ; les heures déjà enregistrées sont conservées.`)) return;
+    train.stalled = true;
+    train.stalledAt = new Date().toISOString();
+    train.collapsed = true;
+    showToast(`Train ${train.number} déclaré calé ⛔`);
+  }
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+}
+
+// "📝 Observation" : texte libre par train, repris dans le PDF récap, la
+// copie stylée, la copie texte et l'email.
+function openObservationModal(train) {
+  openModal({
+    title: `Observation — Train ${escapeHtml(train.number)}`,
+    bodyHTML: `
+      <form id="observationForm" class="stacked-form">
+        <label>Observation (texte libre, repris dans le PDF récap et les emails)
+          <textarea id="fObservation" rows="6" maxlength="2000" placeholder="ex : Retard dû à une avarie wagon, train recomposé à 15:10…">${escapeHtml(train.observation || '')}</textarea>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnClearObservation">Effacer</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      const textarea = panel.querySelector('#fObservation');
+      textarea.focus();
+      const save = (value) => {
+        train.observation = value;
+        train.updatedAt = new Date().toISOString();
+        persist();
+        closeModal();
+        refreshTrainCard(train);
+      };
+      panel.querySelector('#observationForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        save(textarea.value.trim());
+        showToast(train.observation ? 'Observation enregistrée' : 'Observation effacée');
+      });
+      panel.querySelector('#btnClearObservation').addEventListener('click', () => {
+        save('');
+        showToast('Observation effacée');
+      });
+    },
+  });
+}
+
 // ---------- Composition du train (wagons / poids / longueur / traction) ----------
 function openCompositionModal(train) {
   const comp = train.composition || {};
@@ -587,9 +650,13 @@ function buildTrainReportText(train, destination) {
     `🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`,
   ];
 
-  lines.push(lastDelay.status === 'recorded'
-    ? `Départ effectif : ${formatHeureLettre(lastDelay.realDate)} ${regulatorToneEmoji(lastDelay.tone)} ${regulatorEcartTexte(lastDelay.diffMin, DELAY_THRESHOLDS.onTime)}`
-    : 'Départ effectif : — (pas encore enregistré)');
+  if (train.stalled) {
+    lines.push(`⛔ TRAIN CALÉ${train.stalledAt ? ` à ${formatHeureLettre(new Date(train.stalledAt))}` : ''} (séquence non terminée)`);
+  } else {
+    lines.push(lastDelay.status === 'recorded'
+      ? `Départ effectif : ${formatHeureLettre(lastDelay.realDate)} ${regulatorToneEmoji(lastDelay.tone)} ${regulatorEcartTexte(lastDelay.diffMin, DELAY_THRESHOLDS.onTime)}`
+      : 'Départ effectif : — (pas encore enregistré)');
+  }
 
   train.steps.forEach((step, i) => {
     lines.push(regulatorStepLine(step, delays[i]));
@@ -609,6 +676,11 @@ function buildTrainReportText(train, destination) {
   // reprises en plus de la composition ci-dessus, jamais à sa place.
   const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
   if (slotSummary) lines.push(`🎰 SLOT : ${slotSummary}`);
+
+  if (train.observation) {
+    lines.push('');
+    lines.push(`📝 Observation : ${train.observation}`);
+  }
 
   lines.push('');
   lines.push(`⚠ Cause principale : ${cause.cause}${cause.amountLabel && cause.amountLabel !== '--' ? ` (${cause.amountLabel})` : ''}`);
@@ -680,6 +752,14 @@ function mailEcart(delay) {
   return { label: `+${pad2(delay.diffMin)} min`, fg: '#ffffff', bg: '#dc2626', kind: 'late' };
 }
 
+// Couleur d'une heure dans le mail : rouge si en retard, vert si à l'heure
+// ou en avance (tout va bien), encre normale si pas encore d'écart.
+function mailTimeColor(ecart) {
+  if (ecart.kind === 'late') return '#dc2626';
+  if (ecart.kind === 'onTime' || ecart.kind === 'early') return '#15803d';
+  return MAIL_INK;
+}
+
 function mailPill(ecart, size = 13) {
   return `<span style="display:inline-block;padding:4px 10px;border-radius:6px;background:${ecart.bg};color:${ecart.fg};${MAIL_FONT}font-size:${size}px;font-weight:700;white-space:nowrap;">${escapeHtml(ecart.label)}</span>`;
 }
@@ -689,6 +769,7 @@ function mailPill(ecart, size = 13) {
 function trainMailSituation(train, delays) {
   const lastIndex = train.steps.length - 1;
   const last = lastRecordedStepInfo(train, delays);
+  if (train.stalled) return { kind: 'stalled', label: 'CALÉ', icon: '⛔', color: '#7c3aed', last, at: train.stalledAt ? new Date(train.stalledAt) : null };
   const departed = lastIndex >= 0 && delays[lastIndex]?.realDate;
   if (departed) return { kind: 'departed', label: 'PARTI', icon: '✅', color: '#15803d', last: { index: lastIndex, step: train.steps[lastIndex], delay: delays[lastIndex] } };
   if (last) return { kind: 'progress', label: 'EN COURS', icon: '⏳', color: '#d97706', last };
@@ -707,6 +788,12 @@ function trainAnnouncementText(train, destination, delays) {
       : ecart.kind === 'late' ? `, soit un retard de ${ecart.label}${prevu ? ` (prévu ${prevu})` : ''}`
         : ecart.kind === 'early' ? `, soit une avance de ${ecart.label.slice(1)}${prevu ? ` (prévu ${prevu})` : ''}` : '';
     return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
+  }
+  if (situation.kind === 'stalled') {
+    const at = situation.at ? ` depuis ${formatHHMM(situation.at)}` : '';
+    if (!situation.last) return `Nous vous informons que le train N° ${train.number}${dest} est calé${at} (aucune étape effectuée).`;
+    const e = mailEcart(situation.last.delay);
+    return `Nous vous informons que le train N° ${train.number}${dest} est calé${at}. Dernière étape effectuée : « ${situation.last.step.label} » à ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.label})` : ''}.`;
   }
   if (situation.kind === 'progress') {
     const d = situation.last.delay;
@@ -740,10 +827,18 @@ function buildTrainReportHTML(train, destination) {
     const ecartTxt = departEcart.kind === 'onTime' ? ", à l'heure prévue"
       : departEcart.kind === 'late' ? `, soit un retard de ${mailPill(departEcart, 12)}${prevuTxt}`
         : departEcart.kind === 'early' ? `, soit une avance de ${mailPill({ ...departEcart, label: departEcart.label.slice(1) }, 12)}${prevuTxt}` : '';
-    announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:${MAIL_INK};">${escapeHtml(departReel)}</strong>${ecartTxt}.`;
+    announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:${mailTimeColor(departEcart)};">${escapeHtml(departReel)}</strong>${ecartTxt}.`;
+  } else if (situation.kind === 'stalled') {
+    const at = situation.at ? ` depuis <strong style="color:#7c3aed;">${escapeHtml(formatHHMM(situation.at))}</strong>` : '';
+    if (situation.last) {
+      const e = mailEcart(situation.last.delay);
+      announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} est <strong style="color:#7c3aed;">calé</strong>${at}. Dernière étape effectuée : « <strong>${escapeHtml(situation.last.step.label)}</strong> » à <strong style="color:${mailTimeColor(e)};">${escapeHtml(formatHHMM(situation.last.delay.realDate))}</strong>${e.kind !== 'none' ? ` ${mailPill(e, 12)}` : ''}.`;
+    } else {
+      announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} est <strong style="color:#7c3aed;">calé</strong>${at} (aucune étape effectuée).`;
+    }
   } else if (situation.kind === 'progress') {
     const e = mailEcart(situation.last.delay);
-    announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} a effectué l'étape « <strong>${escapeHtml(situation.last.step.label)}</strong> » à <strong style="color:${MAIL_INK};">${escapeHtml(formatHHMM(situation.last.delay.realDate))}</strong>${e.kind !== 'none' ? ` ${mailPill(e, 12)}` : ''}.`;
+    announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} a effectué l'étape « <strong>${escapeHtml(situation.last.step.label)}</strong> » à <strong style="color:${mailTimeColor(e)};">${escapeHtml(formatHHMM(situation.last.delay.realDate))}</strong>${e.kind !== 'none' ? ` ${mailPill(e, 12)}` : ''}.`;
   } else {
     announceHTML = `Nous vous informons du suivi du train ${numberHTML}${destHTML} : aucune étape n'a encore été enregistrée.`;
   }
@@ -758,7 +853,9 @@ function buildTrainReportHTML(train, destination) {
     const labelColor = isLast ? (e.kind === 'late' ? '#dc2626' : MAIL_INK) : '#1f2937';
     const rowBg = isLast ? (e.kind === 'late' ? '#fff5f5' : '#f3f7ff') : '#ffffff';
     const real = recorded ? formatHHMM(d.realDate) : '--:--';
-    const realBorder = isLast && e.kind === 'late' ? '#dc2626' : '#c7cfdc';
+    const realColor = recorded ? mailTimeColor(e) : '#94a3b8';
+    const realBorder = e.kind === 'late' ? '#fca5a5' : (e.kind === 'onTime' || e.kind === 'early') ? '#86efac' : '#c7cfdc';
+    const realBg = e.kind === 'late' ? '#fef2f2' : (e.kind === 'onTime' || e.kind === 'early') ? '#f0fdf4' : '#ffffff';
     return `
       <tr style="background:${rowBg};">
         <td width="18" style="padding:10px 0 10px 14px;border-bottom:1px solid #eef1f6;${F}font-size:16px;color:${dot};">●</td>
@@ -768,7 +865,7 @@ function buildTrainReportHTML(train, destination) {
         <td style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:13px;font-weight:${isLast ? 800 : 600};color:${labelColor};text-transform:uppercase;letter-spacing:.02em;">${escapeHtml(step.label)}</td>
         <td align="center" style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:14px;color:${isLast && e.kind === 'late' ? '#dc2626' : '#64748b'};">${escapeHtml(step.theoretical || '--:--')}</td>
         <td align="center" style="padding:8px;border-bottom:1px solid #eef1f6;">
-          <span style="display:inline-block;min-width:58px;padding:5px 10px;border:1px solid ${realBorder};border-radius:6px;background:#ffffff;${F}font-size:15px;font-weight:800;color:${isLast && e.kind === 'late' ? '#dc2626' : MAIL_INK};">${escapeHtml(real)}</span>
+          <span style="display:inline-block;min-width:58px;padding:5px 10px;border:1px solid ${realBorder};border-radius:6px;background:${realBg};${F}font-size:15px;font-weight:800;color:${realColor};">${escapeHtml(real)}</span>
         </td>
         <td align="center" style="padding:8px 14px 8px 8px;border-bottom:1px solid #eef1f6;">${mailPill(e)}</td>
       </tr>`;
@@ -811,8 +908,11 @@ function buildTrainReportHTML(train, destination) {
             ${destination ? `<div style="${F}font-size:14px;font-weight:700;color:${MAIL_ACCENT};margin-top:2px;">→ ${escapeHtml(destination.toUpperCase())}</div>` : ''}
           </td>
           <td valign="middle" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
+            ${situation.kind === 'stalled' ? `
+            <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:#7c3aed;">TRAIN CALÉ</div>
+            <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:#7c3aed;vertical-align:middle;">${escapeHtml(situation.at ? formatHHMM(situation.at) : '--:--')}</span></div>` : `
             <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">DÉPART EFFECTIF</div>
-            <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:${MAIL_INK};vertical-align:middle;">${escapeHtml(departReel)}</span> ${departEcart.kind !== 'none' ? mailPill(departEcart, 15) : ''}</div>
+            <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:${mailTimeColor(departEcart)};vertical-align:middle;">${escapeHtml(departReel)}</span> ${departEcart.kind !== 'none' ? mailPill(departEcart, 15) : ''}</div>`}
             <div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">PRÉVU : ${escapeHtml(departPrevu)}</div>
           </td>
           <td valign="middle" align="center" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
@@ -836,6 +936,17 @@ function buildTrainReportHTML(train, destination) {
       </table>
     </td>
   </tr>
+  ${train.observation ? `
+  <tr>
+    <td style="padding:0 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #fcd34d;border-radius:10px;border-collapse:separate;background:#fffbeb;">
+        <tr><td style="padding:10px 14px;">
+          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:#b45309;margin-bottom:4px;">📝 OBSERVATIONS</div>
+          <div style="${F}font-size:14px;line-height:1.55;color:#1f2937;">${escapeHtml(train.observation).replace(/\n/g, '<br>')}</div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>` : ''}
   <tr>
     <td style="padding:0 18px 14px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -845,7 +956,8 @@ function buildTrainReportHTML(train, destination) {
             ${summaryRow('🚆', 'Train', escapeHtml(train.number))}
             ${destination ? summaryRow('📍', 'Destination', escapeHtml(destination)) : ''}
             ${summaryRow('🕒', 'Départ prévu', escapeHtml(departPrevu))}
-            ${summaryRow('⏱', 'Départ réel', escapeHtml(departReel))}
+            ${summaryRow('⏱', 'Départ réel', `<span style="color:${departDelay?.realDate ? mailTimeColor(departEcart) : MAIL_INK};">${escapeHtml(departReel)}</span>`)}
+            ${situation.kind === 'stalled' ? summaryRow('⛔', 'Calé à', `<span style="color:#7c3aed;">${escapeHtml(situation.at ? formatHHMM(situation.at) : '--:--')}</span>`) : ''}
             ${summaryRow('📈', 'Écart au départ', departEcart.kind !== 'none' ? mailPill(departEcart, 12) : '—')}
             ${summaryRow('✔', 'Statut', `<span style="color:${situation.color};">${situation.label} ${situation.icon}</span>`)}
             ${causeLabel ? summaryRow('⚠', 'Cause principale', causeLabel) : ''}
@@ -936,6 +1048,9 @@ function trainMailSubject(train, destination) {
   const delays = computeAllStepDelays(train);
   const situation = trainMailSituation(train, delays);
   const dest = destination ? ` → ${destination}` : '';
+  if (situation.kind === 'stalled') {
+    return `Train ${train.number}${dest} — CALÉ${situation.at ? ` (${formatHHMM(situation.at)})` : ''}`;
+  }
   if (situation.kind === 'departed') {
     const e = mailEcart(situation.last.delay);
     return `Départ train ${train.number}${dest} — ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.kind === 'onTime' ? "à l'heure" : e.label})` : ''}`;
@@ -953,10 +1068,15 @@ async function emailTrainData(train) {
   const text = buildTrainReportText(train, destination);
   const copied = await writeRichClipboard(buildTrainReportHTML(train, destination), text);
   const { to, bcc } = getTrainRecipients(train.number);
-  const params = [`subject=${encodeURIComponent(trainMailSubject(train, destination))}`];
+  // Destinataires principaux passés en paramètre "to=" (comme "bcc=") plutôt
+  // que juste après "mailto:" : certaines versions d'Outlook ignoraient les
+  // adresses placées avant le "?" alors qu'elles lisaient bien la Cci.
+  const params = [];
+  if (to) params.push(`to=${encodeMailAddresses(to)}`);
   if (bcc) params.push(`bcc=${encodeMailAddresses(bcc)}`);
+  params.push(`subject=${encodeURIComponent(trainMailSubject(train, destination))}`);
   if (!copied) params.push(`body=${encodeURIComponent(text)}`);
-  window.location.href = `mailto:${encodeMailAddresses(to)}?${params.join('&')}`;
+  window.location.href = `mailto:?${params.join('&')}`;
   if (copied) {
     showToast('Message stylé copié ✓ — dans Outlook, cliquez dans le corps du mail puis Ctrl+V', 'success', 7000);
   } else if (!to) {
@@ -1000,6 +1120,8 @@ function onGridClick(e) {
     case 'open-composition': openCompositionModal(train); break;
     case 'set-train-type': setTrainType(train, btn.dataset.type); break;
     case 'open-slot': openSlotModal(train); break;
+    case 'toggle-stalled': toggleTrainStalled(train); break;
+    case 'open-observation': openObservationModal(train); break;
     case 'collapse-card': setCardCollapsed(train, true); break;
     case 'expand-card': setCardCollapsed(train, false); break;
     default: break;
@@ -3359,6 +3481,15 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     if (compositionSummary) writeLine(`Composition : ${compositionSummary}`, { size: 9.5, gap: 4.8, indent: 4 });
     const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
     if (slotSummary) writeLine(`SLOT : ${slotSummary}`, { size: 9.5, gap: 4.8, indent: 4 });
+    if (train.stalled) {
+      writeLine(`Train calé${train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : ''} — séquence non terminée (étapes faites ci-dessus)`, { size: 9.5, style: 'bold', gap: 4.8, indent: 4 });
+    }
+    if (train.observation) {
+      const obsLines = typeof doc.splitTextToSize === 'function'
+        ? doc.splitTextToSize(`Observation : ${train.observation}`, 180)
+        : [`Observation : ${train.observation}`];
+      obsLines.forEach((line) => writeLine(line, { size: 9.5, style: 'italic', gap: 4.8, indent: 4 }));
+    }
     y += 2;
   });
 
@@ -3422,7 +3553,8 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
 // une copie dans les archives (voir js/archives.js et le bouton
 // "🗄 Archives" ci-dessous) — écrase l'archive du jour si déjà générée
 // aujourd'hui.
-function generateDailyRecapPDF() {
+// Renvoie true si le PDF a bien été archivé (utilisé par "Journée finie").
+async function generateDailyRecapPDF({ download = true, silent = false } = {}) {
   const doc = buildRecapPdfDoc(currentDate, {
     trainsForDate: getTodayTrains(),
     shuttlesSnapshot: shuttles,
@@ -3431,11 +3563,18 @@ function generateDailyRecapPDF() {
   });
   if (!doc) {
     showToast("Génération PDF indisponible (bibliothèque non chargée — vérifiez la connexion réseau au premier chargement)", 'error');
-    return;
+    return false;
   }
-  doc.save(`recap-${currentDate}.pdf`);
-  saveArchivePdf(currentDate, doc.output('blob')).catch((err) => console.warn('Archivage PDF échoué', err));
-  showToast('PDF récap généré ✓ (et archivé)');
+  if (download) doc.save(`recap-${currentDate}.pdf`);
+  try {
+    await saveArchivePdf(currentDate, doc.output('blob'));
+  } catch (err) {
+    console.warn('Archivage PDF échoué', err);
+    if (!silent) showToast('PDF généré, mais archivage impossible sur cet appareil', 'error');
+    return false;
+  }
+  if (!silent) showToast('PDF récap généré ✓ (et archivé)');
+  return true;
 }
 
 // Archivage automatique et silencieux (pas de téléchargement) de la
@@ -3534,6 +3673,213 @@ function openArchivesModal() {
   });
 }
 
+// ---------- "🌙 Journée finie" : clôture propre de la journée ----------
+// Bouton tout en haut : après confirmation, sauvegarde tout (trains,
+// réglages, navettes, arrivées), génère le PDF récap (archivé + téléchargé
+// si coché), renvoie les heures du jour vers Google Sheets si configuré,
+// puis joue une animation de fermeture de 3 s (logo LHTE, "Journée
+// terminée" en néon, fermeture en iris) et ferme l'application. Si le
+// navigateur refuse la fermeture automatique (onglet classique), un écran
+// final "Journée terminée — vous pouvez fermer l'application" s'affiche à la
+// place, avec un bouton pour rouvrir.
+const OUTRO_DURATION_MS = 3000;
+
+function endDayCounts() {
+  const todays = getTodayTrains();
+  const departed = todays.filter((t) => t.steps[t.steps.length - 1]?.real && !t.stalled).length;
+  const stalled = todays.filter((t) => t.stalled).length;
+  return {
+    trains: todays.length,
+    departed,
+    stalled,
+    pending: todays.length - departed - stalled,
+    shuttles: Object.keys(shuttles || {}).length,
+    arrivals: Object.keys(arrivals || {}).length,
+  };
+}
+
+function openEndDayModal() {
+  const c = endDayCounts();
+  const hasSheets = Boolean(settings.sheetsWebAppUrl);
+  openModal({
+    title: '🌙 Clôturer la journée',
+    bodyHTML: `
+      <form id="endDayForm" class="stacked-form">
+        <p class="help-text">${escapeHtml(formatDateLongFR(currentDate))} — ${c.trains} train(s) : ${c.departed} parti(s), ${c.stalled} calé(s), ${c.pending} non terminé(s) · ${c.shuttles} navette(s) · ${c.arrivals} arrivée(s).</p>
+        ${c.pending > 0 ? `<p class="end-day-warning">⚠ ${c.pending} train(s) n'ont pas fini leur séquence : ils apparaîtront tels quels dans le PDF (pensez à « ⛔ Train calé » si besoin).</p>` : ''}
+        <label class="checkbox-row"><input type="checkbox" id="fEndDayPdf" checked> Télécharger le PDF récap (il est archivé dans « 🗄 Archives » dans tous les cas)</label>
+        <label class="checkbox-row"><input type="checkbox" id="fEndDaySheets" ${hasSheets ? 'checked' : 'disabled'}> Renvoyer les heures du jour vers Google Sheets${hasSheets ? '' : ' (non configuré)'}</label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" data-action="close-modal">Annuler</button>
+          <button type="submit" class="btn btn-primary">🌙 Clôturer et fermer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      panel.querySelector('#endDayForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const downloadPdf = panel.querySelector('#fEndDayPdf').checked;
+        const pushSheets = panel.querySelector('#fEndDaySheets').checked;
+        closeModal();
+        runEndOfDay({ downloadPdf, pushSheets });
+      });
+    },
+  });
+}
+
+async function runEndOfDay({ downloadPdf = true, pushSheets = false } = {}) {
+  const btn = el('btnEndDay');
+  if (btn) btn.disabled = true;
+  showToast('Clôture de la journée en cours…');
+  const results = { saved: false, pdf: false, sheets: null };
+  try {
+    saveTrains(trains);
+    saveSettings(settings);
+    saveShuttles(shuttles);
+    saveShuttleReserves(shuttleReserves);
+    saveArrivals(arrivals);
+    results.saved = true;
+  } catch (err) {
+    console.warn('Sauvegarde de fin de journée échouée', err);
+  }
+  results.pdf = await generateDailyRecapPDF({ download: downloadPdf, silent: true });
+  if (pushSheets && settings.sheetsWebAppUrl) {
+    try {
+      const r = await Promise.race([
+        pushTodayToSheet(),
+        new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+      ]);
+      results.sheets = Boolean(r && r.failed === 0);
+    } catch (err) {
+      results.sheets = false;
+    }
+  }
+  settings.lastDayClosedAt = new Date().toISOString();
+  saveSettings(settings);
+  const overlay = await playOutro(results);
+  window.close();
+  // Fermeture refusée (onglet ouvert à la main) : écran final à la place.
+  setTimeout(() => { if (!window.closed) showEndScreen(overlay, results); }, 400);
+}
+
+// Petite signature sonore de fermeture (synthétisée, pas de fichier) :
+// nappe douce + carillon descendant, coupée si le son de l'intro a été
+// coupé (même réglage, voir readIntroMutedPref).
+function playOutroChime() {
+  if (readIntroMutedPref()) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.value = 0.16;
+    master.connect(ctx.destination);
+    [146.83, 220, 293.66, 369.99].forEach((f) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.22, now + 0.6);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 3);
+      o.connect(g).connect(master);
+      o.start(now);
+      o.stop(now + 3.05);
+    });
+    [[880, 0.45], [739.99, 0.8], [587.33, 1.15], [440, 1.6]].forEach(([f, t]) => {
+      [[f, 0.5], [f * 2.01, 0.12]].forEach(([freq, amp]) => {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = freq;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, now + t);
+        g.gain.exponentialRampToValueAtTime(amp, now + t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + t + 1.3);
+        o.connect(g).connect(master);
+        o.start(now + t);
+        o.stop(now + t + 1.35);
+      });
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 3600);
+  } catch (err) {
+    /* son indisponible : animation muette */
+  }
+}
+
+function endDayChecklist(results) {
+  return [
+    results.saved ? '✓ Données sauvegardées' : '✗ Sauvegarde à vérifier',
+    results.pdf ? '✓ PDF récap archivé' : '✗ PDF non généré',
+    results.sheets === null ? null : results.sheets ? '✓ Google Sheets à jour' : '✗ Envoi Google Sheets incomplet',
+  ].filter(Boolean);
+}
+
+// Animation de fermeture (3 s) : le logo LHTE (fin de la vidéo d'intro,
+// lue sans le son) se pose avec un léger zoom, "Journée terminée" s'allume
+// en néon aux couleurs navettes/trains, un reflet balaie l'écran, puis tout
+// se referme en iris jusqu'à un point lumineux qui s'éteint. Purement
+// visuel : les données sont déjà sauvegardées avant son lancement.
+function playOutro(results) {
+  return new Promise((resolve) => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const overlay = document.createElement('div');
+    overlay.className = 'outro';
+    overlay.setAttribute('role', 'presentation');
+    overlay.innerHTML = `
+      <div class="outro-stage">
+        <video class="outro-video" muted playsinline webkit-playsinline preload="auto" disablepictureinpicture disableremoteplayback src="assets/lhte-intro.mp4"></video>
+        <div class="outro-fallback-logo" hidden>LHTE</div>
+        <div class="outro-text">
+          <div class="outro-title">Journée terminée</div>
+          <div class="outro-sub">${escapeHtml(formatDateLongFR(currentDate))} · ${escapeHtml(endDayChecklist(results).join(' · '))}</div>
+        </div>
+        <div class="outro-sweep" aria-hidden="true"></div>
+      </div>
+      <div class="outro-dot" aria-hidden="true"></div>`;
+    document.body.appendChild(overlay);
+    document.body.classList.add('intro-active');
+    buildIntroTagline(overlay.querySelector('.outro-title'));
+
+    const video = overlay.querySelector('.outro-video');
+    const showFallback = () => {
+      video.hidden = true;
+      overlay.querySelector('.outro-fallback-logo').hidden = false;
+    };
+    video.addEventListener('error', showFallback);
+    const start = () => {
+      try { video.currentTime = 5; } catch (err) { /* ignoré */ }
+      video.play().catch(() => {});
+    };
+    if (video.readyState >= 1) start();
+    else video.addEventListener('loadedmetadata', start, { once: true });
+
+    if (reduceMotion) {
+      overlay.classList.add('is-static');
+      setTimeout(() => resolve(overlay), 800);
+      return;
+    }
+    playOutroChime();
+    requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add('is-playing')));
+    setTimeout(() => resolve(overlay), OUTRO_DURATION_MS);
+  });
+}
+
+function showEndScreen(overlay, results) {
+  const closedAt = settings.lastDayClosedAt ? formatHHMM(new Date(settings.lastDayClosedAt)) : formatHHMM(new Date());
+  const target = overlay || document.body.appendChild(document.createElement('div'));
+  target.className = 'outro is-ended';
+  target.innerHTML = `
+    <div class="outro-end">
+      <div class="outro-end-moon" aria-hidden="true">🌙</div>
+      <h1 class="outro-end-title">Journée terminée</h1>
+      <p class="outro-end-date">${escapeHtml(formatDateLongFR(currentDate))} — clôturée à ${escapeHtml(closedAt)}</p>
+      <ul class="outro-end-list">${endDayChecklist(results).map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+      <p class="outro-end-hint">Vous pouvez fermer l'application. Bonne fin de journée !</p>
+      <button type="button" class="btn btn-primary" data-action="reopen-app">↺ Rouvrir l'application</button>
+    </div>`;
+  target.querySelector('[data-action="reopen-app"]').addEventListener('click', () => window.location.reload());
+}
+
 function wireHeaderButtons() {
   el('btnAddTrain').addEventListener('click', () => openTrainModal(null));
   el('btnSettings').addEventListener('click', openSettingsModal);
@@ -3547,7 +3893,11 @@ function wireHeaderButtons() {
   // Bouton "📄 PDF récap" : génère un PDF récapitulatif complet de la
   // journée (trains, navettes, tableau rapide, arrivées) — voir
   // generateDailyRecapPDF ci-dessus.
-  el('btnDailyRecapPdf').addEventListener('click', generateDailyRecapPDF);
+  el('btnDailyRecapPdf').addEventListener('click', () => generateDailyRecapPDF());
+  // Bouton "🌙 Journée finie" : clôture propre (sauvegarde, PDF, Sheets,
+  // animation de fermeture) — voir openEndDayModal ci-dessus.
+  const endDayBtn = el('btnEndDay');
+  if (endDayBtn) endDayBtn.addEventListener('click', openEndDayModal);
   // Bouton "🗄 Archives" : ouvre la liste des PDF récap archivés — voir
   // openArchivesModal ci-dessus.
   const archivesBtn = el('btnArchives');
