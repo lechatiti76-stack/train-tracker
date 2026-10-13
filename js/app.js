@@ -81,7 +81,7 @@ function updateDateLabel() {
 }
 
 // ---------- Toasts ----------
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', durationMs = 2600) {
   const container = el('toastContainer');
   const item = document.createElement('div');
   item.className = `toast toast-${type}`;
@@ -91,7 +91,7 @@ function showToast(message, type = 'success') {
   setTimeout(() => {
     item.classList.remove('show');
     setTimeout(() => item.remove(), 300);
-  }, 2600);
+  }, durationMs);
 }
 
 // ---------- Rendu de la grille ----------
@@ -580,7 +580,12 @@ function buildTrainReportText(train, destination) {
   const lastIndex = train.steps.length - 1;
   const lastDelay = delays[lastIndex];
 
-  const lines = [`🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`];
+  const lines = [
+    'Bonjour,',
+    trainAnnouncementText(train, destination, delays),
+    '',
+    `🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`,
+  ];
 
   lines.push(lastDelay.status === 'recorded'
     ? `Départ effectif : ${formatHeureLettre(lastDelay.realDate)} ${regulatorToneEmoji(lastDelay.tone)} ${regulatorEcartTexte(lastDelay.diffMin, DELAY_THRESHOLDS.onTime)}`
@@ -635,31 +640,6 @@ async function copyTrainData(train) {
   }
 }
 
-function emailTrainData(train) {
-  const subject = `Suivi train ${train.number} - ${formatDateFR(train.date)}`;
-  const body = buildTrainReportText(train, getQuickTrainDestination(train.number));
-  window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
-
-// ---------- Copie « stylée » (couleurs) pour coller dans un email ----------
-// Un lien mailto: ne peut transporter qu'un corps en texte brut (aucune mise
-// en forme HTML possible, quel que soit le client de messagerie) : c'est une
-// limite du protocole, pas de l'app. Pour permettre malgré tout une mise en
-// forme moderne avec couleurs, on écrit en parallèle une représentation
-// HTML dans le presse-papiers (API Clipboard, type MIME text/html) : collée
-// dans la zone de rédaction d'un client mail qui affiche du texte enrichi
-// (Gmail, Outlook, Apple Mail...), elle conserve couleurs et mise en forme.
-function delayColor(tone) {
-  switch (tone) {
-    case 'onTime': return { fg: '#16a34a', bg: '#dcfce7' };
-    case 'late':
-    case 'moderate': return { fg: '#d97706', bg: '#fef3c7' };
-    case 'severe': return { fg: '#dc2626', bg: '#fee2e2' };
-    case 'early': return { fg: '#0284c7', bg: '#e0f2fe' };
-    default: return { fg: '#5b6577', bg: '#eef1f6' };
-  }
-}
-
 // Étape la plus avancée ayant une heure réelle enregistrée (voir la même
 // logique dans computeTrainStatus/delay-calc.js, non exportée telle
 // quelle) : c'est elle qui alimente la phrase d'en-tête de l'email stylé
@@ -672,78 +652,236 @@ function lastRecordedStepInfo(train, delays) {
   return null;
 }
 
-// `destination` (optionnelle) vient des trains à accès rapide déjà
-// configurés dans Réglages (settings.quickTrains) — voir
-// getQuickTrainDestination, appelé depuis copyTrainDataStyled.
+// ---------- Message de régulation (copie stylée + email Outlook) ----------
+// Mise en page inspirée d'un "message de régulation – information
+// circulation" : en-tête, phrase d'annonce ("Nous vous annonçons le départ
+// du train..."), bloc départ effectif / état, séquence opérationnelle étape
+// par étape (heure théorique, heure constatée, écart en pastille colorée),
+// résumé + légende, pied de page. Fond clair (pas de fond noir) pour rester
+// lisible dans n'importe quelle boîte mail. Tout en tableaux + styles en
+// ligne : c'est la seule mise en forme qu'Outlook (moteur Word) respecte.
+// Un lien mailto: ne peut transporter qu'un corps en texte brut : la version
+// stylée passe donc par le presse-papiers (type MIME text/html), à coller
+// avec Ctrl+V dans le corps du mail.
+const MAIL_FONT = "font-family:'Segoe UI',Arial,Helvetica,sans-serif;";
+const MAIL_INK = '#0f2a5f';
+const MAIL_MUTED = '#5b6577';
+const MAIL_BORDER = '#d7dce6';
+const MAIL_ACCENT = '#1d4ed8';
+
+// 3 états seulement dans le mail (comme la légende) : en avance (vert),
+// à l'heure (gris), en retard (rouge), quelle que soit l'ampleur.
+function mailEcart(delay) {
+  if (!delay || delay.status !== 'recorded' || delay.diffMin === null || delay.diffMin === undefined) {
+    return { label: '—', fg: MAIL_MUTED, bg: '#eef1f6', kind: 'none' };
+  }
+  if (Math.abs(delay.diffMin) < DELAY_THRESHOLDS.onTime) return { label: '0 min', fg: '#334155', bg: '#e2e8f0', kind: 'onTime' };
+  if (delay.diffMin < 0) return { label: `-${pad2(delay.diffMin)} min`, fg: '#ffffff', bg: '#15803d', kind: 'early' };
+  return { label: `+${pad2(delay.diffMin)} min`, fg: '#ffffff', bg: '#dc2626', kind: 'late' };
+}
+
+function mailPill(ecart, size = 13) {
+  return `<span style="display:inline-block;padding:4px 10px;border-radius:6px;background:${ecart.bg};color:${ecart.fg};${MAIL_FONT}font-size:${size}px;font-weight:700;white-space:nowrap;">${escapeHtml(ecart.label)}</span>`;
+}
+
+// Situation du train pour l'en-tête du message : parti (dernière étape
+// enregistrée), en cours (au moins une étape), en attente (aucune).
+function trainMailSituation(train, delays) {
+  const lastIndex = train.steps.length - 1;
+  const last = lastRecordedStepInfo(train, delays);
+  const departed = lastIndex >= 0 && delays[lastIndex]?.realDate;
+  if (departed) return { kind: 'departed', label: 'PARTI', icon: '✅', color: '#15803d', last: { index: lastIndex, step: train.steps[lastIndex], delay: delays[lastIndex] } };
+  if (last) return { kind: 'progress', label: 'EN COURS', icon: '⏳', color: '#d97706', last };
+  return { kind: 'waiting', label: 'EN ATTENTE', icon: '🕓', color: MAIL_MUTED, last: null };
+}
+
+// Phrase d'annonce en tête du message (texte brut, sans mise en forme).
+function trainAnnouncementText(train, destination, delays) {
+  const situation = trainMailSituation(train, delays);
+  const dest = destination ? ` à destination de ${destination}` : '';
+  if (situation.kind === 'departed') {
+    const d = situation.last.delay;
+    const ecart = mailEcart(d);
+    const prevu = train.steps[situation.last.index].theoretical;
+    const suffix = ecart.kind === 'onTime' ? ", à l'heure prévue"
+      : ecart.kind === 'late' ? `, soit un retard de ${ecart.label}${prevu ? ` (prévu ${prevu})` : ''}`
+        : ecart.kind === 'early' ? `, soit une avance de ${ecart.label.slice(1)}${prevu ? ` (prévu ${prevu})` : ''}` : '';
+    return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
+  }
+  if (situation.kind === 'progress') {
+    const d = situation.last.delay;
+    const ecart = mailEcart(d);
+    return `Nous vous informons que le train N° ${train.number}${dest} a effectué l'étape « ${situation.last.step.label} » à ${formatHHMM(d.realDate)}${ecart.kind !== 'none' ? ` (${ecart.label})` : ''}.`;
+  }
+  return `Nous vous informons du suivi du train N° ${train.number}${dest} : aucune étape n'a encore été enregistrée.`;
+}
+
 function buildTrainReportHTML(train, destination) {
   const delays = computeAllStepDelays(train);
-  const status = computeTrainStatus(train);
   const cause = computeMainCause(train);
-  const statusColor = delayColor(status.tone);
-  const causeColor = delayColor(cause.tone);
+  const situation = trainMailSituation(train, delays);
   const compositionSummary = formatCompositionSummary(train.composition);
   const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
-  const font = "font-family:Arial,Helvetica,sans-serif;";
+  const lastIndex = train.steps.length - 1;
+  const departDelay = delays[lastIndex];
+  const departEcart = mailEcart(departDelay);
+  const departPrevu = train.steps[lastIndex]?.theoretical || '--:--';
+  const departReel = departDelay?.realDate ? formatHHMM(departDelay.realDate) : '--:--';
+  const now = new Date();
+  const dateLabel = (() => { const [y, m, d] = train.date.split('-'); return `${d}/${m}/${y}`; })();
+  const F = MAIL_FONT;
 
-  const last = lastRecordedStepInfo(train, delays);
-  const lastTime = last?.delay?.realDate ? formatHHMM(last.delay.realDate) : null;
-  const numberHTML = `<strong style="color:${statusColor.fg};">N° ${escapeHtml(train.number)}</strong>`;
-  const destinationHTML = destination ? ` à destination de <strong style="color:${statusColor.fg};">${escapeHtml(destination)}</strong>` : '';
-  const timeHTML = lastTime ? `<strong style="color:${statusColor.fg};">${escapeHtml(lastTime)}</strong>` : null;
-
-  // Message d'en-tête : reprend le libellé réel de la dernière étape
-  // enregistrée (ex : "Mise en tête", "Départ pour la ligne"...) plutôt
-  // qu'un lieu figé, pour rester juste quel que soit l'avancement.
-  const headerMessage = last && timeHTML
-    ? `Je vous informe que votre train ${numberHTML}${destinationHTML} vient de faire l'étape « ${escapeHtml(last.step.label)} » à ${timeHTML}.`
-    : `Suivi du train ${numberHTML}${destinationHTML} : aucune étape enregistrée pour l'instant.`;
+  // Phrase d'annonce, avec numéro / destination / heure mis en valeur.
+  const destHTML = destination ? ` à destination de <strong style="color:${MAIL_ACCENT};">${escapeHtml(destination)}</strong>` : '';
+  const numberHTML = `<strong style="color:${MAIL_INK};">N° ${escapeHtml(train.number)}</strong>`;
+  let announceHTML;
+  if (situation.kind === 'departed') {
+    const prevuTxt = departPrevu !== '--:--' ? ` (prévu ${escapeHtml(departPrevu)})` : '';
+    const ecartTxt = departEcart.kind === 'onTime' ? ", à l'heure prévue"
+      : departEcart.kind === 'late' ? `, soit un retard de ${mailPill(departEcart, 12)}${prevuTxt}`
+        : departEcart.kind === 'early' ? `, soit une avance de ${mailPill({ ...departEcart, label: departEcart.label.slice(1) }, 12)}${prevuTxt}` : '';
+    announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:${MAIL_INK};">${escapeHtml(departReel)}</strong>${ecartTxt}.`;
+  } else if (situation.kind === 'progress') {
+    const e = mailEcart(situation.last.delay);
+    announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} a effectué l'étape « <strong>${escapeHtml(situation.last.step.label)}</strong> » à <strong style="color:${MAIL_INK};">${escapeHtml(formatHHMM(situation.last.delay.realDate))}</strong>${e.kind !== 'none' ? ` ${mailPill(e, 12)}` : ''}.`;
+  } else {
+    announceHTML = `Nous vous informons du suivi du train ${numberHTML}${destHTML} : aucune étape n'a encore été enregistrée.`;
+  }
 
   const stepsRows = train.steps.map((step, i) => {
     const d = delays[i];
-    const c = delayColor(d.tone);
-    const ecartLabel = d.status === 'recorded' ? formatDelayLabel(d.diffMin, DELAY_THRESHOLDS) : null;
-    const realText = d.realDate ? escapeHtml(formatHHMM(d.realDate)) : 'Non enregistré';
+    const e = mailEcart(d);
+    const isLast = i === lastIndex;
+    const recorded = Boolean(d.realDate);
+    const dot = e.kind === 'late' ? '#dc2626' : e.kind === 'early' ? '#15803d' : recorded ? '#16a34a' : '#cbd5e1';
+    const iconBg = e.kind === 'late' ? '#fee2e2' : e.kind === 'early' || recorded ? '#dcfce7' : '#eef1f6';
+    const labelColor = isLast ? (e.kind === 'late' ? '#dc2626' : MAIL_INK) : '#1f2937';
+    const rowBg = isLast ? (e.kind === 'late' ? '#fff5f5' : '#f3f7ff') : '#ffffff';
+    const real = recorded ? formatHHMM(d.realDate) : '--:--';
+    const realBorder = isLast && e.kind === 'late' ? '#dc2626' : '#c7cfdc';
     return `
-      <tr>
-        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;">${escapeHtml(step.label)}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:12px;color:#5b6577;">${escapeHtml(step.theoretical || '--:--')}</td>
-        <td style="padding:7px 10px;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#1f2937;white-space:nowrap;">
-          ${realText}${ecartLabel ? ` <span style="${font}font-size:11px;font-weight:700;color:${c.fg};">(${escapeHtml(ecartLabel)})</span>` : ''}
+      <tr style="background:${rowBg};">
+        <td width="18" style="padding:10px 0 10px 14px;border-bottom:1px solid #eef1f6;${F}font-size:16px;color:${dot};">●</td>
+        <td width="40" style="padding:8px 6px;border-bottom:1px solid #eef1f6;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="32" height="32" align="center" valign="middle" style="width:32px;height:32px;border-radius:16px;background:${iconBg};font-size:16px;line-height:32px;">${regulatorStepIcon(step.label)}</td></tr></table>
         </td>
+        <td style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:13px;font-weight:${isLast ? 800 : 600};color:${labelColor};text-transform:uppercase;letter-spacing:.02em;">${escapeHtml(step.label)}</td>
+        <td align="center" style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:14px;color:${isLast && e.kind === 'late' ? '#dc2626' : '#64748b'};">${escapeHtml(step.theoretical || '--:--')}</td>
+        <td align="center" style="padding:8px;border-bottom:1px solid #eef1f6;">
+          <span style="display:inline-block;min-width:58px;padding:5px 10px;border:1px solid ${realBorder};border-radius:6px;background:#ffffff;${F}font-size:15px;font-weight:800;color:${isLast && e.kind === 'late' ? '#dc2626' : MAIL_INK};">${escapeHtml(real)}</span>
+        </td>
+        <td align="center" style="padding:8px 14px 8px 8px;border-bottom:1px solid #eef1f6;">${mailPill(e)}</td>
       </tr>`;
   }).join('');
 
-  return `<div style="${font}max-width:560px;border:1px solid #d7dce6;border-radius:10px;overflow:hidden;">
-  <div style="background:${statusColor.bg};padding:14px 16px;border-bottom:2px solid ${statusColor.fg};">
-    <div style="${font}font-size:14px;line-height:1.55;color:#1f2937;">🚆 ${headerMessage}</div>
-    <div style="${font}font-size:12px;color:#5b6577;margin-top:4px;">📅 ${escapeHtml(formatDateFR(train.date))}</div>
-  </div>
-  ${compositionSummary ? `<div style="padding:10px 16px;background:#f4f6fb;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#334155;">🚃 <strong>Composition :</strong> ${escapeHtml(compositionSummary)}</div>` : ''}
-  ${slotSummary ? `<div style="padding:10px 16px;background:#f4f6fb;border-bottom:1px solid #e5e9f2;${font}font-size:13px;color:#334155;">🎰 <strong>SLOT :</strong> ${escapeHtml(slotSummary)}</div>` : ''}
-  <table style="width:100%;border-collapse:collapse;">
-    <thead>
-      <tr style="background:#f4f6fb;">
-        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Étape</th>
-        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Théorique</th>
-        <th style="text-align:left;padding:7px 10px;${font}font-size:12px;color:#5b6577;">Réel (écart)</th>
-      </tr>
-    </thead>
-    <tbody>${stepsRows}</tbody>
-  </table>
-  <div style="padding:12px 16px;border-top:1px solid #e5e9f2;">
-    <div style="${font}font-size:12px;color:#5b6577;text-transform:uppercase;letter-spacing:.03em;">⚠ Cause principale</div>
-    <div style="margin-top:4px;">
-      <span style="display:inline-block;padding:3px 10px;border-radius:999px;${font}font-size:13px;font-weight:700;background:${causeColor.bg};color:${causeColor.fg};">${escapeHtml(cause.cause)}</span>
-      ${cause.amountLabel && cause.amountLabel !== '--' ? ` <span style="${font}font-size:12px;color:#5b6577;">${escapeHtml(cause.amountLabel)}</span>` : ''}
-    </div>
-  </div>
-</div>`;
+  const summaryRow = (icon, label, valueHTML) => `
+    <tr>
+      <td width="26" style="padding:5px 0;${F}font-size:14px;">${icon}</td>
+      <td style="padding:5px 6px;${F}font-size:13px;color:#334155;">${label}</td>
+      <td style="padding:5px 0;${F}font-size:13px;font-weight:700;color:${MAIL_INK};">${valueHTML}</td>
+    </tr>`;
+  const causeLabel = cause.cause ? `${escapeHtml(cause.cause)}${cause.amountLabel && cause.amountLabel !== '--' ? ` (${escapeHtml(cause.amountLabel)})` : ''}` : '';
+
+  const legendRow = (ecart, text) => `
+    <tr>
+      <td width="40" style="padding:4px 0;">${mailPill(ecart, 12)}</td>
+      <td style="padding:4px 8px;${F}font-size:13px;color:#334155;">${text}</td>
+    </tr>`;
+
+  return `<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;border:1px solid ${MAIL_BORDER};border-radius:12px;border-collapse:separate;background:#ffffff;${F}">
+  <tr>
+    <td style="padding:12px 18px;background:#eef4ff;border-bottom:1px solid ${MAIL_BORDER};border-radius:12px 12px 0 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="${F}font-size:12px;font-weight:700;letter-spacing:.05em;color:${MAIL_ACCENT};">📡 MESSAGE DE RÉGULATION – INFORMATION CIRCULATION</td>
+        <td align="right" style="${F}font-size:12px;color:${MAIL_MUTED};white-space:nowrap;">Date : ${escapeHtml(dateLabel)} &nbsp;|&nbsp; ${escapeHtml(formatHHMM(now))}</td>
+      </tr></table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:16px 18px 6px;${F}font-size:14px;line-height:1.6;color:#1f2937;">
+      Bonjour,<br>${announceHTML}
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:10px 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${MAIL_BORDER};border-radius:10px;border-collapse:separate;">
+        <tr>
+          <td valign="middle" style="padding:14px 16px;">
+            <div style="${F}font-size:24px;font-weight:800;color:${MAIL_INK};">🚆 TRAIN ${escapeHtml(train.number)}</div>
+            ${destination ? `<div style="${F}font-size:14px;font-weight:700;color:${MAIL_ACCENT};margin-top:2px;">→ ${escapeHtml(destination.toUpperCase())}</div>` : ''}
+          </td>
+          <td valign="middle" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
+            <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">DÉPART EFFECTIF</div>
+            <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:${MAIL_INK};vertical-align:middle;">${escapeHtml(departReel)}</span> ${departEcart.kind !== 'none' ? mailPill(departEcart, 15) : ''}</div>
+            <div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">PRÉVU : ${escapeHtml(departPrevu)}</div>
+          </td>
+          <td valign="middle" align="center" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
+            <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">ÉTAT</div>
+            <div style="${F}font-size:20px;font-weight:800;color:${situation.color};margin-top:4px;white-space:nowrap;">${situation.label} ${situation.icon}</div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${MAIL_BORDER};border-radius:10px;border-collapse:separate;">
+        <tr style="background:#f6f8fc;">
+          <td colspan="3" style="padding:10px 14px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};">📋 SÉQUENCE OPÉRATIONNELLE</td>
+          <td align="center" style="padding:10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">HEURE THÉORIQUE</td>
+          <td align="center" style="padding:10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">HEURE CONSTATÉE</td>
+          <td align="center" style="padding:10px 14px 10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">ÉCART</td>
+        </tr>
+        ${stepsRows}
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="56%" valign="top" style="padding:12px 14px;border:1px solid ${MAIL_BORDER};border-radius:10px;">
+          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin-bottom:6px;">RÉSUMÉ CIRCULATION</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            ${summaryRow('🚆', 'Train', escapeHtml(train.number))}
+            ${destination ? summaryRow('📍', 'Destination', escapeHtml(destination)) : ''}
+            ${summaryRow('🕒', 'Départ prévu', escapeHtml(departPrevu))}
+            ${summaryRow('⏱', 'Départ réel', escapeHtml(departReel))}
+            ${summaryRow('📈', 'Écart au départ', departEcart.kind !== 'none' ? mailPill(departEcart, 12) : '—')}
+            ${summaryRow('✔', 'Statut', `<span style="color:${situation.color};">${situation.label} ${situation.icon}</span>`)}
+            ${causeLabel ? summaryRow('⚠', 'Cause principale', causeLabel) : ''}
+            ${compositionSummary ? summaryRow('🚃', 'Composition', escapeHtml(compositionSummary)) : ''}
+            ${slotSummary ? summaryRow('🎰', 'SLOT', escapeHtml(slotSummary)) : ''}
+          </table>
+        </td>
+        <td width="12">&nbsp;</td>
+        <td valign="top" style="padding:12px 14px;border:1px solid ${MAIL_BORDER};border-radius:10px;">
+          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin-bottom:6px;">LÉGENDE</div>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            ${legendRow({ label: '-', fg: '#ffffff', bg: '#15803d' }, 'En avance')}
+            ${legendRow({ label: '0', fg: '#334155', bg: '#e2e8f0' }, "À l'heure")}
+            ${legendRow({ label: '+', fg: '#ffffff', bg: '#dc2626' }, 'En retard')}
+          </table>
+          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin:10px 0 4px;">INFORMATION</div>
+          <div style="${F}font-size:12px;line-height:1.5;color:${MAIL_MUTED};">Les écarts sont calculés par rapport à l'horaire théorique.<br>Heure affichée : HH:MM</div>
+        </td>
+      </tr></table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:12px 18px;background:#f6f8fc;border-top:1px solid ${MAIL_BORDER};border-radius:0 0 12px 12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="${F}font-size:12px;color:${MAIL_MUTED};"><strong style="color:${MAIL_ACCENT};letter-spacing:.04em;">🛡 SERVICE RÉGULATION</strong><br>Merci de ne pas répondre à ce message.</td>
+        <td align="right" style="${F}font-size:12px;font-weight:800;letter-spacing:.06em;color:${MAIL_INK};">LHTE<br><span style="font-weight:400;letter-spacing:0;color:${MAIL_MUTED};">Le Havre Terminal Exploitation</span></td>
+      </tr></table>
+    </td>
+  </tr>
+</table>`;
 }
 
-async function copyTrainDataStyled(train) {
-  const destination = getQuickTrainDestination(train.number);
-  const html = buildTrainReportHTML(train, destination);
-  const text = buildTrainReportText(train, destination);
+// Écrit le message dans le presse-papiers en version riche (HTML, pour
+// Outlook/Gmail...) + texte brut de secours. Renvoie true si la version
+// riche a pu être copiée.
+async function writeRichClipboard(html, text) {
   try {
     if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
       const item = new ClipboardItem({
@@ -751,14 +889,79 @@ async function copyTrainDataStyled(train) {
         'text/plain': new Blob([text], { type: 'text/plain' }),
       });
       await navigator.clipboard.write([item]);
-      showToast('Résumé stylé copié ✓ (collez-le dans votre email)');
-      return;
+      return true;
     }
   } catch (err) {
-    // Repli ci-dessous si la copie HTML riche est indisponible/refusée par
-    // le navigateur (ex : ancien navigateur, contexte non sécurisé).
+    // Copie riche indisponible/refusée (ancien navigateur, contexte non
+    // sécurisé...) : l'appelant se replie sur le texte brut.
+  }
+  return false;
+}
+
+async function copyTrainDataStyled(train) {
+  const destination = getQuickTrainDestination(train.number);
+  const ok = await writeRichClipboard(buildTrainReportHTML(train, destination), buildTrainReportText(train, destination));
+  if (ok) {
+    showToast('Message stylé copié ✓ (collez-le dans votre email)');
+    return;
   }
   await copyTrainData(train);
+}
+
+// ---------- Destinataires des emails (Réglages) ----------
+// Par train à accès rapide : champs "À" et "Cci" (destinataires
+// invisibles). Un champ laissé vide reprend la liste par défaut
+// (Réglages → "Destinataires par défaut"). Adresses séparées par ; , ou
+// des espaces — ressorties séparées par ";" (format accepté par Outlook).
+function normalizeRecipients(raw) {
+  return (raw || '')
+    .split(/[;,\s]+/)
+    .map((a) => a.trim())
+    .filter((a) => a.includes('@'))
+    .join(';');
+}
+
+function getTrainRecipients(number) {
+  const quickTrain = (settings.quickTrains || []).find((t) => t.number === number);
+  const to = normalizeRecipients(quickTrain?.mailTo) || normalizeRecipients(settings.mailDefaultTo);
+  const bcc = normalizeRecipients(quickTrain?.mailBcc) || normalizeRecipients(settings.mailDefaultBcc);
+  return { to, bcc };
+}
+
+function encodeMailAddresses(list) {
+  return list.split(';').filter(Boolean).map((a) => encodeURIComponent(a).replace(/%40/g, '@')).join(';');
+}
+
+function trainMailSubject(train, destination) {
+  const delays = computeAllStepDelays(train);
+  const situation = trainMailSituation(train, delays);
+  const dest = destination ? ` → ${destination}` : '';
+  if (situation.kind === 'departed') {
+    const e = mailEcart(situation.last.delay);
+    return `Départ train ${train.number}${dest} — ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.kind === 'onTime' ? "à l'heure" : e.label})` : ''}`;
+  }
+  return `Suivi train ${train.number}${dest} — ${formatDateFR(train.date)}`;
+}
+
+// Bouton "Email" : copie le message stylé dans le presse-papiers puis ouvre
+// la messagerie (Outlook) avec destinataires, Cci et objet déjà remplis —
+// il ne reste qu'à cliquer dans le corps du mail, Ctrl+V, puis Envoyer. Si
+// la copie riche est impossible, le texte brut est mis directement dans le
+// corps du mail à la place.
+async function emailTrainData(train) {
+  const destination = getQuickTrainDestination(train.number);
+  const text = buildTrainReportText(train, destination);
+  const copied = await writeRichClipboard(buildTrainReportHTML(train, destination), text);
+  const { to, bcc } = getTrainRecipients(train.number);
+  const params = [`subject=${encodeURIComponent(trainMailSubject(train, destination))}`];
+  if (bcc) params.push(`bcc=${encodeMailAddresses(bcc)}`);
+  if (!copied) params.push(`body=${encodeURIComponent(text)}`);
+  window.location.href = `mailto:${encodeMailAddresses(to)}?${params.join('&')}`;
+  if (copied) {
+    showToast('Message stylé copié ✓ — dans Outlook, cliquez dans le corps du mail puis Ctrl+V', 'success', 7000);
+  } else if (!to) {
+    showToast('Aucun destinataire réglé pour ce train (Réglages → Trains à accès rapide)', 'error');
+  }
 }
 
 // ---------- Délégation d'événements sur la grille ----------
@@ -1069,14 +1272,24 @@ function saveTrainForm(panel, existingTrain) {
 }
 
 // ---------- Modale Réglages ----------
-function addQuickTrainRowInto(container, { number = '', operator = '', destination = '' } = {}) {
+function addQuickTrainRowInto(container, { number = '', operator = '', destination = '', mailTo = '', mailBcc = '' } = {}) {
   const row = document.createElement('div');
-  row.className = 'quick-train-form-row date-row-extra';
+  row.className = 'quick-train-form-row';
   row.innerHTML = `
-    <input type="text" class="fQuickTrainNumber" placeholder="Numéro" inputmode="numeric" value="${escapeHtml(number)}" style="max-width:110px;">
-    <input type="text" class="fQuickTrainOperator" placeholder="Opérateur (ex : NAVILAND)" value="${escapeHtml(operator)}">
-    <input type="text" class="fQuickTrainDestination" placeholder="Destination" value="${escapeHtml(destination)}">
-    <button type="button" class="icon-btn" data-action="remove-quick-train-row" aria-label="Retirer ce train">✕</button>`;
+    <div class="quick-train-form-main">
+      <input type="text" class="fQuickTrainNumber" placeholder="Numéro" inputmode="numeric" value="${escapeHtml(number)}" style="max-width:110px;">
+      <input type="text" class="fQuickTrainOperator" placeholder="Opérateur (ex : NAVILAND)" value="${escapeHtml(operator)}">
+      <input type="text" class="fQuickTrainDestination" placeholder="Destination" value="${escapeHtml(destination)}">
+      <button type="button" class="icon-btn" data-action="remove-quick-train-row" aria-label="Retirer ce train">✕</button>
+    </div>
+    <div class="quick-train-form-mail">
+      <label>✉ À
+        <input type="text" class="fQuickTrainMailTo" inputmode="email" autocomplete="off" placeholder="adresses séparées par ; (vide = liste par défaut)" value="${escapeHtml(mailTo)}">
+      </label>
+      <label>👁‍🗨 Cci (invisibles)
+        <input type="text" class="fQuickTrainMailBcc" inputmode="email" autocomplete="off" placeholder="adresses séparées par ; (vide = liste par défaut)" value="${escapeHtml(mailBcc)}">
+      </label>
+    </div>`;
   container.appendChild(row);
 }
 
@@ -1283,6 +1496,15 @@ function settingsBodyHTML() {
 
       <div class="steps-form-list">
         <p class="help-text">Trains à accès rapide — un bouton apparaît pour chacun sous les navettes : cliquez pour indiquer qu'il circule aujourd'hui (ajoute sa vignette) ou qu'il ne circule pas (la retire). Opérateur et destination sont affichés au-dessus du numéro.</p>
+        <p class="help-text">Destinataires du bouton « Email » de chaque train : « À » (visibles) et « Cci » (invisibles, les autres destinataires ne les voient pas). Plusieurs adresses : séparez-les par « ; ». Un champ vide reprend les destinataires par défaut ci-dessous.</p>
+        <div class="quick-train-form-mail mail-defaults">
+          <label>✉ À — par défaut (tous les trains)
+            <input type="text" id="sMailDefaultTo" inputmode="email" autocomplete="off" placeholder="ex : regulation@exemple.fr; chef.equipe@exemple.fr" value="${escapeHtml(settings.mailDefaultTo || '')}">
+          </label>
+          <label>👁‍🗨 Cci — par défaut (invisibles)
+            <input type="text" id="sMailDefaultBcc" inputmode="email" autocomplete="off" placeholder="ex : archives@exemple.fr" value="${escapeHtml(settings.mailDefaultBcc || '')}">
+          </label>
+        </div>
         <div id="sQuickTrainsContainer" class="extra-dates"></div>
         <button type="button" class="btn btn-ghost btn-sm" id="btnAddQuickTrainRow">+ Ajouter un train à accès rapide</button>
       </div>
@@ -1409,9 +1631,13 @@ function openSettingsModal() {
             number: row.querySelector('.fQuickTrainNumber').value.trim(),
             operator: row.querySelector('.fQuickTrainOperator').value.trim(),
             destination: row.querySelector('.fQuickTrainDestination').value.trim(),
+            mailTo: row.querySelector('.fQuickTrainMailTo').value.trim(),
+            mailBcc: row.querySelector('.fQuickTrainMailBcc').value.trim(),
           }))
           .filter((t) => t.number);
         settings.quickTrainsEnrichedV2 = true;
+        settings.mailDefaultTo = panel.querySelector('#sMailDefaultTo').value.trim();
+        settings.mailDefaultBcc = panel.querySelector('#sMailDefaultBcc').value.trim();
 
         const shuttleTimings = { ...(settings.shuttleTimings || {}) };
         panel.querySelectorAll('[data-shuttle-family]').forEach((fieldset) => {
@@ -3388,6 +3614,46 @@ function wireVisibilityRefresh() {
 // l'intro n'est pas jouée du tout, par respect de ce réglage.
 const INTRO_SOUND_PREF_KEY = 'traintrack.introSoundMuted';
 const INTRO_START_TIMEOUT_MS = 2500;
+// Moment de la vidéo (en s) où le slogan "électrique" s'allume (juste après
+// le flash du logo), et petite pause sur la dernière image avant de fermer
+// l'intro, le temps de lire le slogan en entier.
+const INTRO_TAGLINE_AT_S = 3.6;
+const INTRO_END_HOLD_MS = 600;
+// Dégradé du slogan : couleurs des navettes (FL orange, AL jaune, NL bleu,
+// éclairci pour rester lisible sur fond nuit) puis des trains (NAVILAND
+// violet, FERROVERGNE orange).
+const INTRO_TAGLINE_COLORS = ['#f59e0b', '#eab308', '#60a5fa', '#a78bfa', '#fb923c'];
+
+function mixHexColors(a, b, t) {
+  const pa = a.match(/\w\w/g).map((h) => parseInt(h, 16));
+  const pb = b.match(/\w\w/g).map((h) => parseInt(h, 16));
+  return `#${pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
+
+// Découpe le slogan en mots (insécables) puis en lettres, chacune avec sa
+// couleur (position dans le dégradé), son délai d'allumage et un léger
+// décalage de grésillement — voir .intro-tagline-* dans css/style.css.
+function buildIntroTagline(container) {
+  const text = container.textContent.trim();
+  const letters = text.replace(/\s+/g, '').length;
+  const stops = INTRO_TAGLINE_COLORS;
+  let index = 0;
+  const colorAt = (k) => {
+    const pos = letters > 1 ? (k / (letters - 1)) * (stops.length - 1) : 0;
+    const i = Math.min(Math.floor(pos), stops.length - 2);
+    return mixHexColors(stops[i], stops[i + 1], pos - i);
+  };
+  const wordsHTML = text.split(/\s+/).map((word) => {
+    const chars = [...word].map((ch) => {
+      const k = index++;
+      const delay = (k * 0.022 + (k % 3) * 0.04).toFixed(3);
+      const buzz = ((k * 7) % 11 / 5).toFixed(2);
+      return `<span class="intro-tagline-char" style="--c:${colorAt(k)};--d:${delay}s;--b:${buzz}s">${escapeHtml(ch)}</span>`;
+    }).join('');
+    return `<span class="intro-tagline-word">${chars}</span>`;
+  }).join(' ');
+  container.innerHTML = `<span class="intro-tagline-text">${wordsHTML}</span><span class="intro-tagline-spark"></span>`;
+}
 
 function readIntroMutedPref() {
   try { return localStorage.getItem(INTRO_SOUND_PREF_KEY) === '1'; } catch (err) { return false; }
@@ -3402,6 +3668,7 @@ function playIntroSplash() {
   const video = document.getElementById('introVideo');
   const soundBtn = document.getElementById('introSoundBtn');
   const skipBtn = document.getElementById('introSkipBtn');
+  const tagline = document.getElementById('introTagline');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   if (reduceMotion || !video || typeof video.play !== 'function') {
@@ -3411,6 +3678,7 @@ function playIntroSplash() {
   }
 
   document.body.classList.add('intro-active');
+  if (tagline) buildIntroTagline(tagline);
   let dismissed = false;
   let safetyTimer = null;
 
@@ -3468,8 +3736,14 @@ function playIntroSplash() {
     });
   }
 
-  video.addEventListener('ended', dismiss);
+  video.addEventListener('ended', () => {
+    if (tagline) tagline.classList.add('is-on');
+    setTimeout(dismiss, INTRO_END_HOLD_MS);
+  });
   video.addEventListener('error', dismiss);
+  video.addEventListener('timeupdate', () => {
+    if (tagline && video.currentTime >= INTRO_TAGLINE_AT_S) tagline.classList.add('is-on');
+  });
   // Une fois la lecture réellement lancée, filet de sécurité calé sur la
   // durée de la vidéo (au cas où l'événement "ended" ne viendrait jamais).
   video.addEventListener('playing', () => {
