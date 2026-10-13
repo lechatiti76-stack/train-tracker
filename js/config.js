@@ -82,6 +82,13 @@ export const DEFAULT_SETTINGS = {
   // dans app.js. Absente/vide pour une famille = pas de badge affiché (pas
   // assez d'information pour calculer un écart).
   quickboardTimings: {},
+  // Destinataires par défaut du bouton "Email" des vignettes (adresses
+  // séparées par ";") : "À" visibles, "Cci" invisibles. Chaque train à accès
+  // rapide peut avoir ses propres listes (champs mailTo / mailBcc de
+  // quickTrains) ; un champ vide reprend ces listes par défaut — voir
+  // getTrainRecipients dans app.js.
+  mailDefaultTo: '',
+  mailDefaultBcc: '',
   theme: 'auto', // 'auto' | 'light' | 'dark'
   hasSeeded: false,
   lastSyncAt: null,
