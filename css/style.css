@@ -1419,3 +1419,219 @@ html.theme-dark .bar-title--shuttles { --bar-title-gradient: linear-gradient(90d
 .shuttle-quickboard-bar.is-collapsed .bar-title,
 .arrivals-bar.is-collapsed .bar-title { opacity: 0.75; margin-bottom: 0; }
 .quick-trains-bar .bar-title { display: flex; width: max-content; }
+
+/* ---------- "⛔ Train calé" / "📝 Observation" (vignette train) ---------- */
+.status-pill.tone-stalled { background: #ede9fe; color: #6d28d9; }
+html.theme-dark .status-pill.tone-stalled { background: rgba(167, 139, 250, 0.18); color: #c4b5fd; }
+.train-ops-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.btn-stall.is-active {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+.btn-observation.is-active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+html.theme-dark .btn-observation.is-active { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+.stalled-banner {
+  margin-top: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #c4b5fd;
+  background: #f5f3ff;
+  color: #4c1d95;
+  font-size: 0.88rem;
+}
+html.theme-dark .stalled-banner { background: rgba(124, 58, 237, 0.16); border-color: rgba(167, 139, 250, 0.45); color: #ddd6fe; }
+.stalled-banner[hidden], .observation-preview[hidden] { display: none; }
+.observation-preview {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--warning-bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#fObservation { width: 100%; min-height: 8rem; resize: vertical; font: inherit; }
+
+/* ---------- "🌙 Journée finie" ---------- */
+.btn-endday {
+  background: linear-gradient(135deg, #0f2a5f, #1d4ed8);
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.btn-endday:hover { filter: brightness(1.12); }
+.btn-endday:disabled { opacity: 0.6; cursor: progress; }
+.end-day-warning {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.stacked-form label.checkbox-row { flex-direction: row; align-items: flex-start; gap: 0.5rem; font-size: 0.9rem; font-weight: 500; color: var(--text); }
+.stacked-form label.checkbox-row input { width: auto; flex: none; margin-top: 0.2rem; }
+
+/* Animation de fermeture (3 s, voir playOutro dans js/app.js) :
+   0-0,35 s fondu d'entrée · 0-0,9 s le logo se pose (zoom + net) ·
+   0,45 s "Journée terminée" s'allume en néon · 1 s ligne d'état ·
+   1,45 s reflet qui balaie · 2,05-2,8 s fermeture en iris ·
+   2,65-3 s point lumineux qui s'éteint, écran noir. */
+.outro {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 50%, #0a2463 0%, #071a4a 45%, #04102b 100%);
+  color: #eef2ff;
+  opacity: 0;
+}
+.outro::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #02060f;
+  opacity: 0;
+  pointer-events: none;
+}
+.outro.is-playing { animation: outroFadeIn 0.35s ease-out forwards; }
+.outro.is-playing::after { animation: outroDarken 0.45s ease-in 2.55s forwards; }
+.outro.is-static, .outro.is-ended { opacity: 1; }
+.outro-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: circle(110% at 50% 46%);
+}
+.outro.is-playing .outro-stage { animation: outroIris 0.75s cubic-bezier(0.7, 0, 0.3, 1) 2.05s forwards; }
+.outro-video {
+  display: block;
+  flex: none;
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(closest-side, #000 76%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 76%, transparent 100%);
+}
+.outro.is-playing .outro-video { animation: outroSettle 2.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.outro-fallback-logo {
+  font-size: clamp(3rem, 14vw, 8rem);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #e0f2fe;
+  text-shadow: 0 0 6px #fff, 0 0 22px #22d3ee, 0 0 44px #1d4ed8;
+}
+.outro-fallback-logo[hidden] { display: none; }
+.outro-text {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14vh + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 92vw;
+  text-align: center;
+}
+@media (orientation: portrait) {
+  .outro-text { bottom: auto; top: calc(50% + 28.125vw + 1rem); }
+}
+.outro-title {
+  font-weight: 800;
+  font-size: clamp(1.3rem, 3.6vw, 2.4rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+.outro .intro-tagline-char { opacity: 0; }
+.outro.is-static .intro-tagline-char { opacity: 1; }
+.outro.is-playing .intro-tagline-char { animation: introNeonIgnite 0.7s steps(1, end) calc(var(--d, 0s) + 0.45s) both; }
+.outro .intro-tagline-spark { width: 0; }
+.outro.is-static .intro-tagline-spark { width: 100%; }
+.outro.is-playing .intro-tagline-spark { animation: introSparkLine 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.6s forwards; }
+.outro.is-playing .intro-tagline-spark::after { animation: introSparkDot 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.6s forwards; }
+.outro-sub {
+  margin-top: 0.7rem;
+  font-size: clamp(0.75rem, 1.6vw, 0.95rem);
+  letter-spacing: 0.04em;
+  color: #a5b4fc;
+  opacity: 0;
+}
+.outro.is-static .outro-sub { opacity: 1; }
+.outro.is-playing .outro-sub { animation: outroRise 0.5s ease-out 1s forwards; }
+.outro-sweep {
+  position: absolute;
+  inset: -20% -40%;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.16) 48%, rgba(186, 230, 253, 0.32) 50%, rgba(255, 255, 255, 0.16) 52%, transparent 58%);
+  transform: translateX(-70%);
+  pointer-events: none;
+}
+.outro.is-playing .outro-sweep { animation: outroSweep 0.65s ease-in-out 1.45s forwards; }
+.outro-dot {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 12px #fff, 0 0 26px #22d3ee, 0 0 48px #1d4ed8;
+  opacity: 0;
+  z-index: 2;
+}
+.outro.is-playing .outro-dot { animation: outroDot 0.4s ease-out 2.6s forwards; }
+@keyframes outroFadeIn { to { opacity: 1; } }
+@keyframes outroDarken { to { opacity: 1; } }
+@keyframes outroIris {
+  from { clip-path: circle(110% at 50% 46%); }
+  to { clip-path: circle(0% at 50% 46%); }
+}
+@keyframes outroSettle {
+  0% { transform: scale(1.1); filter: blur(8px) brightness(1.4); opacity: 0; }
+  25% { transform: scale(1.02); filter: blur(0) brightness(1.05); opacity: 1; }
+  100% { transform: scale(0.97); filter: none; opacity: 1; }
+}
+@keyframes outroRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes outroSweep { to { transform: translateX(70%); } }
+@keyframes outroDot {
+  0% { opacity: 0; transform: scale(0.4); }
+  35% { opacity: 1; transform: scale(1.6); }
+  100% { opacity: 0; transform: scale(0.2); }
+}
+.outro.is-ended::after { display: none; }
+.outro-end {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  text-align: center;
+  animation: outroRise 0.6s ease-out both;
+}
+.outro-end-moon { font-size: 3rem; filter: drop-shadow(0 0 18px rgba(147, 197, 253, 0.6)); }
+.outro-end-title { margin: 0; font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.outro-end-date { margin: 0; color: #a5b4fc; }
+.outro-end-list { list-style: none; margin: 0.4rem 0; padding: 0; color: #d1fae5; display: flex; flex-direction: column; gap: 0.25rem; }
+.outro-end-hint { margin: 0.4rem 0 0.8rem; color: #cbd5e1; }
