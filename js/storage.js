@@ -206,6 +206,14 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     // graphique) reste nécessaire, et ces infos SLOT s'affichent en plus, à
     // côté de Composition. null tant que la fenêtre n'a pas été validée.
     slot: null,
+    // Train "calé" (bouton "⛔ Train calé") : validé sans avoir fini la
+    // séquence ; stalledAt = heure (ISO) où il a été déclaré calé. Les
+    // étapes déjà enregistrées restent affichées — voir computeTrainStatus.
+    stalled: false,
+    stalledAt: null,
+    // Observation libre (bouton "📝 Observation"), reprise dans le PDF
+    // récap, la copie stylée et l'email.
+    observation: '',
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
