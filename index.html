@@ -26,6 +26,10 @@
        fin de la vidéo, ou dès qu'on touche l'écran / "Passer". -->
   <div id="introSplash" class="intro-splash" role="presentation" aria-hidden="true" tabindex="-1">
     <video id="introVideo" class="intro-video" src="assets/lhte-intro.mp4" playsinline webkit-playsinline preload="auto" disablepictureinpicture disableremoteplayback></video>
+    <!-- Slogan "électrique" affiché sous le logo vers la fin de la vidéo
+         (lettres découpées et animées par playIntroSplash dans js/app.js),
+         aux couleurs des navettes et des trains. -->
+    <div class="intro-tagline" id="introTagline" aria-hidden="true">Gestionnaire des Arrivées et Départs trains et navettes</div>
     <button type="button" class="intro-sound" id="introSoundBtn" hidden>🔊 Activer le son</button>
     <button type="button" class="intro-skip" id="introSkipBtn">Passer ›</button>
   </div>
@@ -80,20 +84,24 @@
 
   <section class="shuttles-bar" aria-label="Navettes internes">
     <button type="button" class="bar-toggle-btn" data-bar-toggle="shuttles" title="Masquer/afficher cette ligne" aria-label="Masquer/afficher cette ligne">▾</button>
+    <h2 class="bar-title bar-title--shuttles"><span class="bar-title-icon" aria-hidden="true">🚐</span>Arrivées Navettes</h2>
     <div id="shuttlesBar" class="shuttles-bar-inner"></div>
   </section>
 
   <section class="shuttle-quickboard-bar" aria-label="Tableau rapide des départs navettes (sens retour)">
     <button type="button" class="bar-toggle-btn" data-bar-toggle="quickboard" title="Masquer/afficher cette ligne" aria-label="Masquer/afficher cette ligne">▾</button>
+    <h2 class="bar-title bar-title--shuttles"><span class="bar-title-icon" aria-hidden="true">🚐</span>Départs Navettes</h2>
     <div id="shuttleQuickboard" class="shuttle-quickboard"></div>
   </section>
 
   <section class="arrivals-bar" aria-label="Arrivées">
     <button type="button" class="bar-toggle-btn" data-bar-toggle="arrivals" title="Masquer/afficher cette ligne" aria-label="Masquer/afficher cette ligne">▾</button>
+    <h2 class="bar-title bar-title--arrivals"><span class="bar-title-icon" aria-hidden="true">🚆</span>Arrivées trains</h2>
     <div id="arrivalsBar" class="arrivals-bar-inner"></div>
   </section>
 
   <section class="quick-trains-bar" aria-label="Trains à accès rapide">
+    <h2 class="bar-title bar-title--departures"><span class="bar-title-icon" aria-hidden="true">🚆</span>Départs trains</h2>
     <div id="quickTrainsBar" class="quick-trains-bar-inner"></div>
   </section>
 
