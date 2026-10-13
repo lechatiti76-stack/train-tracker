@@ -100,6 +100,13 @@ export function computeAllStepDelays(train) {
 
 // Statut global affiché sur l'en-tête de la vignette, sans avoir à l'ouvrir.
 export function computeTrainStatus(train) {
+  // Train déclaré "calé" (bouton "⛔ Train calé" de la vignette) : validé
+  // même si la séquence n'est pas finie — l'état l'emporte sur le reste,
+  // les étapes déjà faites restent affichées telles quelles.
+  if (train.stalled) {
+    const at = train.stalledAt ? ` À ${formatHHMM(new Date(train.stalledAt))}` : '';
+    return { label: `TRAIN CALÉ${at}`, tone: 'stalled' };
+  }
   const delays = computeAllStepDelays(train);
   let lastRecordedIndex = -1;
   for (let i = delays.length - 1; i >= 0; i--) {
