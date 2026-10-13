@@ -130,10 +130,31 @@ function summaryRowHTML(train) {
 // ou, pour un train SLOT parti en FA sans aucune étape encore enregistrée,
 // un libellé dédié expliquant pourquoi la vignette est réduite.
 function collapsedStripLabel(train) {
+  if (train.stalled) {
+    const at = train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : '';
+    return `⛔ calé${at}${lastDoneLabel(train) ? ` — dernière étape : ${lastDoneLabel(train)}` : ''}`;
+  }
   const lastStep = train.steps[train.steps.length - 1];
   if (lastStep?.real) return `départ à ${formatHHMM(new Date(lastStep.real))}`;
   if (train.trainType === 'slots' && train.slot?.departure === 'FA') return 'SLOT FA — repart de chez eux, plus suivi ici';
   return 'départ à --:--';
+}
+
+// Dernière étape effectivement enregistrée ("Mise en tête à 14:24"), pour
+// le bandeau d'un train calé.
+function lastDoneLabel(train) {
+  for (let i = train.steps.length - 1; i >= 0; i--) {
+    const s = train.steps[i];
+    if (s.real) return `${s.label} à ${formatHHMM(new Date(s.real))}`;
+  }
+  return '';
+}
+
+// Bandeau affiché en haut d'une vignette de train calé.
+function stalledBannerHTML(train) {
+  const at = train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : '';
+  const last = lastDoneLabel(train);
+  return `⛔ <strong>Train calé${at}</strong>${last ? ` — dernière étape effectuée : ${escapeHtml(last)}` : ' — aucune étape effectuée'}`;
 }
 
 export function trainCardTemplate(train, { readOnly = false, destination = null } = {}) {
@@ -148,7 +169,7 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
   // donc la vignette se réduit immédiatement, même sans aucune étape
   // enregistrée.
   const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
-  const isCollapsible = !readOnly && (Boolean(lastStep?.real) || isSlotFA);
+  const isCollapsible = !readOnly && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled));
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
 
   return `
@@ -167,6 +188,8 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
           <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
           ${readOnly ? '' : `<button type="button" class="card-collapse-btn" data-action="collapse-card" data-role="collapse-btn" title="Réduire cette vignette" aria-label="Réduire cette vignette" ${isCollapsible ? '' : 'hidden'}>▾</button>`}
         </header>
+
+        <div class="stalled-banner" data-role="stalled-banner" ${train.stalled ? '' : 'hidden'}>${train.stalled ? stalledBannerHTML(train) : ''}</div>
 
         ${readOnly ? '' : `
           <div class="sillon-lookup">
@@ -190,7 +213,12 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
               <button type="button" class="btn btn-outline btn-sm" data-action="open-slot">🎰 Infos SLOT</button>
               <span class="slot-summary" data-role="slot-summary">${escapeHtml(formatSlotSummary(train.slot))}</span>
             </span>
+          </div>
+          <div class="train-ops-row">
+            <button type="button" class="btn btn-outline btn-sm btn-stall${train.stalled ? ' is-active' : ''}" data-action="toggle-stalled" data-role="stall-btn" aria-pressed="${Boolean(train.stalled)}" title="Valider le train même si la séquence n'est pas finie (état : calé)">${train.stalled ? '⛔ Train calé ✓' : '⛔ Train calé'}</button>
+            <button type="button" class="btn btn-outline btn-sm btn-observation${train.observation ? ' is-active' : ''}" data-action="open-observation" data-role="observation-btn" title="Ajouter une observation (reprise dans le PDF récap et l'email)">📝 Observation</button>
           </div>`}
+        <p class="observation-preview" data-role="observation-preview" ${train.observation ? '' : 'hidden'}>📝 ${escapeHtml(train.observation || '')}</p>
 
         <ul class="steps-list" data-role="steps-list">${stepsHTML}</ul>
 
@@ -256,9 +284,28 @@ export function updateCardDynamicParts(cardEl, train) {
   const summary = cardEl.querySelector('[data-role="summary"]');
   if (summary) summary.innerHTML = summaryRowHTML(train);
 
+  const stalledBanner = cardEl.querySelector('[data-role="stalled-banner"]');
+  if (stalledBanner) {
+    stalledBanner.hidden = !train.stalled;
+    stalledBanner.innerHTML = train.stalled ? stalledBannerHTML(train) : '';
+  }
+  const stallBtn = cardEl.querySelector('[data-role="stall-btn"]');
+  if (stallBtn) {
+    stallBtn.classList.toggle('is-active', Boolean(train.stalled));
+    stallBtn.setAttribute('aria-pressed', String(Boolean(train.stalled)));
+    stallBtn.textContent = train.stalled ? '⛔ Train calé ✓' : '⛔ Train calé';
+  }
+  const observationBtn = cardEl.querySelector('[data-role="observation-btn"]');
+  if (observationBtn) observationBtn.classList.toggle('is-active', Boolean(train.observation));
+  const observationPreview = cardEl.querySelector('[data-role="observation-preview"]');
+  if (observationPreview) {
+    observationPreview.hidden = !train.observation;
+    observationPreview.textContent = train.observation ? `📝 ${train.observation}` : '';
+  }
+
   const lastStep = train.steps[train.steps.length - 1];
   const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
-  const isCollapsible = cardEl.dataset.readonly !== 'true' && (Boolean(lastStep?.real) || isSlotFA);
+  const isCollapsible = cardEl.dataset.readonly !== 'true' && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled));
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
   cardEl.classList.toggle('is-collapsed', isCollapsed);
 
