@@ -3918,7 +3918,7 @@ function playOutro(results) {
     overlay.setAttribute('role', 'presentation');
     overlay.innerHTML = `
       <div class="outro-stage">
-        <video class="outro-video" muted playsinline webkit-playsinline preload="auto" disablepictureinpicture disableremoteplayback src="assets/lhte-intro.mp4"></video>
+        <video class="outro-video" muted playsinline webkit-playsinline preload="auto" disablepictureinpicture disableremoteplayback src="assets/lhte-intro-v2.mp4"></video>
         <div class="outro-fallback-logo" hidden>LHTE</div>
         <div class="outro-text">
           <div class="outro-title">Journée terminée</div>
@@ -4039,7 +4039,7 @@ function wireVisibilityRefresh() {
 // ---------- Animation d'introduction (~7 s au lancement) ----------
 // Overlay purement cosmétique défini dans index.html (#introSplash) et
 // css/style.css (.intro-*) : vidéo du logo LHTE avec musique
-// (assets/lhte-intro.mp4). Ne bloque jamais l'app en dessous (déjà en
+// (assets/lhte-intro-v2.mp4). Ne bloque jamais l'app en dessous (déjà en
 // cours d'initialisation juste après, voir init()) ni l'utilisateur :
 // cliquer/toucher l'overlay, le bouton "Passer", ou Échap/Entrée/Espace la
 // fait disparaître immédiatement. Disparaît aussi toute seule à la fin de
