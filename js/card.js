@@ -49,10 +49,10 @@ export function formatSlotSummary(slot) {
   if (!slot) return '';
   const parts = [];
   if (slot.type) parts.push(`SLOT ${slot.type}`);
+  if (slot.departure || slot.departureTime) parts.push(`Départ${slot.departure ? ` ${slot.departure}` : ''}${slot.departureTime ? ` ${slot.departureTime}` : ''}`);
   if (slot.wagons) parts.push(`${slot.wagons} wagons`);
   if (slot.arrivalTime) parts.push(`Arr. ${slot.arrivalTime}`);
   if (slot.recompositionTime) parts.push(`Recomp. ${slot.recompositionTime}`);
-  if (slot.departure) parts.push(slot.departure);
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -136,7 +136,10 @@ function collapsedStripLabel(train) {
   }
   const lastStep = train.steps[train.steps.length - 1];
   if (lastStep?.real) return `départ à ${formatHHMM(new Date(lastStep.real))}`;
-  if (train.trainType === 'slots' && train.slot?.departure === 'FA') return 'SLOT FA — repart de chez eux, plus suivi ici';
+  if (train.trainType === 'slots' && train.slot?.departure === 'FA') {
+    const bits = [train.slot.departureTime ? `départ FA à ${train.slot.departureTime}` : 'départ FA', train.slot.wagons ? `${train.slot.wagons} wagons` : ''].filter(Boolean);
+    return `SLOT ${bits.join(' · ')}`;
+  }
   return 'départ à --:--';
 }
 
