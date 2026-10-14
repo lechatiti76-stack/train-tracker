@@ -130,6 +130,7 @@ function summaryRowHTML(train) {
 // ou, pour un train SLOT parti en FA sans aucune étape encore enregistrée,
 // un libellé dédié expliquant pourquoi la vignette est réduite.
 function collapsedStripLabel(train) {
+  if (train.cancelled) return '🚫 SUPPRIMÉ — ne roule pas';
   if (train.stalled) {
     const at = train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : '';
     return `⛔ calé${at}${lastDoneLabel(train) ? ` — dernière étape : ${lastDoneLabel(train)}` : ''}`;
@@ -172,11 +173,12 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
   // donc la vignette se réduit immédiatement, même sans aucune étape
   // enregistrée.
   const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
-  const isCollapsible = !readOnly && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled));
+  const isCollapsible = !readOnly && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled) || Boolean(train.cancelled));
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
 
   return `
-    <article class="train-card${isCollapsed ? ' is-collapsed' : ''}" data-train-id="${train.id}" data-readonly="${readOnly}">
+    <article class="train-card${isCollapsed ? ' is-collapsed' : ''}${train.cancelled ? ' is-cancelled' : ''}" data-train-id="${train.id}" data-readonly="${readOnly}">
+      <span class="cancel-banner card-cancel-banner" aria-hidden="true">Supprimé</span>
       ${readOnly ? '' : `
       <button type="button" class="train-card-collapsed-strip" data-role="collapsed-strip" data-action="expand-card" ${isCollapsed ? '' : 'hidden'}>
         <span class="train-card-collapsed-number">TRAIN <span data-role="collapsed-number">${escapeHtml(train.number)}</span></span>
@@ -220,6 +222,7 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
           <div class="train-ops-row">
             <button type="button" class="btn btn-outline btn-sm btn-stall${train.stalled ? ' is-active' : ''}" data-action="toggle-stalled" data-role="stall-btn" aria-pressed="${Boolean(train.stalled)}" title="Valider le train même si la séquence n'est pas finie (état : calé)">${train.stalled ? '⛔ Train calé ✓' : '⛔ Train calé'}</button>
             <button type="button" class="btn btn-outline btn-sm btn-observation${train.observation ? ' is-active' : ''}" data-action="open-observation" data-role="observation-btn" title="Ajouter une observation (reprise dans le PDF récap et l'email)">📝 Observation</button>
+            <button type="button" class="btn btn-outline btn-sm btn-cancel-trip${train.cancelled ? ' is-active' : ''}" data-action="toggle-cancelled" data-role="cancel-btn" title="Le train ne roule pas aujourd'hui : vignette grisée et marquée « SUPPRIMÉ »">${train.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
           </div>`}
         <p class="observation-preview" data-role="observation-preview" ${train.observation ? '' : 'hidden'}>📝 ${escapeHtml(train.observation || '')}</p>
 
@@ -298,6 +301,12 @@ export function updateCardDynamicParts(cardEl, train) {
     stallBtn.setAttribute('aria-pressed', String(Boolean(train.stalled)));
     stallBtn.textContent = train.stalled ? '⛔ Train calé ✓' : '⛔ Train calé';
   }
+  cardEl.classList.toggle('is-cancelled', Boolean(train.cancelled));
+  const cancelBtn = cardEl.querySelector('[data-role="cancel-btn"]');
+  if (cancelBtn) {
+    cancelBtn.classList.toggle('is-active', Boolean(train.cancelled));
+    cancelBtn.textContent = train.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage';
+  }
   const observationBtn = cardEl.querySelector('[data-role="observation-btn"]');
   if (observationBtn) observationBtn.classList.toggle('is-active', Boolean(train.observation));
   const observationPreview = cardEl.querySelector('[data-role="observation-preview"]');
@@ -308,7 +317,7 @@ export function updateCardDynamicParts(cardEl, train) {
 
   const lastStep = train.steps[train.steps.length - 1];
   const isSlotFA = train.trainType === 'slots' && train.slot?.departure === 'FA';
-  const isCollapsible = cardEl.dataset.readonly !== 'true' && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled));
+  const isCollapsible = cardEl.dataset.readonly !== 'true' && (Boolean(lastStep?.real) || isSlotFA || Boolean(train.stalled) || Boolean(train.cancelled));
   const isCollapsed = isCollapsible && Boolean(train.collapsed);
   cardEl.classList.toggle('is-collapsed', isCollapsed);
 
