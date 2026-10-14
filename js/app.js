@@ -3616,127 +3616,538 @@ function pdfEcart(diffMin) {
   return diffMin === null || diffMin === undefined ? '—' : formatDelayLabel(diffMin, DELAY_THRESHOLDS);
 }
 
+// Mise en page "comme le mail" : encadrés, pastilles d'écart colorées
+// (vert = en avance, gris = à l'heure, rouge = en retard — mêmes couleurs
+// que mailEcart), heures constatées dans une case colorée, voyages
+// supprimés grisés avec la mention rouge "SUPPRIMÉ". Les polices standard
+// de jsPDF (Helvetica, encodage WinAnsi) ne savent pas afficher les emojis
+// ni les flèches : pdfSafeText les remplace ou les retire, et les
+// pictogrammes sont dessinés (pastilles, points, bandeaux) plutôt qu'écrits.
+const PDF_WINANSI_EXTRA = '\u20ac\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u017d\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u017e\u0178';
+function pdfSafeText(value) {
+  return String(value ?? '')
+    .replace(/\u2192|\u279c|\u21d2/g, '»')
+    .replace(/\u2190/g, '«')
+    .replace(/\u26a0/g, '!')
+    .replace(/\u2713|\u2714/g, 'OK')
+    .replace(/[\u2009\u202f\u00a0]/g, ' ')
+    .split('')
+    .filter((ch) => ch.charCodeAt(0) <= 0xff || PDF_WINANSI_EXTRA.includes(ch))
+    .join('')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function pdfEcartInfo(diffMin) {
+  if (diffMin === null || diffMin === undefined) return mailEcart(null);
+  return mailEcart({ status: 'recorded', diffMin });
+}
+
 function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleReservesSnapshot, arrivalsSnapshot }) {
   if (!window.jspdf || !window.jspdf.jsPDF) return null;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const marginLeft = 12;
-  const marginBottom = 15;
-  let y = 15;
-
-  const ensureSpace = (lineHeight = 5.5) => {
-    if (y + lineHeight > pageHeight - marginBottom) {
-      doc.addPage();
-      y = 15;
-    }
+  const PAGE_W = doc.internal.pageSize.getWidth ? doc.internal.pageSize.getWidth() : 210;
+  const PAGE_H = doc.internal.pageSize.getHeight();
+  const M = 12;
+  const CW = PAGE_W - 2 * M;
+  const BOTTOM = PAGE_H - 16;
+  const PT = 0.3528; // 1 pt en mm
+  const C = {
+    ink: '#0f2a5f', text: '#1f2937', muted: '#5b6577', faint: '#94a3b8', border: '#d7dce6', line: '#eef1f6',
+    accent: '#1d4ed8', headBg: '#f6f8fc', bandBg: '#eef4ff', green: '#15803d', red: '#dc2626', purple: '#7c3aed',
+    amber: '#d97706', greyBg: '#f1f5f9',
   };
-  const writeLine = (text, { size = 10, style = 'normal', gap = 5.5, indent = 0 } = {}) => {
-    ensureSpace(gap);
-    doc.setFont('helvetica', style);
-    doc.setFontSize(size);
-    doc.text(String(text), marginLeft + indent, y);
-    y += gap;
+  const ecartsMuted = { label: '—', fg: C.muted, bg: C.line, kind: 'none' };
+  let y = M;
+
+  // ---- primitives ----
+  const rgb = (hex) => {
+    const h = String(hex || '#000000').replace('#', '');
+    const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.padEnd(6, '0');
+    return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
   };
-  const writeSectionTitle = (text) => {
-    y += 2;
-    ensureSpace(8);
-    doc.setDrawColor(180, 180, 180);
-    doc.line(marginLeft, y - 3, 198, y - 3);
-    writeLine(text, { size: 13, style: 'bold', gap: 7 });
+  const fill = (hex) => doc.setFillColor(...rgb(hex));
+  const draw = (hex) => doc.setDrawColor(...rgb(hex));
+  const ink = (hex) => doc.setTextColor(...rgb(hex));
+  const font = (size, style = 'normal') => { doc.setFont('helvetica', style); doc.setFontSize(size); };
+  const width = (s) => (typeof doc.getTextWidth === 'function' ? doc.getTextWidth(s) : String(s).length * 1.8);
+  const txt = (s, x, yy, { size = 9, style = 'normal', color = C.text, align = 'left', maxW = null } = {}) => {
+    font(size, style);
+    ink(color);
+    let str = pdfSafeText(s);
+    if (maxW && width(str) > maxW) {
+      while (str.length > 1 && width(`${str}…`) > maxW) str = str.slice(0, -1);
+      str = `${str.trimEnd()}…`;
+    }
+    doc.text(str, x, yy, align === 'left' ? undefined : { align });
+    return width(str);
+  };
+  const box = (x, yy, w, h, { fillColor = null, stroke = C.border, r = 2, lw = 0.3 } = {}) => {
+    doc.setLineWidth(lw);
+    if (fillColor) fill(fillColor);
+    if (stroke) draw(stroke);
+    const style = fillColor && stroke ? 'FD' : fillColor ? 'F' : 'S';
+    if (typeof doc.roundedRect === 'function') doc.roundedRect(x, yy, w, h, r, r, style);
+    else doc.rect(x, yy, w, h, style);
+  };
+  const dot = (x, yy, r, color) => { fill(color); if (typeof doc.circle === 'function') doc.circle(x, yy, r, 'F'); };
+  const baseline = (top, h, size) => top + h / 2 + size * PT * 0.35;
+  // Pastille colorée (écart) centrée dans [x, x+w].
+  const pill = (e, cx, top, h, size = 7.5) => {
+    font(size, 'bold');
+    const label = pdfSafeText(e.label);
+    const w = Math.max(width(label) + 4, 11);
+    box(cx - w / 2, top, w, h, { fillColor: e.bg, stroke: null, r: 1.2 });
+    txt(label, cx, baseline(top, h, size), { size, style: 'bold', color: e.fg, align: 'center' });
+    return w;
+  };
+  // Case "heure constatée" : bordure + fond selon l'écart (rouge/vert).
+  const timeBox = (value, e, cx, top, h, size = 9) => {
+    const recorded = value && value !== '--:--';
+    const late = e.kind === 'late';
+    const ok = e.kind === 'onTime' || e.kind === 'early';
+    const w = 15;
+    box(cx - w / 2, top, w, h, { fillColor: late ? '#fef2f2' : ok ? '#f0fdf4' : '#ffffff', stroke: late ? '#fca5a5' : ok ? '#86efac' : '#c7cfdc', r: 1.2, lw: 0.25 });
+    txt(recorded ? value : '--:--', cx, baseline(top, h, size), { size, style: 'bold', color: !recorded ? C.faint : late ? C.red : ok ? C.green : C.ink, align: 'center' });
+  };
+  const cancelledTag = (cx, top, h, size = 7) => {
+    font(size, 'bold');
+    const w = width('SUPPRIMÉ') + 4;
+    box(cx - w / 2, top, w, h, { fillColor: '#fee2e2', stroke: C.red, r: 1.2, lw: 0.3 });
+    txt('SUPPRIMÉ', cx, baseline(top, h, size), { size, style: 'bold', color: C.red, align: 'center' });
+  };
+  // Bandeau rouge en diagonale "SUPPRIMÉ" (comme sur la vignette de l'app).
+  const diagonalBanner = (cx, cy, length, angleDeg = 8, size = 13) => {
+    const a = (angleDeg * Math.PI) / 180;
+    const u = [Math.cos(a), -Math.sin(a)];
+    const n = [Math.sin(a), Math.cos(a)];
+    const L = length / 2;
+    const T = 3.6;
+    const p = (s, t) => [cx + s * L * u[0] + t * T * n[0], cy + s * L * u[1] + t * T * n[1]];
+    const pts = [p(-1, -1), p(1, -1), p(1, 1), p(-1, 1)];
+    if (typeof doc.lines === 'function') {
+      const rel = [];
+      for (let i = 1; i < pts.length; i++) rel.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+      fill('#fee2e2');
+      draw(C.red);
+      doc.setLineWidth(0.5);
+      doc.lines(rel, pts[0][0], pts[0][1], [1, 1], 'FD', true);
+    }
+    font(size, 'bold');
+    ink(C.red);
+    const label = 'SUPPRIMÉ';
+    const w = width(label) + label.length * 0.9;
+    const fh = size * PT;
+    const x0 = cx - (w / 2) * Math.cos(a) + 0.35 * fh * Math.sin(a);
+    const y0 = cy + (w / 2) * Math.sin(a) + 0.35 * fh * Math.cos(a);
+    doc.text(label, x0, y0, { angle: angleDeg, charSpace: 0.9 });
   };
 
-  writeLine(`Récap du jour — ${formatDateFR(dateISO)}`, { size: 17, style: 'bold', gap: 9 });
-  writeLine(`Généré le ${formatDateFR(todayISO())} à ${formatHHMMSS(new Date())}`, { size: 9, style: 'italic', gap: 7 });
+  const dateLabel = (() => { const [yy, mm, dd] = String(dateISO).split('-'); return `${dd}/${mm}/${yy}`; })();
+  const continuationHeader = () => {
+    box(M, 8, CW, 8, { fillColor: C.bandBg, stroke: C.border, r: 1.5 });
+    txt('RÉCAP DU JOUR — INFORMATION CIRCULATION (suite)', M + 4, baseline(8, 8, 8), { size: 8, style: 'bold', color: C.accent });
+    txt(`Date : ${dateLabel}`, M + CW - 4, baseline(8, 8, 8), { size: 8, color: C.muted, align: 'right' });
+    y = 21;
+  };
+  const newPage = () => { doc.addPage(); continuationHeader(); };
+  const ensure = (h) => { if (y + h > BOTTOM) { newPage(); return true; } return false; };
 
-  // ---- Trains ----
-  writeSectionTitle('🚆 Trains');
-  if (trainsForDate.length === 0) {
-    writeLine('Aucun train pour cette date.', { size: 10, style: 'italic' });
-  }
-  trainsForDate.forEach((train) => {
-    const delays = computeAllStepDelays(train);
-    const status = computeTrainStatus(train);
-    const cause = computeMainCause(train);
-    const destination = getQuickTrainDestination(train.number);
-    writeLine(`TRAIN ${train.number}${destination ? ` → ${destination}` : ''} — ${status.label}`, { size: 11.5, style: 'bold', gap: 6 });
-    train.steps.forEach((step, i) => {
-      const d = delays[i];
-      const real = d.realDate ? formatHHMM(d.realDate) : 'non enregistré';
-      const ecart = d.status === 'recorded' ? pdfEcart(d.diffMin) : '—';
-      writeLine(`${step.label} — théo. ${step.theoretical || '--:--'} / réel ${real} / écart ${ecart}`, { size: 9.5, gap: 4.8, indent: 4 });
-    });
-    if (cause.cause) {
-      writeLine(`Cause principale : ${cause.cause}${cause.amountLabel && cause.amountLabel !== '--' ? ` (${cause.amountLabel})` : ''}`, { size: 9.5, style: 'italic', gap: 4.8, indent: 4 });
-    }
-    const compositionSummary = formatCompositionSummary(train.composition);
-    if (compositionSummary) writeLine(`Composition : ${compositionSummary}`, { size: 9.5, gap: 4.8, indent: 4 });
-    const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
-    if (slotSummary) writeLine(`SLOT : ${slotSummary}`, { size: 9.5, gap: 4.8, indent: 4 });
-    if (train.stalled) {
-      writeLine(`Train calé${train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : ''} — séquence non terminée (étapes faites ci-dessus)`, { size: 9.5, style: 'bold', gap: 4.8, indent: 4 });
-    }
-    if (train.observation) {
-      const obsLines = typeof doc.splitTextToSize === 'function'
-        ? doc.splitTextToSize(`Observation : ${train.observation}`, 180)
-        : [`Observation : ${train.observation}`];
-      obsLines.forEach((line) => writeLine(line, { size: 9.5, style: 'italic', gap: 4.8, indent: 4 }));
-    }
-    y += 2;
+  // ---- En-tête ----
+  box(M, y, CW, 10, { fillColor: C.bandBg, stroke: C.border, r: 2 });
+  txt('RÉCAP DU JOUR — INFORMATION CIRCULATION', M + 4, baseline(y, 10, 8.5), { size: 8.5, style: 'bold', color: C.accent });
+  txt(`Date : ${dateLabel}  |  généré le ${formatDateFR(todayISO())} à ${formatHHMMSS(new Date())}`, M + CW - 4, baseline(y, 10, 8), { size: 8, color: C.muted, align: 'right' });
+  y += 19;
+  txt(`Récap du jour — ${formatDateFR(dateISO)}`, M, y, { size: 18, style: 'bold', color: C.ink });
+  txt('LHTE', M + CW, y - 4, { size: 13, style: 'bold', color: C.ink, align: 'right' });
+  txt('Le Havre Terminal Exploitation', M + CW, y + 0.5, { size: 7.5, color: C.muted, align: 'right' });
+  y += 6;
+
+  // ---- Chiffres clés ----
+  const lastIdxOf = (t) => t.steps.length - 1;
+  const trainDeparted = (t) => !t.cancelled && !t.stalled && (Boolean(t.steps[lastIdxOf(t)]?.real) || isSlotFADeparted(t));
+  const departedTrains = trainsForDate.filter(trainDeparted);
+  const lateTrains = departedTrains.filter((t) => {
+    if (isSlotFADeparted(t)) return false;
+    const d = computeAllStepDelays(t)[lastIdxOf(t)];
+    return mailEcart(d).kind === 'late';
   });
-
-  // ---- Navettes (ligne 1) ----
-  writeSectionTitle('🚌 Navettes (ligne 1)');
   const shuttleCodes = getAllShuttleGroups().flatMap((g) => g.codes);
-  if (shuttleCodes.length === 0) writeLine('Aucune navette configurée.', { size: 10, style: 'italic' });
-  shuttleCodes.forEach((code) => {
-    const rec = shuttlesSnapshot[code] || {};
-    const eta = rec.departure ? computeShuttleArrival(code, rec.departure) : null;
-    const delta = computeArrivalDeltaFromRecord(rec, findShuttleGroup(code));
-    const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
-    writeLine(
-      `${code} — départ ${rec.departure || '--:--'} / arrivée estimée ${eta || '--:--'}` +
-      `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''}${rec.cancelled ? ' — SUPPRIMÉ (ne roule pas)' : ''}`,
-      { size: 9.5, gap: 4.8, indent: 4 },
-    );
-  });
-
-  // ---- Tableau rapide des départs (ligne 2) ----
-  writeSectionTitle('⏱ Tableau rapide des départs navettes (ligne 2)');
   const quickboardKeys = [...SHUTTLE_QUICKBOARD_CODES, ...SHUTTLE_QUICKBOARD_RESERVE_FAMILIES];
+  const qbCancelledMap = shuttleReservesSnapshot._cancelled || {};
+  const arrivalGroups = getAllArrivalGroups();
+  const cancelledCount = trainsForDate.filter((t) => t.cancelled).length
+    + shuttleCodes.filter((c) => shuttlesSnapshot[c]?.cancelled).length
+    + quickboardKeys.filter((k) => qbCancelledMap[k]).length
+    + arrivalGroups.filter((g) => arrivalsSnapshot[g.id]?.cancelled).length;
+  const shuttlesActive = shuttleCodes.filter((c) => !shuttlesSnapshot[c]?.cancelled);
+  const shuttlesArrived = shuttlesActive.filter((c) => shuttlesSnapshot[c]?.arrivedManually).length;
+  const qbActive = SHUTTLE_QUICKBOARD_CODES.filter((k) => !qbCancelledMap[k]);
+  const qbDeparted = qbActive.filter((k) => shuttleReservesSnapshot[k]).length;
+  const tiles = [
+    { label: 'DÉPARTS TRAINS', value: `${departedTrains.length} / ${trainsForDate.filter((t) => !t.cancelled).length}`, color: C.green },
+    { label: 'TRAINS EN RETARD', value: String(lateTrains.length), color: lateTrains.length ? C.red : C.green },
+    { label: 'TRAINS CALÉS', value: String(trainsForDate.filter((t) => t.stalled && !t.cancelled).length), color: C.purple },
+    { label: 'ARRIVÉES NAVETTES', value: `${shuttlesArrived} / ${shuttlesActive.length}`, color: C.accent },
+    { label: 'DÉPARTS NAVETTES', value: `${qbDeparted} / ${qbActive.length}`, color: C.accent },
+    { label: 'VOYAGES SUPPRIMÉS', value: String(cancelledCount), color: cancelledCount ? C.red : C.muted },
+  ];
+  const gap = 3;
+  const tileW = (CW - gap * (tiles.length - 1)) / tiles.length;
+  tiles.forEach((tile, i) => {
+    const x = M + i * (tileW + gap);
+    box(x, y, tileW, 16, { fillColor: '#ffffff', stroke: C.border, r: 2 });
+    fill(tile.color);
+    doc.rect(x + 0.15, y + 3, 1.1, 10, 'F');
+    txt(tile.label, x + tileW / 2, y + 5.2, { size: 6.2, style: 'bold', color: C.muted, align: 'center', maxW: tileW - 3 });
+    txt(tile.value, x + tileW / 2, y + 12.4, { size: 13, style: 'bold', color: tile.color, align: 'center' });
+  });
+  y += 22;
+
+  // ---- Titre de section (barre de couleur comme les titres de l'app) ----
+  const sectionTitle = (title, color, subtitle = '') => {
+    ensure(24);
+    box(M, y, CW, 9, { fillColor: C.headBg, stroke: C.border, r: 2 });
+    fill(color);
+    doc.rect(M + 0.15, y + 1.5, 1.6, 6, 'F');
+    txt(title.toUpperCase(), M + 5, baseline(y, 9, 10.5), { size: 10.5, style: 'bold', color: C.ink });
+    if (subtitle) txt(subtitle, M + CW - 4, baseline(y, 9, 7.5), { size: 7.5, color: C.muted, align: 'right' });
+    y += 11;
+  };
+
+  // ---- Tableau générique encadré, avec reprise d'en-tête après saut de page ----
+  // Colonnes : { title, w, align }. Cellule : { text, color, bold } |
+  // { chip: { color, text } } | { time: { value, e } } | { pill: e } |
+  // { status: { text, color } } | { cancelled: true }.
+  const table = (columns, rows) => {
+    const HEAD_H = 6.5;
+    const ROW_H = 7;
+    const xs = [];
+    columns.reduce((acc, col) => { xs.push(acc); return acc + col.w; }, M);
+    let segTop = y;
+    const header = () => {
+      segTop = y;
+      fill(C.headBg);
+      doc.rect(M + 0.2, y + 0.2, CW - 0.4, HEAD_H - 0.2, 'F');
+      columns.forEach((col, i) => {
+        const cx = col.align === 'center' ? xs[i] + col.w / 2 : xs[i] + 3;
+        txt(col.title, cx, baseline(y, HEAD_H, 6.8), { size: 6.8, style: 'bold', color: C.muted, align: col.align === 'center' ? 'center' : 'left', maxW: col.w - 2 });
+      });
+      draw(C.border);
+      doc.setLineWidth(0.25);
+      doc.line(M, y + HEAD_H, M + CW, y + HEAD_H);
+      y += HEAD_H;
+    };
+    const closeSeg = () => box(M, segTop, CW, y - segTop, { stroke: C.border, r: 2 });
+    ensure(HEAD_H + ROW_H + 2);
+    header();
+    rows.forEach((row, ri) => {
+      if (y + ROW_H > BOTTOM) { closeSeg(); newPage(); header(); }
+      if (row.cancelled) { fill(C.greyBg); doc.rect(M + 0.2, y, CW - 0.4, ROW_H, 'F'); }
+      else if (row.bg) { fill(row.bg); doc.rect(M + 0.2, y, CW - 0.4, ROW_H, 'F'); }
+      row.cells.forEach((cell, i) => {
+        const col = columns[i];
+        const cx = xs[i] + col.w / 2;
+        const left = xs[i] + 3;
+        if (!cell) return;
+        if (cell.cancelled) { font(7, 'bold'); cancelledTag(left + (width('SUPPRIMÉ') + 4) / 2, y + 1.5, ROW_H - 3); return; }
+        if (cell.pill) { if (row.cancelled) txt('—', cx, baseline(y, ROW_H, 8.5), { size: 8.5, color: C.faint, align: 'center' }); else pill(cell.pill, cx, y + 1.4, ROW_H - 2.8); return; }
+        if (cell.time) { if (row.cancelled) txt('--:--', cx, baseline(y, ROW_H, 9), { size: 9, color: C.faint, align: 'center' }); else timeBox(cell.time.value, cell.time.e, cx, y + 1.1, ROW_H - 2.2); return; }
+        if (cell.chip) {
+          dot(left + 1.2, y + ROW_H / 2, 1.3, row.cancelled ? '#cbd5e1' : cell.chip.color);
+          txt(cell.chip.text, left + 4, baseline(y, ROW_H, 9), { size: 9, style: 'bold', color: row.cancelled ? C.faint : C.ink, maxW: col.w - 7 });
+          return;
+        }
+        if (cell.status) {
+          txt(cell.status.text, col.align === 'center' ? cx : left, baseline(y, ROW_H, 8), { size: 8, style: 'bold', color: cell.status.color, align: col.align === 'center' ? 'center' : 'left', maxW: col.w - 4 });
+          return;
+        }
+        txt(cell.text ?? '', col.align === 'center' ? cx : left, baseline(y, ROW_H, 9), {
+          size: 9, style: cell.bold ? 'bold' : 'normal', color: row.cancelled ? C.faint : (cell.color || C.text), align: col.align === 'center' ? 'center' : 'left', maxW: col.w - 4,
+        });
+      });
+      y += ROW_H;
+      if (ri < rows.length - 1) { draw(C.line); doc.setLineWidth(0.2); doc.line(M + 1, y, M + CW - 1, y); }
+    });
+    closeSeg();
+    y += 5;
+  };
+  const emptyNote = (text) => { ensure(8); txt(text, M + 3, y + 3, { size: 9, style: 'italic', color: C.muted }); y += 8; };
+  const timeColor = (e) => (e.kind === 'late' ? C.red : (e.kind === 'onTime' || e.kind === 'early') ? C.green : C.ink);
+
+  // ---- 1. Arrivées Navettes (ligne 1) ----
+  sectionTitle('Arrivées Navettes', '#f59e0b', 'écart = arrivée réelle - arrivée estimée');
+  if (shuttleCodes.length === 0) emptyNote('Aucune navette configurée.');
+  else {
+    table([
+      { title: 'NAVETTE', w: 28 }, { title: 'DÉPART', w: 24, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 30, align: 'center' },
+      { title: 'ARRIVÉE RÉELLE', w: 30, align: 'center' }, { title: 'ÉCART', w: 28, align: 'center' }, { title: 'ÉTAT', w: CW - 140 },
+    ], shuttleCodes.map((code) => {
+      const rec = shuttlesSnapshot[code] || {};
+      const group = findShuttleGroup(code);
+      const eta = rec.departure ? computeShuttleArrival(code, rec.departure) : null;
+      const delta = computeArrivalDeltaFromRecord(rec, group);
+      const e = delta ? pdfEcartInfo(delta.diffMin) : ecartsMuted;
+      const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
+      let status;
+      if (rec.cancelled) status = { cancelled: true };
+      else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
+      else if (rec.departure) status = { status: { text: rec.delayFlag ? 'Partie — retard signalé' : 'Partie — arrivée non confirmée', color: rec.delayFlag ? C.red : C.amber } };
+      else status = { status: { text: 'Non partie', color: C.faint } };
+      return {
+        cancelled: Boolean(rec.cancelled),
+        cells: [
+          { chip: { color: group?.color || '#94a3b8', text: code } },
+          { text: rec.departure || '--:--', bold: Boolean(rec.departure), color: rec.departure ? C.ink : C.faint },
+          { text: eta || '--:--', color: eta ? C.muted : C.faint },
+          { time: { value: arrivalReal, e } },
+          { pill: e },
+          status,
+        ],
+      };
+    }));
+  }
+
+  // ---- 2. Départs Navettes (tableau rapide, ligne 2) ----
+  sectionTitle('Départs Navettes', '#f59e0b', 'écart = départ réel - départ théorique');
+  const unusedReserves = [];
+  const qbRows = [];
   quickboardKeys.forEach((key) => {
-    const theoretical = settings.quickboardTimings?.[key];
-    const real = shuttleReservesSnapshot[key];
+    const isReserve = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key);
+    const theoretical = settings.quickboardTimings?.[key] || '';
+    const real = shuttleReservesSnapshot[key] || '';
+    const cancelled = Boolean(qbCancelledMap[key]);
+    if (isReserve && !real && !cancelled) { unusedReserves.push(key); return; }
     const parsedTheo = parseHHMM(theoretical);
     const parsedReal = parseHHMM(real);
-    let delta = null;
+    let e = ecartsMuted;
     if (parsedTheo && parsedReal) {
       const theoDate = new Date(2000, 0, 1, parsedTheo.h, parsedTheo.m, 0, 0);
       const realDate = new Date(2000, 0, 1, parsedReal.h, parsedReal.m, 0, 0);
-      const diffMin = diffMinutes(theoDate, realDate);
-      delta = { diffMin, tone: delayTone(diffMin, DELAY_THRESHOLDS) };
+      e = pdfEcartInfo(diffMinutes(theoDate, realDate));
+    } else if (parsedReal) {
+      e = { ...ecartsMuted, kind: 'onTime', label: '—' };
     }
-    const label = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key) ? `Réserve ${key}` : key;
-    const qbCancelled = Boolean(shuttleReservesSnapshot._cancelled?.[key]);
-    writeLine(`${label} — théorique ${theoretical || '--:--'} / réel ${real || '--:--'} / écart ${pdfEcart(delta?.diffMin)}${qbCancelled ? ' — SUPPRIMÉ (ne roule pas)' : ''}`, { size: 9.5, gap: 4.8, indent: 4 });
+    const label = isReserve ? `Réserve ${key}` : key;
+    let status;
+    if (cancelled) status = { cancelled: true };
+    else if (real) status = { status: { text: e.kind === 'late' ? 'Parti en retard' : 'Parti', color: e.kind === 'late' ? C.red : C.green } };
+    else status = { status: { text: 'Non parti', color: C.faint } };
+    qbRows.push({
+      cancelled,
+      cells: [
+        { chip: { color: quickboardGroupOf(key)?.color || '#94a3b8', text: label } },
+        { text: theoretical || '--:--', color: theoretical ? C.muted : C.faint },
+        { time: { value: real || null, e: parsedTheo ? e : ecartsMuted } },
+        { pill: parsedTheo ? e : ecartsMuted },
+        status,
+      ],
+    });
+  });
+  table([
+    { title: 'DÉPART', w: 34 }, { title: 'HEURE THÉORIQUE', w: 32, align: 'center' }, { title: 'HEURE RÉELLE', w: 32, align: 'center' },
+    { title: 'ÉCART', w: 30, align: 'center' }, { title: 'ÉTAT', w: CW - 128 },
+  ], qbRows);
+  if (unusedReserves.length) {
+    y -= 2;
+    txt(`Réserves non utilisées : ${unusedReserves.join(', ')}`, M + 2, y, { size: 7.5, style: 'italic', color: C.muted });
+    y += 5;
+  }
+
+  // ---- 3. Arrivées trains ----
+  sectionTitle('Arrivées trains', '#0ea5e9', 'écart = arrivée réelle - arrivée estimée');
+  if (arrivalGroups.length === 0) emptyNote('Aucune arrivée configurée.');
+  else {
+    table([
+      { title: 'ORIGINE', w: 46 }, { title: 'DÉPART ORIGINE', w: 26, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 28, align: 'center' },
+      { title: 'ARRIVÉE RÉELLE', w: 28, align: 'center' }, { title: 'ÉCART', w: 24, align: 'center' }, { title: 'ÉTAT', w: CW - 152 },
+    ], arrivalGroups.map((group) => {
+      const rec = arrivalsSnapshot[group.id] || {};
+      const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
+      const delta = computeArrivalDeltaFromRecord(rec, getArrivalEffectiveConfig(group.id));
+      const e = delta ? pdfEcartInfo(delta.diffMin) : ecartsMuted;
+      const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
+      let status;
+      if (rec.cancelled) status = { cancelled: true };
+      else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivé en retard' : 'Arrivé', color: e.kind === 'late' ? C.red : C.green } };
+      else if (rec.delayFlag) status = { status: { text: 'Retard signalé', color: C.red } };
+      else if (rec.departure) status = { status: { text: 'En route', color: C.amber } };
+      else status = { status: { text: 'En attente', color: C.faint } };
+      return {
+        cancelled: Boolean(rec.cancelled),
+        cells: [
+          { chip: { color: group.color || '#94a3b8', text: group.label } },
+          { text: rec.departure || '--:--', bold: Boolean(rec.departure), color: rec.departure ? C.ink : C.faint },
+          { text: eta || '--:--', color: eta ? C.muted : C.faint },
+          { time: { value: arrivalReal, e } },
+          { pill: e },
+          status,
+        ],
+      };
+    }));
+  }
+
+  // ---- 4. Départs trains : un encadré par train, comme le mail ----
+  sectionTitle('Départs trains', C.accent, `${trainsForDate.length} train(s)`);
+  if (trainsForDate.length === 0) emptyNote('Aucun train pour cette date.');
+  trainsForDate.forEach((train) => {
+    const delays = computeAllStepDelays(train);
+    const situation = trainMailSituation(train, delays);
+    const cause = computeMainCause(train);
+    const destination = getQuickTrainDestination(train.number);
+    const lastIndex = train.steps.length - 1;
+    const departDelay = delays[lastIndex];
+    const departE = mailEcart(departDelay);
+    const departPrevu = train.steps[lastIndex]?.theoretical || '--:--';
+    const departReel = departDelay?.realDate ? formatHHMM(departDelay.realDate) : '--:--';
+    const anyRecorded = delays.some((d) => d.realDate);
+    const anyTheo = train.steps.some((s) => s.theoretical);
+    const showSteps = !train.cancelled && (anyRecorded || anyTheo);
+    const compositionSummary = formatCompositionSummary(train.composition);
+    const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
+    const extras = [];
+    if (!train.cancelled) {
+      if (anyRecorded && cause.cause) extras.push(['Cause principale', `${cause.cause}${cause.amountLabel && cause.amountLabel !== '--' ? ` (${cause.amountLabel})` : ''}`, cause.tone === 'onTime' ? C.green : C.red]);
+      if (train.stalled) extras.push(['Train calé', `${train.stalledAt ? `à ${formatHHMM(new Date(train.stalledAt))} — ` : ''}séquence non terminée`, C.purple]);
+      if (compositionSummary) extras.push(['Composition', compositionSummary, C.ink]);
+      if (slotSummary) extras.push(['SLOT', slotSummary, C.ink]);
+    }
+    let obsLines = [];
+    if (train.observation) {
+      font(9, 'normal');
+      obsLines = typeof doc.splitTextToSize === 'function'
+        ? doc.splitTextToSize(pdfSafeText(train.observation.replace(/\n+/g, ' / ')), CW - 14)
+        : [pdfSafeText(train.observation)];
+    }
+    const HEAD = 20;
+    const STEP_H = 6.2;
+    const stepsH = showSteps ? 6 + STEP_H * train.steps.length + 3 : (train.cancelled ? 0 : 8);
+    const extrasH = extras.length ? extras.length * 5 + 2 : 0;
+    const obsH = obsLines.length ? 9 + obsLines.length * 4.2 + 3 : 0;
+    const cardH = train.cancelled ? HEAD + 8 + obsH : HEAD + stepsH + extrasH + obsH + 3;
+    if (y + cardH > BOTTOM && cardH < BOTTOM - 21) newPage();
+    const top = y;
+    const cancelled = Boolean(train.cancelled);
+    box(M, top, CW, cardH, { fillColor: cancelled ? C.greyBg : '#ffffff', stroke: C.border, r: 2.5, lw: 0.35 });
+
+    // En-tête de l'encadré : train | départ effectif | état
+    const c1 = M + 5;
+    const c2 = M + 74;
+    const c3 = M + 140;
+    draw(C.border);
+    doc.setLineWidth(0.25);
+    if (!cancelled) {
+      doc.line(c2 - 4, top + 3, c2 - 4, top + HEAD - 3);
+      doc.line(c3 - 4, top + 3, c3 - 4, top + HEAD - 3);
+    }
+    txt(`TRAIN ${train.number}`, c1, top + 9, { size: 15, style: 'bold', color: cancelled ? C.faint : C.ink, maxW: c2 - c1 - 8 });
+    if (destination) txt(`» ${String(destination).toUpperCase()}`, c1, top + 15, { size: 9, style: 'bold', color: cancelled ? C.faint : C.accent, maxW: c2 - c1 - 8 });
+    let label2 = 'DÉPART EFFECTIF';
+    let value2 = departReel;
+    let color2 = departDelay?.realDate ? timeColor(departE) : C.faint;
+    let sub2 = `PRÉVU : ${departPrevu}`;
+    let pill2 = departE.kind !== 'none' ? departE : null;
+    if (situation.kind === 'cancelled') { label2 = 'DÉPART'; value2 = 'Ne roule pas'; color2 = C.faint; sub2 = ''; pill2 = null; }
+    else if (situation.kind === 'departedFA') { label2 = 'DÉPART (FA)'; value2 = situation.time; color2 = C.green; sub2 = situation.wagons ? `${situation.wagons} WAGONS` : ''; pill2 = null; }
+    else if (situation.kind === 'stalled') { label2 = 'TRAIN CALÉ'; value2 = situation.at ? formatHHMM(situation.at) : '--:--'; color2 = C.purple; pill2 = null; }
+    if (!cancelled) {
+      txt(label2, c2, top + 6, { size: 6.8, style: 'bold', color: situation.kind === 'stalled' ? C.purple : C.muted });
+      const w2 = txt(value2, c2, top + 12.6, { size: situation.kind === 'cancelled' ? 12 : 15, style: 'bold', color: color2 });
+      if (pill2) pill(pill2, c2 + w2 + 2 + Math.max(width(pdfSafeText(pill2.label)) + 4, 11) / 2, top + 8.3, 5.2, 8);
+      if (sub2) txt(sub2, c2, top + 17, { size: 7, color: C.muted });
+      txt('ÉTAT', c3, top + 6, { size: 6.8, style: 'bold', color: C.muted });
+      txt(cancelled ? 'NE ROULE PAS' : situation.label, c3, top + 12.6, { size: 13, style: 'bold', color: cancelled ? C.faint : situation.color === MAIL_INK ? C.ink : situation.color, maxW: M + CW - c3 - 4 });
+    }
+    y = top + HEAD;
+
+    if (cancelled) {
+      txt(`Voyage supprimé${train.cancelledAt ? ` à ${formatHHMM(new Date(train.cancelledAt))}` : ''} — le train ne circule pas aujourd'hui.`, M + 5, y + 4, { size: 8.5, style: 'italic', color: C.faint });
+      y += 8;
+    } else if (showSteps) {
+      // Séquence opérationnelle (mêmes colonnes que le mail)
+      const tx = M + 4;
+      const tw = CW - 8;
+      const colTheo = tx + tw - 66;
+      const colReal = tx + tw - 40;
+      const colEcart = tx + tw - 13;
+      box(tx, y, tw, 6 + STEP_H * train.steps.length, { stroke: C.border, r: 1.8, lw: 0.25 });
+      fill(C.headBg);
+      doc.rect(tx + 0.2, y + 0.2, tw - 0.4, 5.8, 'F');
+      txt('SÉQUENCE OPÉRATIONNELLE', tx + 3, baseline(y, 6, 6.8), { size: 6.8, style: 'bold', color: C.accent });
+      txt('THÉORIQUE', colTheo, baseline(y, 6, 6.5), { size: 6.5, style: 'bold', color: C.muted, align: 'center' });
+      txt('CONSTATÉE', colReal, baseline(y, 6, 6.5), { size: 6.5, style: 'bold', color: C.muted, align: 'center' });
+      txt('ÉCART', colEcart, baseline(y, 6, 6.5), { size: 6.5, style: 'bold', color: C.muted, align: 'center' });
+      y += 6;
+      train.steps.forEach((step, i) => {
+        const d = delays[i];
+        const e = mailEcart(d);
+        const isLast = i === lastIndex;
+        const recorded = Boolean(d.realDate);
+        if (isLast) { fill(e.kind === 'late' ? '#fff5f5' : '#f3f7ff'); doc.rect(tx + 0.2, y, tw - 0.4, STEP_H - 0.1, 'F'); }
+        dot(tx + 4, y + STEP_H / 2, 1.2, e.kind === 'late' ? C.red : e.kind === 'early' ? C.green : recorded ? '#16a34a' : '#cbd5e1');
+        txt(String(step.label).toUpperCase(), tx + 8, baseline(y, STEP_H, 7.8), { size: 7.8, style: 'bold', color: isLast ? (e.kind === 'late' ? C.red : C.ink) : C.text, maxW: colTheo - tx - 20 });
+        txt(step.theoretical || '--:--', colTheo, baseline(y, STEP_H, 8.5), { size: 8.5, color: isLast && e.kind === 'late' ? C.red : '#64748b', align: 'center' });
+        timeBox(recorded ? formatHHMM(d.realDate) : null, e, colReal, y + 0.8, STEP_H - 1.6, 8.5);
+        pill(e, colEcart, y + 0.9, STEP_H - 1.8, 7);
+        y += STEP_H;
+        if (i < lastIndex) { draw(C.line); doc.setLineWidth(0.2); doc.line(tx + 1, y, tx + tw - 1, y); }
+      });
+      y += 3;
+    } else {
+      const note = situation.kind === 'departedFA'
+        ? `Parti depuis FA à ${situation.time} — aucune étape réalisée au LHTE.`
+        : 'Aucune étape enregistrée.';
+      txt(note, M + 5, y + 4.5, { size: 8.5, style: 'italic', color: C.muted });
+      y += 8;
+    }
+    if (extras.length) {
+      y += 1;
+      extras.forEach(([k, v, col]) => {
+        txt(`${k} :`, M + 5, y + 3.6, { size: 8, style: 'bold', color: C.muted });
+        txt(v, M + 37, y + 3.6, { size: 8.5, style: 'bold', color: col, maxW: CW - 40 });
+        y += 5;
+      });
+      y += 1;
+    }
+    if (obsLines.length) {
+      const oh = 9 + obsLines.length * 4.2;
+      box(M + 4, y, CW - 8, oh, { fillColor: '#fffbeb', stroke: '#fcd34d', r: 1.8, lw: 0.3 });
+      txt('OBSERVATIONS', M + 8, y + 5, { size: 7, style: 'bold', color: '#b45309' });
+      obsLines.forEach((line, i) => txt(line, M + 8, y + 9.6 + i * 4.2, { size: 9, color: C.text }));
+      y += oh + 3;
+    }
+    if (cancelled) diagonalBanner(M + CW * 0.63, top + 11, 86, 5, 15);
+    y = top + cardH + 4;
   });
 
-  // ---- Arrivées ----
-  writeSectionTitle('📥 Arrivées');
-  const arrivalGroups = getAllArrivalGroups();
-  if (arrivalGroups.length === 0) writeLine('Aucune arrivée configurée.', { size: 10, style: 'italic' });
-  arrivalGroups.forEach((group) => {
-    const rec = arrivalsSnapshot[group.id] || {};
-    const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
-    const delta = computeArrivalDeltaFromRecord(rec, getArrivalEffectiveConfig(group.id));
-    const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
-    const statusText = rec.cancelled ? 'SUPPRIMÉ (ne roule pas)' : rec.arrivedManually ? 'Arrivée effectuée' : (rec.delayFlag ? '⚠ Retard / souci signalé' : 'En attente');
-    writeLine(
-      `${group.label} — départ ${rec.departure || '--:--'} / ETA ${eta || '--:--'}` +
-      `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''} / ${statusText}`,
-      { size: 9.5, gap: 4.8, indent: 4 },
-    );
+  // ---- Légende ----
+  ensure(16);
+  box(M, y, CW, 12, { fillColor: C.headBg, stroke: C.border, r: 2 });
+  txt('LÉGENDE', M + 4, y + 7.3, { size: 7.5, style: 'bold', color: C.accent });
+  let lx = M + 26;
+  [[{ label: '-', fg: '#ffffff', bg: '#15803d' }, 'En avance'], [{ label: '0', fg: '#334155', bg: '#e2e8f0' }, "À l'heure"], [{ label: '+', fg: '#ffffff', bg: '#dc2626' }, 'En retard']].forEach(([e, label]) => {
+    const pw = pill(e, lx + 5.5, y + 3.6, 4.8, 7.5);
+    lx += 5.5 + pw / 2 + 2;
+    lx += txt(label, lx, y + 7.3, { size: 8, color: C.text }) + 8;
   });
+  font(6.5, 'bold');
+  const tagW = width('SUPPRIMÉ') + 4;
+  cancelledTag(lx + tagW / 2, y + 3.6, 4.8, 6.5);
+  lx += tagW + 2;
+  txt('Voyage supprimé (ne roule pas)', lx, y + 7.3, { size: 8, color: C.text });
+  y += 16;
+
+  // ---- Pied de page sur chaque page ----
+  const pages = typeof doc.getNumberOfPages === 'function' ? doc.getNumberOfPages() : 1;
+  for (let p = 1; p <= pages; p++) {
+    if (typeof doc.setPage === 'function') doc.setPage(p);
+    draw(C.border);
+    doc.setLineWidth(0.25);
+    doc.line(M, PAGE_H - 11, M + CW, PAGE_H - 11);
+    txt('LHTE — Le Havre Terminal Exploitation · Service régulation', M, PAGE_H - 6.5, { size: 7.5, style: 'bold', color: C.ink });
+    txt(`Récap du ${dateLabel} — page ${p} / ${pages}`, M + CW, PAGE_H - 6.5, { size: 7.5, color: C.muted, align: 'right' });
+  }
 
   return doc;
 }
