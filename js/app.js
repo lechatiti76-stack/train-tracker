@@ -499,6 +499,7 @@ function openSlotModal(train) {
             <option value="TDF" ${slot.type === 'TDF' ? 'selected' : ''}>SLOT TDF</option>
             <option value="TN" ${slot.type === 'TN' ? 'selected' : ''}>SLOT TN</option>
             <option value="ATL" ${slot.type === 'ATL' ? 'selected' : ''}>SLOT ATL</option>
+            <option value="LHTE" ${slot.type === 'LHTE' ? 'selected' : ''}>SLOT LHTE</option>
           </select>
         </label>
         <label>Nombre de wagons
@@ -513,15 +514,21 @@ function openSlotModal(train) {
         <label>Départ
           <select id="fSlotDeparture">
             <option value="" ${!slot.departure ? 'selected' : ''}>—</option>
-            <option value="FA" ${slot.departure === 'FA' ? 'selected' : ''}>FA — repart de chez eux (plus géré ici)</option>
-            <option value="LHTE" ${slot.departure === 'LHTE' ? 'selected' : ''}>LHTE — repart de chez moi (suivi complet)</option>
+            <option value="FA" ${slot.departure === 'FA' ? 'selected' : ''}>FA</option>
+            <option value="LHTE" ${slot.departure === 'LHTE' ? 'selected' : ''}>LHTE</option>
           </select>
         </label>
+        <label>Heure de départ
+          <div class="sillon-lookup-row">
+            <input type="time" id="fSlotDepartureTime" value="${slot.departureTime || ''}">
+            <button type="button" class="btn btn-outline btn-sm" id="btnSlotDepartureNow">Maintenant</button>
+          </div>
+        </label>
         <p class="help-text">
-          FA réduit automatiquement la vignette (comme la case 7) : le train
-          repart de l'autre site, vous n'avez plus besoin de le suivre ici.
-          LHTE garde le suivi complet (7 étapes + graphique) et affiche ces
-          infos SLOT à côté de Composition.
+          FA : le train repart de l'autre site — la vignette se réduit, mais
+          l'heure de départ et le nombre de wagons saisis ici apparaissent
+          quand même dans le récap, le PDF et l'email. LHTE : suivi complet
+          (7 étapes + graphique), ces infos SLOT s'affichent en plus.
         </p>
         <div class="form-actions">
           <button type="button" class="btn btn-outline" id="btnClearSlot">Effacer</button>
@@ -529,6 +536,9 @@ function openSlotModal(train) {
         </div>
       </form>`,
     onMount: (panel) => {
+      panel.querySelector('#btnSlotDepartureNow').addEventListener('click', () => {
+        panel.querySelector('#fSlotDepartureTime').value = formatHHMM(new Date());
+      });
       panel.querySelector('#slotForm').addEventListener('submit', (e) => {
         e.preventDefault();
         const type = panel.querySelector('#fSlotType').value || null;
@@ -536,7 +546,8 @@ function openSlotModal(train) {
         const arrivalTime = panel.querySelector('#fSlotArrival').value || null;
         const recompositionTime = panel.querySelector('#fSlotRecomposition').value || null;
         const departure = panel.querySelector('#fSlotDeparture').value || null;
-        train.slot = { type, wagons: wagonsRaw ? Number(wagonsRaw) : null, arrivalTime, recompositionTime, departure };
+        const departureTime = panel.querySelector('#fSlotDepartureTime').value || null;
+        train.slot = { type, wagons: wagonsRaw ? Number(wagonsRaw) : null, arrivalTime, recompositionTime, departure, departureTime };
         train.trainType = 'slots';
         train.updatedAt = new Date().toISOString();
         if (departure === 'FA') train.collapsed = true;
@@ -650,7 +661,9 @@ function buildTrainReportText(train, destination) {
     `🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`,
   ];
 
-  if (train.stalled) {
+  if (!train.stalled && isSlotFADeparted(train)) {
+    lines.push(`Départ effectif (FA) : ${train.slot.departureTime.replace(':', ' h ')}${train.slot.wagons ? ` — ${train.slot.wagons} wagons` : ''}`);
+  } else if (train.stalled) {
     lines.push(`⛔ TRAIN CALÉ${train.stalledAt ? ` à ${formatHeureLettre(new Date(train.stalledAt))}` : ''} (séquence non terminée)`);
   } else {
     lines.push(lastDelay.status === 'recorded'
@@ -764,12 +777,26 @@ function mailPill(ecart, size = 13) {
   return `<span style="display:inline-block;padding:4px 10px;border-radius:6px;background:${ecart.bg};color:${ecart.fg};${MAIL_FONT}font-size:${size}px;font-weight:700;white-space:nowrap;">${escapeHtml(ecart.label)}</span>`;
 }
 
+// Train SLOT reparti de l'autre site (FA) avec une heure de départ saisie
+// dans "Infos SLOT", sans que la dernière étape ait été enregistrée ici.
+function isSlotFADeparted(train) {
+  return train.trainType === 'slots' && train.slot?.departure === 'FA' && Boolean(train.slot.departureTime)
+    && !train.steps[train.steps.length - 1]?.real;
+}
+
+function slotFADetailsText(train) {
+  const bits = [train.slot?.type ? `SLOT ${train.slot.type}` : 'SLOT', 'départ FA'];
+  if (train.slot?.wagons) bits.push(`${train.slot.wagons} wagons`);
+  return bits.join(', ');
+}
+
 // Situation du train pour l'en-tête du message : parti (dernière étape
 // enregistrée), en cours (au moins une étape), en attente (aucune).
 function trainMailSituation(train, delays) {
   const lastIndex = train.steps.length - 1;
   const last = lastRecordedStepInfo(train, delays);
   if (train.stalled) return { kind: 'stalled', label: 'CALÉ', icon: '⛔', color: '#7c3aed', last, at: train.stalledAt ? new Date(train.stalledAt) : null };
+  if (isSlotFADeparted(train)) return { kind: 'departedFA', label: 'PARTI (FA)', icon: '✅', color: '#15803d', last, time: train.slot.departureTime, wagons: train.slot.wagons };
   const departed = lastIndex >= 0 && delays[lastIndex]?.realDate;
   if (departed) return { kind: 'departed', label: 'PARTI', icon: '✅', color: '#15803d', last: { index: lastIndex, step: train.steps[lastIndex], delay: delays[lastIndex] } };
   if (last) return { kind: 'progress', label: 'EN COURS', icon: '⏳', color: '#d97706', last };
@@ -788,6 +815,9 @@ function trainAnnouncementText(train, destination, delays) {
       : ecart.kind === 'late' ? `, soit un retard de ${ecart.label}${prevu ? ` (prévu ${prevu})` : ''}`
         : ecart.kind === 'early' ? `, soit une avance de ${ecart.label.slice(1)}${prevu ? ` (prévu ${prevu})` : ''}` : '';
     return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
+  }
+  if (situation.kind === 'departedFA') {
+    return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${situation.time} (${slotFADetailsText(train)}).`;
   }
   if (situation.kind === 'stalled') {
     const at = situation.at ? ` depuis ${formatHHMM(situation.at)}` : '';
@@ -828,6 +858,8 @@ function buildTrainReportHTML(train, destination) {
       : departEcart.kind === 'late' ? `, soit un retard de ${mailPill(departEcart, 12)}${prevuTxt}`
         : departEcart.kind === 'early' ? `, soit une avance de ${mailPill({ ...departEcart, label: departEcart.label.slice(1) }, 12)}${prevuTxt}` : '';
     announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:${mailTimeColor(departEcart)};">${escapeHtml(departReel)}</strong>${ecartTxt}.`;
+  } else if (situation.kind === 'departedFA') {
+    announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:#15803d;">${escapeHtml(situation.time)}</strong> (${escapeHtml(slotFADetailsText(train))}).`;
   } else if (situation.kind === 'stalled') {
     const at = situation.at ? ` depuis <strong style="color:#7c3aed;">${escapeHtml(formatHHMM(situation.at))}</strong>` : '';
     if (situation.last) {
@@ -908,12 +940,15 @@ function buildTrainReportHTML(train, destination) {
             ${destination ? `<div style="${F}font-size:14px;font-weight:700;color:${MAIL_ACCENT};margin-top:2px;">→ ${escapeHtml(destination.toUpperCase())}</div>` : ''}
           </td>
           <td valign="middle" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
-            ${situation.kind === 'stalled' ? `
+            ${situation.kind === 'departedFA' ? `
+            <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">DÉPART (FA)</div>
+            <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:#15803d;vertical-align:middle;">${escapeHtml(situation.time)}</span></div>
+            ${situation.wagons ? `<div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">${escapeHtml(String(situation.wagons))} WAGONS</div>` : ''}` : situation.kind === 'stalled' ? `
             <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:#7c3aed;">TRAIN CALÉ</div>
             <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:#7c3aed;vertical-align:middle;">${escapeHtml(situation.at ? formatHHMM(situation.at) : '--:--')}</span></div>` : `
             <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">DÉPART EFFECTIF</div>
             <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:${mailTimeColor(departEcart)};vertical-align:middle;">${escapeHtml(departReel)}</span> ${departEcart.kind !== 'none' ? mailPill(departEcart, 15) : ''}</div>`}
-            <div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">PRÉVU : ${escapeHtml(departPrevu)}</div>
+            ${situation.kind === 'departedFA' ? '' : `<div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">PRÉVU : ${escapeHtml(departPrevu)}</div>`}
           </td>
           <td valign="middle" align="center" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
             <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">ÉTAT</div>
@@ -956,7 +991,10 @@ function buildTrainReportHTML(train, destination) {
             ${summaryRow('🚆', 'Train', escapeHtml(train.number))}
             ${destination ? summaryRow('📍', 'Destination', escapeHtml(destination)) : ''}
             ${summaryRow('🕒', 'Départ prévu', escapeHtml(departPrevu))}
-            ${summaryRow('⏱', 'Départ réel', `<span style="color:${departDelay?.realDate ? mailTimeColor(departEcart) : MAIL_INK};">${escapeHtml(departReel)}</span>`)}
+            ${situation.kind === 'departedFA'
+    ? summaryRow('⏱', 'Départ (FA)', `<span style="color:#15803d;">${escapeHtml(situation.time)}</span>`)
+    : summaryRow('⏱', 'Départ réel', `<span style="color:${departDelay?.realDate ? mailTimeColor(departEcart) : MAIL_INK};">${escapeHtml(departReel)}</span>`)}
+            ${train.trainType === 'slots' && train.slot?.wagons ? summaryRow('🚃', 'Wagons', escapeHtml(String(train.slot.wagons))) : ''}
             ${situation.kind === 'stalled' ? summaryRow('⛔', 'Calé à', `<span style="color:#7c3aed;">${escapeHtml(situation.at ? formatHHMM(situation.at) : '--:--')}</span>`) : ''}
             ${summaryRow('📈', 'Écart au départ', departEcart.kind !== 'none' ? mailPill(departEcart, 12) : '—')}
             ${summaryRow('✔', 'Statut', `<span style="color:${situation.color};">${situation.label} ${situation.icon}</span>`)}
@@ -1048,6 +1086,9 @@ function trainMailSubject(train, destination) {
   const delays = computeAllStepDelays(train);
   const situation = trainMailSituation(train, delays);
   const dest = destination ? ` → ${destination}` : '';
+  if (situation.kind === 'departedFA') {
+    return `Départ train ${train.number}${dest} — ${situation.time} (FA${situation.wagons ? `, ${situation.wagons} wagons` : ''})`;
+  }
   if (situation.kind === 'stalled') {
     return `Train ${train.number}${dest} — CALÉ${situation.at ? ` (${formatHHMM(situation.at)})` : ''}`;
   }
@@ -2254,6 +2295,46 @@ function shuttleDeltaBadgeHTML(delta) {
   return `<span class="shuttle-delta-badge tone-${delta.tone}" data-role="shuttle-delta">${escapeHtml(formatDelayLabel(delta.diffMin, DELAY_THRESHOLDS))}</span>`;
 }
 
+// ---------- "✕ Supprimer le voyage" (navettes, tableau rapide, arrivées) ----------
+// Petite croix en haut à droite d'une vignette qui a des données du jour :
+// retire le voyage (départ, arrivée confirmée, retard signalé...) après
+// confirmation, comme si rien n'avait été saisi. Interceptée dans les
+// gestionnaires de clic des bandeaux AVANT l'ouverture de la vignette.
+function chipDeleteHTML(label) {
+  return `<span class="chip-delete" data-chip-delete role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">✕</span>`;
+}
+
+function tripHasData(rec) {
+  return Boolean(rec && (rec.departure || rec.arrivedManually || rec.delayFlag || rec.arrivedAt || (rec.stops && rec.stops.length)));
+}
+
+function deleteShuttleTrip(code) {
+  const dep = shuttles[code]?.departure;
+  if (!confirm(`Supprimer le voyage de la navette ${code}${dep ? ` (départ ${dep})` : ''} ?`)) return;
+  delete shuttles[code];
+  saveShuttles(shuttles);
+  renderShuttlesBar();
+  showToast(`Voyage ${code} supprimé`);
+}
+
+function deleteArrivalTrip(id) {
+  const group = findArrivalGroup(id);
+  const dep = arrivals[id]?.departure;
+  if (!confirm(`Supprimer le voyage ${group?.label || id}${dep ? ` (départ ${dep})` : ''} ?`)) return;
+  delete arrivals[id];
+  saveArrivals(arrivals);
+  renderArrivalsBar();
+  showToast(`Voyage ${group?.label || id} supprimé`);
+}
+
+function deleteQuickboardTrip(key, label) {
+  if (!confirm(`Supprimer le départ ${label} (${shuttleReserves[key]}) ?`)) return;
+  shuttleReserves[key] = null;
+  saveShuttleReserves(shuttleReserves);
+  renderShuttleQuickboard();
+  showToast(`Départ ${label} supprimé`);
+}
+
 function shuttleChipInnerHTML(code) {
   const rec = shuttles[code];
   const departure = rec?.departure;
@@ -2270,6 +2351,7 @@ function shuttleChipInnerHTML(code) {
   // théorique.
   const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
   return `
+    ${tripHasData(rec) ? chipDeleteHTML(`Supprimer le voyage ${code}`) : ''}
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || arrival}</span>`
@@ -2463,7 +2545,7 @@ function openShuttleModal(code) {
         <p class="help-text" data-role="shuttle-quick-status">${shuttleQuickStatusText(arrivedManually, delayFlag)}</p>
 
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnClearShuttle">Effacer</button>
+          <button type="button" class="btn btn-outline" id="btnClearShuttle">🗑 Supprimer le voyage</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -2550,7 +2632,7 @@ function openShuttleModal(code) {
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
-        showToast(`Navette ${code} réinitialisée`);
+        showToast(`Voyage ${code} supprimé`);
       });
     },
   });
@@ -2721,6 +2803,7 @@ function wireShuttlesBar() {
   container.addEventListener('click', (e) => {
     if (e.target.closest('#btnAddShuttle')) { openAddShuttleModal(); return; }
     const btn = e.target.closest('[data-shuttle-code]');
+    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); deleteShuttleTrip(btn.dataset.shuttleCode); return; }
     if (btn) openShuttleModal(btn.dataset.shuttleCode);
   });
   setInterval(updateShuttleStates, 15000);
@@ -2788,6 +2871,7 @@ function shuttleQuickboardCellHTML(code) {
   return `
     <td>
       <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        ${time ? chipDeleteHTML(`Supprimer le départ ${code}`) : ''}
         <span class="quickboard-code">${escapeHtml(code)}</span>
         <span class="quickboard-time">${time || '--:--'}</span>
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(code))}
@@ -2801,6 +2885,7 @@ function shuttleQuickboardReserveCellHTML(family) {
   return `
     <td>
       <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-reserve="${escapeHtml(family)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        ${time ? chipDeleteHTML(`Supprimer le départ Réserve ${family}`) : ''}
         <span class="quickboard-code">Réserve ${escapeHtml(family)}</span>
         <span class="quickboard-time">${time || '--:--'}</span>
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(family))}
@@ -2829,7 +2914,7 @@ function openQuickboardTimeEditor(key, label) {
           <input type="time" id="fQuickboardTime" value="${escapeHtml(current)}">
         </label>
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnQuickboardClear">Effacer</button>
+          <button type="button" class="btn btn-outline" id="btnQuickboardClear">🗑 Supprimer le départ</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -2894,7 +2979,11 @@ function wireShuttleQuickboard() {
   const container = el('shuttleQuickboard');
   if (!container) return;
   container.addEventListener('click', (e) => {
+    const isDelete = Boolean(e.target.closest('[data-chip-delete]'));
     const codeBtn = e.target.closest('[data-quickboard-code]');
+    if (codeBtn && isDelete) { e.preventDefault(); deleteQuickboardTrip(codeBtn.dataset.quickboardCode, codeBtn.dataset.quickboardCode); return; }
+    const resDel = e.target.closest('[data-quickboard-reserve]');
+    if (resDel && isDelete) { e.preventDefault(); deleteQuickboardTrip(resDel.dataset.quickboardReserve, `Réserve ${resDel.dataset.quickboardReserve}`); return; }
     if (codeBtn) { quickboardRecordCode(codeBtn.dataset.quickboardCode); return; }
     const resBtn = e.target.closest('[data-quickboard-reserve]');
     if (resBtn) { quickboardRecordReserve(resBtn.dataset.quickboardReserve); return; }
@@ -3079,6 +3168,7 @@ function arrivalChipInnerHTML(id) {
   // que l'heure estimée.
   const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
   return `
+    ${tripHasData(rec) ? chipDeleteHTML(`Supprimer le voyage ${group.label}`) : ''}
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || eta}</span>`
@@ -3225,7 +3315,7 @@ function openArrivalModal(id) {
         <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
 
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnClearArrival">Effacer</button>
+          <button type="button" class="btn btn-outline" id="btnClearArrival">🗑 Supprimer le voyage</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -3324,7 +3414,7 @@ function openArrivalModal(id) {
         saveArrivals(arrivals);
         renderArrivalsBar();
         closeModal();
-        showToast(`${group.label} réinitialisée`);
+        showToast(`Voyage ${group.label} supprimé`);
       });
     },
   });
@@ -3400,6 +3490,7 @@ function wireArrivalsBar() {
   container.addEventListener('click', (e) => {
     if (e.target.closest('#btnAddArrival')) { openAddArrivalModal(); return; }
     const btn = e.target.closest('[data-arrival-id]');
+    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); deleteArrivalTrip(btn.dataset.arrivalId); return; }
     if (btn) openArrivalModal(btn.dataset.arrivalId);
   });
   setInterval(updateArrivalStates, 1000);
