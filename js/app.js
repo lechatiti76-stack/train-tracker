@@ -144,11 +144,14 @@ function renderQuickTrainsBar() {
   const quickTrains = settings.quickTrains || [];
   if (quickTrains.length === 0) { container.innerHTML = ''; return; }
   container.innerHTML = quickTrains.map(({ number, operator, destination }) => {
-    const exists = trains.some((t) => t.date === currentDate && t.number === number);
+    const todayTrain = trains.find((t) => t.date === currentDate && t.number === number);
+    const exists = Boolean(todayTrain);
+    const cancelled = Boolean(todayTrain?.cancelled);
     const meta = [operator, destination].filter(Boolean).join(' · ');
     const color = quickTrainOperatorColor(operator);
     return `
-      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}${color ? ' has-operator-color' : ''}" ${color ? `style="--quick-train-color:${color}"` : ''} data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
+      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}${color ? ' has-operator-color' : ''}${cancelled ? ' is-cancelled' : ''}" ${color ? `style="--quick-train-color:${color}"` : ''} data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
+        ${cancelled ? cancelBannerHTML() : ''}
         ${meta ? `<span class="quick-train-meta">${escapeHtml(meta)}</span>` : ''}
         <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}</span>
       </button>`;
@@ -356,6 +359,23 @@ function toggleTrainStalled(train) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
+}
+
+// "🚫 Supprimer le voyage" : le train ne roule pas aujourd'hui. La vignette
+// reste (grisée, bannière rouge "SUPPRIMÉ" en diagonale, réduite) pour
+// garder une trace dans le récap, le PDF et l'email ; un second clic
+// rétablit le voyage. Pour l'enlever complètement, il reste "✕" (supprimer
+// la vignette) ou le bouton du train à accès rapide.
+function toggleTrainCancelled(train) {
+  if (!train.cancelled && !confirm(`Supprimer le voyage du train ${train.number} ?\n\nLa vignette sera grisée et marquée « SUPPRIMÉ » (le train ne roule pas). Vous pourrez la rétablir.`)) return;
+  train.cancelled = !train.cancelled;
+  train.cancelledAt = train.cancelled ? new Date().toISOString() : null;
+  train.collapsed = train.cancelled;
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+  renderQuickTrainsBar();
+  showToast(train.cancelled ? `Train ${train.number} supprimé (ne roule pas)` : `Train ${train.number} rétabli`);
 }
 
 // "📝 Observation" : texte libre par train, repris dans le PDF récap, la
@@ -661,7 +681,9 @@ function buildTrainReportText(train, destination) {
     `🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`,
   ];
 
-  if (!train.stalled && isSlotFADeparted(train)) {
+  if (train.cancelled) {
+    lines.push('🚫 TRAIN SUPPRIMÉ — ne circule pas aujourd\'hui');
+  } else if (!train.stalled && isSlotFADeparted(train)) {
     lines.push(`Départ effectif (FA) : ${train.slot.departureTime.replace(':', ' h ')}${train.slot.wagons ? ` — ${train.slot.wagons} wagons` : ''}`);
   } else if (train.stalled) {
     lines.push(`⛔ TRAIN CALÉ${train.stalledAt ? ` à ${formatHeureLettre(new Date(train.stalledAt))}` : ''} (séquence non terminée)`);
@@ -795,6 +817,7 @@ function slotFADetailsText(train) {
 function trainMailSituation(train, delays) {
   const lastIndex = train.steps.length - 1;
   const last = lastRecordedStepInfo(train, delays);
+  if (train.cancelled) return { kind: 'cancelled', label: 'SUPPRIMÉ', icon: '🚫', color: '#dc2626', last };
   if (train.stalled) return { kind: 'stalled', label: 'CALÉ', icon: '⛔', color: '#7c3aed', last, at: train.stalledAt ? new Date(train.stalledAt) : null };
   if (isSlotFADeparted(train)) return { kind: 'departedFA', label: 'PARTI (FA)', icon: '✅', color: '#15803d', last, time: train.slot.departureTime, wagons: train.slot.wagons };
   const departed = lastIndex >= 0 && delays[lastIndex]?.realDate;
@@ -815,6 +838,9 @@ function trainAnnouncementText(train, destination, delays) {
       : ecart.kind === 'late' ? `, soit un retard de ${ecart.label}${prevu ? ` (prévu ${prevu})` : ''}`
         : ecart.kind === 'early' ? `, soit une avance de ${ecart.label.slice(1)}${prevu ? ` (prévu ${prevu})` : ''}` : '';
     return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
+  }
+  if (situation.kind === 'cancelled') {
+    return `Nous vous informons que le train N° ${train.number}${dest} est supprimé : il ne circule pas aujourd'hui.`;
   }
   if (situation.kind === 'departedFA') {
     return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${situation.time} (${slotFADetailsText(train)}).`;
@@ -858,6 +884,8 @@ function buildTrainReportHTML(train, destination) {
       : departEcart.kind === 'late' ? `, soit un retard de ${mailPill(departEcart, 12)}${prevuTxt}`
         : departEcart.kind === 'early' ? `, soit une avance de ${mailPill({ ...departEcart, label: departEcart.label.slice(1) }, 12)}${prevuTxt}` : '';
     announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:${mailTimeColor(departEcart)};">${escapeHtml(departReel)}</strong>${ecartTxt}.`;
+  } else if (situation.kind === 'cancelled') {
+    announceHTML = `Nous vous informons que le train ${numberHTML}${destHTML} est <strong style="color:#dc2626;">supprimé</strong> : il ne circule pas aujourd'hui.`;
   } else if (situation.kind === 'departedFA') {
     announceHTML = `Nous vous annonçons le départ du train ${numberHTML}${destHTML} à <strong style="color:#15803d;">${escapeHtml(situation.time)}</strong> (${escapeHtml(slotFADetailsText(train))}).`;
   } else if (situation.kind === 'stalled') {
@@ -940,7 +968,9 @@ function buildTrainReportHTML(train, destination) {
             ${destination ? `<div style="${F}font-size:14px;font-weight:700;color:${MAIL_ACCENT};margin-top:2px;">→ ${escapeHtml(destination.toUpperCase())}</div>` : ''}
           </td>
           <td valign="middle" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
-            ${situation.kind === 'departedFA' ? `
+            ${situation.kind === 'cancelled' ? `
+            <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:#dc2626;">TRAIN SUPPRIMÉ</div>
+            <div style="margin-top:2px;"><span style="${F}font-size:22px;font-weight:800;color:#dc2626;vertical-align:middle;">Ne roule pas</span></div>` : situation.kind === 'departedFA' ? `
             <div style="${F}font-size:11px;font-weight:700;letter-spacing:.06em;color:${MAIL_MUTED};">DÉPART (FA)</div>
             <div style="margin-top:2px;"><span style="${F}font-size:28px;font-weight:800;color:#15803d;vertical-align:middle;">${escapeHtml(situation.time)}</span></div>
             ${situation.wagons ? `<div style="${F}font-size:12px;color:${MAIL_MUTED};margin-top:2px;">${escapeHtml(String(situation.wagons))} WAGONS</div>` : ''}` : situation.kind === 'stalled' ? `
@@ -1086,6 +1116,7 @@ function trainMailSubject(train, destination) {
   const delays = computeAllStepDelays(train);
   const situation = trainMailSituation(train, delays);
   const dest = destination ? ` → ${destination}` : '';
+  if (situation.kind === 'cancelled') return `Train ${train.number}${dest} — SUPPRIMÉ (ne roule pas)`;
   if (situation.kind === 'departedFA') {
     return `Départ train ${train.number}${dest} — ${situation.time} (FA${situation.wagons ? `, ${situation.wagons} wagons` : ''})`;
   }
@@ -1162,6 +1193,7 @@ function onGridClick(e) {
     case 'set-train-type': setTrainType(train, btn.dataset.type); break;
     case 'open-slot': openSlotModal(train); break;
     case 'toggle-stalled': toggleTrainStalled(train); break;
+    case 'toggle-cancelled': toggleTrainCancelled(train); break;
     case 'open-observation': openObservationModal(train); break;
     case 'collapse-card': setCardCollapsed(train, true); break;
     case 'expand-card': setCardCollapsed(train, false); break;
@@ -2194,6 +2226,7 @@ function computeShuttleArrival(code, departureHHMM) {
 // passer à "Arrivée effectuée" (grisée) : voir "arrivedManually" ci-dessous,
 // qui court-circuite tout ce calcul.
 function computeShuttleProgress(code) {
+  if (shuttles[code]?.cancelled) return { state: 'cancelled', label: 'Ne roule pas' };
   if (shuttles[code]?.arrivedManually) return { state: 'arrived', label: 'Arrivée effectuée' };
   const group = findShuttleGroup(code);
   const departure = shuttles[code]?.departure;
@@ -2231,7 +2264,7 @@ function shuttleHasDelayFlag(code) {
 // enregistré ou une fois la navette arrivée (le décompte n'a alors plus de
 // sens et le libellé d'état s'en charge déjà).
 function computeShuttleRemainingMin(code) {
-  if (shuttles[code]?.arrivedManually) return null;
+  if (shuttles[code]?.arrivedManually || shuttles[code]?.cancelled) return null;
   const group = findShuttleGroup(code);
   const departure = shuttles[code]?.departure;
   if (!group || !departure) return null;
@@ -2250,7 +2283,7 @@ function computeShuttleRemainingMin(code) {
 // personne n'a cliqué "✓ Navette arrivée" — null tant que l'heure estimée
 // n'est pas dépassée, ou une fois l'arrivée confirmée manuellement.
 function computeShuttleOverdueMin(code) {
-  if (shuttles[code]?.arrivedManually) return null;
+  if (shuttles[code]?.arrivedManually || shuttles[code]?.cancelled) return null;
   const group = findShuttleGroup(code);
   const departure = shuttles[code]?.departure;
   if (!group || !departure) return null;
@@ -2295,44 +2328,66 @@ function shuttleDeltaBadgeHTML(delta) {
   return `<span class="shuttle-delta-badge tone-${delta.tone}" data-role="shuttle-delta">${escapeHtml(formatDelayLabel(delta.diffMin, DELAY_THRESHOLDS))}</span>`;
 }
 
-// ---------- "✕ Supprimer le voyage" (navettes, tableau rapide, arrivées) ----------
-// Petite croix en haut à droite d'une vignette qui a des données du jour :
-// retire le voyage (départ, arrivée confirmée, retard signalé...) après
-// confirmation, comme si rien n'avait été saisi. Interceptée dans les
-// gestionnaires de clic des bandeaux AVANT l'ouverture de la vignette.
+// ---------- Voyage supprimé (ne roule pas) : navettes, tableau rapide, arrivées ----------
+// "Supprimer le voyage" ne vide pas la vignette : il la marque "supprimée"
+// (le voyage ne roule pas aujourd'hui) — vignette grisée avec une bannière
+// rouge en diagonale "SUPPRIMÉ", plus de décompte ni d'alerte, et mention
+// "SUPPRIMÉ" dans le PDF récap. Rétablissable à tout moment (↺). À ne pas
+// confondre avec "Effacer" (dans la fenêtre de la vignette), qui retire
+// seulement l'heure de départ saisie. Le marquage est remis à zéro avec le
+// reste de la journée à minuit. Pour le tableau rapide (valeurs = heures),
+// les voyages supprimés sont rangés dans shuttleReserves._cancelled.
 function chipDeleteHTML(label) {
   return `<span class="chip-delete" data-chip-delete role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">✕</span>`;
 }
 
-function tripHasData(rec) {
-  return Boolean(rec && (rec.departure || rec.arrivedManually || rec.delayFlag || rec.arrivedAt || (rec.stops && rec.stops.length)));
+function chipRestoreHTML(label) {
+  return `<span class="chip-delete chip-restore" data-chip-restore role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">↺</span>`;
 }
 
-function deleteShuttleTrip(code) {
-  const dep = shuttles[code]?.departure;
-  if (!confirm(`Supprimer le voyage de la navette ${code}${dep ? ` (départ ${dep})` : ''} ?`)) return;
-  delete shuttles[code];
+function cancelBannerHTML() {
+  return '<span class="cancel-banner" aria-hidden="true">Supprimé</span>';
+}
+
+function isQuickboardCancelled(key) {
+  return Boolean(shuttleReserves._cancelled?.[key]);
+}
+
+function setShuttleCancelled(code, cancelled) {
+  if (cancelled && !confirm(`Supprimer le voyage ${code} ?\n\nLa vignette sera grisée et marquée « SUPPRIMÉ » (le voyage ne roule pas). Vous pourrez la rétablir avec ↺.`)) return false;
+  const rec = shuttles[code] || {};
+  rec.cancelled = cancelled;
+  rec.cancelledAt = cancelled ? new Date().toISOString() : null;
+  shuttles[code] = rec;
   saveShuttles(shuttles);
   renderShuttlesBar();
-  showToast(`Voyage ${code} supprimé`);
+  showToast(cancelled ? `Voyage ${code} supprimé (ne roule pas)` : `Voyage ${code} rétabli`);
+  return true;
 }
 
-function deleteArrivalTrip(id) {
-  const group = findArrivalGroup(id);
-  const dep = arrivals[id]?.departure;
-  if (!confirm(`Supprimer le voyage ${group?.label || id}${dep ? ` (départ ${dep})` : ''} ?`)) return;
-  delete arrivals[id];
+function setArrivalCancelled(id, cancelled) {
+  const label = findArrivalGroup(id)?.label || id;
+  if (cancelled && !confirm(`Supprimer le voyage ${label} ?\n\nLa vignette sera grisée et marquée « SUPPRIMÉ » (le train ne roule pas). Vous pourrez la rétablir avec ↺.`)) return false;
+  const rec = arrivals[id] || {};
+  rec.cancelled = cancelled;
+  rec.cancelledAt = cancelled ? new Date().toISOString() : null;
+  arrivals[id] = rec;
   saveArrivals(arrivals);
   renderArrivalsBar();
-  showToast(`Voyage ${group?.label || id} supprimé`);
+  showToast(cancelled ? `Voyage ${label} supprimé (ne roule pas)` : `Voyage ${label} rétabli`);
+  return true;
 }
 
-function deleteQuickboardTrip(key, label) {
-  if (!confirm(`Supprimer le départ ${label} (${shuttleReserves[key]}) ?`)) return;
-  shuttleReserves[key] = null;
+function setQuickboardCancelled(key, label, cancelled) {
+  if (cancelled && !confirm(`Supprimer le départ ${label} ?\n\nLa case sera grisée et marquée « SUPPRIMÉ » (ne roule pas). Vous pourrez la rétablir avec ↺.`)) return false;
+  const map = { ...(shuttleReserves._cancelled || {}) };
+  if (cancelled) map[key] = true;
+  else delete map[key];
+  shuttleReserves._cancelled = map;
   saveShuttleReserves(shuttleReserves);
   renderShuttleQuickboard();
-  showToast(`Départ ${label} supprimé`);
+  showToast(cancelled ? `Départ ${label} supprimé (ne roule pas)` : `Départ ${label} rétabli`);
+  return true;
 }
 
 function shuttleChipInnerHTML(code) {
@@ -2350,8 +2405,15 @@ function shuttleChipInnerHTML(code) {
   // d'écart (shuttleDeltaBadgeHTML) montre déjà la différence avec l'heure
   // théorique.
   const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
+  if (rec?.cancelled) {
+    return `
+    ${chipRestoreHTML(`Rétablir le voyage ${code}`)}
+    ${cancelBannerHTML()}
+    <span class="shuttle-code">${escapeHtml(code)}</span>
+    <span class="shuttle-times shuttle-times-empty">Ne roule pas</span>`;
+  }
   return `
-    ${tripHasData(rec) ? chipDeleteHTML(`Supprimer le voyage ${code}`) : ''}
+    ${chipDeleteHTML(`Supprimer le voyage ${code} (ne roule pas)`)}
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || arrival}</span>`
@@ -2545,7 +2607,8 @@ function openShuttleModal(code) {
         <p class="help-text" data-role="shuttle-quick-status">${shuttleQuickStatusText(arrivedManually, delayFlag)}</p>
 
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnClearShuttle">🗑 Supprimer le voyage</button>
+          <button type="button" class="btn btn-outline" id="btnClearShuttle">Effacer</button>
+          <button type="button" class="btn btn-outline btn-cancel-trip" id="btnCancelShuttle">${rec.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -2627,12 +2690,19 @@ function openShuttleModal(code) {
         if (current.departure) pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, null, current.departure, null);
         showToast(`Navette ${code} mise à jour`);
       });
+      // "Effacer" : retire seulement l'heure de départ saisie (la vignette
+      // reste active) — voir aussi "Supprimer le voyage" juste à côté.
       panel.querySelector('#btnClearShuttle').addEventListener('click', () => {
-        shuttles[code] = { departure: null, arrivedManually: false, delayFlag: false, arrivedAt: null };
+        const current = shuttles[code] || {};
+        current.departure = null;
+        shuttles[code] = current;
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
-        showToast(`Voyage ${code} supprimé`);
+        showToast(`Navette ${code} : heure de départ effacée`);
+      });
+      panel.querySelector('#btnCancelShuttle').addEventListener('click', () => {
+        if (setShuttleCancelled(code, !shuttles[code]?.cancelled)) closeModal();
       });
     },
   });
@@ -2803,7 +2873,8 @@ function wireShuttlesBar() {
   container.addEventListener('click', (e) => {
     if (e.target.closest('#btnAddShuttle')) { openAddShuttleModal(); return; }
     const btn = e.target.closest('[data-shuttle-code]');
-    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); deleteShuttleTrip(btn.dataset.shuttleCode); return; }
+    if (btn && e.target.closest('[data-chip-restore]')) { e.preventDefault(); setShuttleCancelled(btn.dataset.shuttleCode, false); return; }
+    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); setShuttleCancelled(btn.dataset.shuttleCode, true); return; }
     if (btn) openShuttleModal(btn.dataset.shuttleCode);
   });
   setInterval(updateShuttleStates, 15000);
@@ -2868,10 +2939,11 @@ function computeQuickboardDelta(key) {
 function shuttleQuickboardCellHTML(code) {
   const group = quickboardGroupOf(code);
   const time = shuttleReserves[code] || null;
+  const cancelled = isQuickboardCancelled(code);
   return `
     <td>
-      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
-        ${time ? chipDeleteHTML(`Supprimer le départ ${code}`) : ''}
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        ${cancelled ? `${chipRestoreHTML(`Rétablir le départ ${code}`)}${cancelBannerHTML()}` : chipDeleteHTML(`Supprimer le départ ${code} (ne roule pas)`)}
         <span class="quickboard-code">${escapeHtml(code)}</span>
         <span class="quickboard-time">${time || '--:--'}</span>
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(code))}
@@ -2882,10 +2954,11 @@ function shuttleQuickboardCellHTML(code) {
 function shuttleQuickboardReserveCellHTML(family) {
   const group = quickboardGroupOf(family);
   const time = shuttleReserves[family] || null;
+  const cancelled = isQuickboardCancelled(family);
   return `
     <td>
-      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-reserve="${escapeHtml(family)}" title="${time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
-        ${time ? chipDeleteHTML(`Supprimer le départ Réserve ${family}`) : ''}
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-reserve="${escapeHtml(family)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+        ${cancelled ? `${chipRestoreHTML(`Rétablir le départ Réserve ${family}`)}${cancelBannerHTML()}` : chipDeleteHTML(`Supprimer le départ Réserve ${family} (ne roule pas)`)}
         <span class="quickboard-code">Réserve ${escapeHtml(family)}</span>
         <span class="quickboard-time">${time || '--:--'}</span>
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(family))}
@@ -2914,7 +2987,8 @@ function openQuickboardTimeEditor(key, label) {
           <input type="time" id="fQuickboardTime" value="${escapeHtml(current)}">
         </label>
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnQuickboardClear">🗑 Supprimer le départ</button>
+          <button type="button" class="btn btn-outline" id="btnQuickboardClear">Effacer</button>
+          <button type="button" class="btn btn-outline btn-cancel-trip" id="btnQuickboardCancel">${isQuickboardCancelled(key) ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -2924,6 +2998,10 @@ function openQuickboardTimeEditor(key, label) {
         saveShuttleReserves(shuttleReserves);
         renderShuttleQuickboard();
         closeModal();
+        showToast(`${label} : heure de départ effacée`);
+      });
+      panel.querySelector('#btnQuickboardCancel').addEventListener('click', () => {
+        if (setQuickboardCancelled(key, label, !isQuickboardCancelled(key))) closeModal();
       });
       panel.querySelector('#quickboardTimeForm').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -2952,7 +3030,7 @@ function pushQuickboardLog(key, label) {
 }
 
 function quickboardRecordCode(code) {
-  if (!shuttleReserves[code]) {
+  if (!shuttleReserves[code] && !isQuickboardCancelled(code)) {
     shuttleReserves[code] = quickboardNowHHMM();
     saveShuttleReserves(shuttleReserves);
     renderShuttleQuickboard();
@@ -2964,7 +3042,7 @@ function quickboardRecordCode(code) {
 }
 
 function quickboardRecordReserve(family) {
-  if (!shuttleReserves[family]) {
+  if (!shuttleReserves[family] && !isQuickboardCancelled(family)) {
     shuttleReserves[family] = quickboardNowHHMM();
     saveShuttleReserves(shuttleReserves);
     renderShuttleQuickboard();
@@ -2980,10 +3058,15 @@ function wireShuttleQuickboard() {
   if (!container) return;
   container.addEventListener('click', (e) => {
     const isDelete = Boolean(e.target.closest('[data-chip-delete]'));
+    const isRestore = Boolean(e.target.closest('[data-chip-restore]'));
     const codeBtn = e.target.closest('[data-quickboard-code]');
-    if (codeBtn && isDelete) { e.preventDefault(); deleteQuickboardTrip(codeBtn.dataset.quickboardCode, codeBtn.dataset.quickboardCode); return; }
-    const resDel = e.target.closest('[data-quickboard-reserve]');
-    if (resDel && isDelete) { e.preventDefault(); deleteQuickboardTrip(resDel.dataset.quickboardReserve, `Réserve ${resDel.dataset.quickboardReserve}`); return; }
+    const resBtnAny = e.target.closest('[data-quickboard-reserve]');
+    if ((isDelete || isRestore) && (codeBtn || resBtnAny)) {
+      e.preventDefault();
+      const key = codeBtn ? codeBtn.dataset.quickboardCode : resBtnAny.dataset.quickboardReserve;
+      setQuickboardCancelled(key, codeBtn ? key : `Réserve ${key}`, isDelete);
+      return;
+    }
     if (codeBtn) { quickboardRecordCode(codeBtn.dataset.quickboardCode); return; }
     const resBtn = e.target.closest('[data-quickboard-reserve]');
     if (resBtn) { quickboardRecordReserve(resBtn.dataset.quickboardReserve); return; }
@@ -3052,6 +3135,9 @@ function computeArrivalProgress(id) {
   const totalMin = group.offsetMinutes || 1;
   const baseStops = group.stops.map((s) => ({ ...s, pct: Math.max(0, Math.min(100, (s.offsetMin / totalMin) * 100)) }));
 
+  if (arrivals[id]?.cancelled) {
+    return { state: 'cancelled', label: 'Ne roule pas', pct: 0, stops: baseStops.map((s) => ({ ...s, reached: false, time: null })) };
+  }
   if (arrivals[id]?.arrivedManually) {
     return { state: 'arrived', label: 'Arrivée effectuée', pct: 100, stops: baseStops.map((s) => ({ ...s, reached: true, time: null })) };
   }
@@ -3089,7 +3175,7 @@ function computeArrivalProgress(id) {
 // même logique que computeShuttleRemainingMin ci-dessus pour les navettes —
 // voir .arrival-countdown dans style.css.
 function computeArrivalRemainingMin(id) {
-  if (arrivals[id]?.arrivedManually) return null;
+  if (arrivals[id]?.arrivedManually || arrivals[id]?.cancelled) return null;
   const group = getArrivalEffectiveConfig(id);
   const departure = arrivals[id]?.departure;
   if (!group || !departure) return null;
@@ -3106,7 +3192,7 @@ function computeArrivalRemainingMin(id) {
 // Minutes de retard écoulées au-delà de l'heure d'arrivée estimée, même
 // logique que computeShuttleOverdueMin ci-dessus pour les navettes.
 function computeArrivalOverdueMin(id) {
-  if (arrivals[id]?.arrivedManually) return null;
+  if (arrivals[id]?.arrivedManually || arrivals[id]?.cancelled) return null;
   const group = getArrivalEffectiveConfig(id);
   const departure = arrivals[id]?.departure;
   if (!group || !departure) return null;
@@ -3167,8 +3253,15 @@ function arrivalChipInnerHTML(id) {
   // ("✓ Arrivée effectuée"), on affiche l'heure RÉELLE d'arrivée plutôt
   // que l'heure estimée.
   const realArrival = rec?.arrivedManually && rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
+  if (rec?.cancelled) {
+    return `
+    ${chipRestoreHTML(`Rétablir le voyage ${group.label}`)}
+    ${cancelBannerHTML()}
+    <span class="arrival-label">${escapeHtml(group.label)}</span>
+    <span class="shuttle-times shuttle-times-empty">Ne roule pas</span>`;
+  }
   return `
-    ${tripHasData(rec) ? chipDeleteHTML(`Supprimer le voyage ${group.label}`) : ''}
+    ${chipDeleteHTML(`Supprimer le voyage ${group.label} (ne roule pas)`)}
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || eta}</span>`
@@ -3315,7 +3408,8 @@ function openArrivalModal(id) {
         <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
 
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" id="btnClearArrival">🗑 Supprimer le voyage</button>
+          <button type="button" class="btn btn-outline" id="btnClearArrival">Effacer</button>
+          <button type="button" class="btn btn-outline btn-cancel-trip" id="btnCancelArrival">${arrivals[id]?.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </div>
       </form>`,
@@ -3409,12 +3503,18 @@ function openArrivalModal(id) {
         if (current.departure) pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, null, current.departure, null);
         showToast(`${group.label} mise à jour`);
       });
+      // "Effacer" : retire seulement l'heure de départ saisie.
       panel.querySelector('#btnClearArrival').addEventListener('click', () => {
-        arrivals[id] = { departure: null, arrivedManually: false, delayFlag: false, stops: null };
+        const current = arrivals[id] || {};
+        current.departure = null;
+        arrivals[id] = current;
         saveArrivals(arrivals);
         renderArrivalsBar();
         closeModal();
-        showToast(`Voyage ${group.label} supprimé`);
+        showToast(`${group.label} : heure de départ effacée`);
+      });
+      panel.querySelector('#btnCancelArrival').addEventListener('click', () => {
+        if (setArrivalCancelled(id, !arrivals[id]?.cancelled)) closeModal();
       });
     },
   });
@@ -3490,7 +3590,8 @@ function wireArrivalsBar() {
   container.addEventListener('click', (e) => {
     if (e.target.closest('#btnAddArrival')) { openAddArrivalModal(); return; }
     const btn = e.target.closest('[data-arrival-id]');
-    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); deleteArrivalTrip(btn.dataset.arrivalId); return; }
+    if (btn && e.target.closest('[data-chip-restore]')) { e.preventDefault(); setArrivalCancelled(btn.dataset.arrivalId, false); return; }
+    if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); setArrivalCancelled(btn.dataset.arrivalId, true); return; }
     if (btn) openArrivalModal(btn.dataset.arrivalId);
   });
   setInterval(updateArrivalStates, 1000);
@@ -3595,7 +3696,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
     writeLine(
       `${code} — départ ${rec.departure || '--:--'} / arrivée estimée ${eta || '--:--'}` +
-      `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''}`,
+      `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''}${rec.cancelled ? ' — SUPPRIMÉ (ne roule pas)' : ''}`,
       { size: 9.5, gap: 4.8, indent: 4 },
     );
   });
@@ -3616,7 +3717,8 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       delta = { diffMin, tone: delayTone(diffMin, DELAY_THRESHOLDS) };
     }
     const label = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key) ? `Réserve ${key}` : key;
-    writeLine(`${label} — théorique ${theoretical || '--:--'} / réel ${real || '--:--'} / écart ${pdfEcart(delta?.diffMin)}`, { size: 9.5, gap: 4.8, indent: 4 });
+    const qbCancelled = Boolean(shuttleReservesSnapshot._cancelled?.[key]);
+    writeLine(`${label} — théorique ${theoretical || '--:--'} / réel ${real || '--:--'} / écart ${pdfEcart(delta?.diffMin)}${qbCancelled ? ' — SUPPRIMÉ (ne roule pas)' : ''}`, { size: 9.5, gap: 4.8, indent: 4 });
   });
 
   // ---- Arrivées ----
@@ -3628,7 +3730,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
     const delta = computeArrivalDeltaFromRecord(rec, getArrivalEffectiveConfig(group.id));
     const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
-    const statusText = rec.arrivedManually ? 'Arrivée effectuée' : (rec.delayFlag ? '⚠ Retard / souci signalé' : 'En attente');
+    const statusText = rec.cancelled ? 'SUPPRIMÉ (ne roule pas)' : rec.arrivedManually ? 'Arrivée effectuée' : (rec.delayFlag ? '⚠ Retard / souci signalé' : 'En attente');
     writeLine(
       `${group.label} — départ ${rec.departure || '--:--'} / ETA ${eta || '--:--'}` +
       `${arrivalReal ? ` / arrivée réelle ${arrivalReal} (écart ${pdfEcart(delta?.diffMin)})` : ''} / ${statusText}`,
@@ -3777,13 +3879,15 @@ const OUTRO_DURATION_MS = 3000;
 
 function endDayCounts() {
   const todays = getTodayTrains();
-  const departed = todays.filter((t) => t.steps[t.steps.length - 1]?.real && !t.stalled).length;
-  const stalled = todays.filter((t) => t.stalled).length;
+  const cancelled = todays.filter((t) => t.cancelled).length;
+  const departed = todays.filter((t) => !t.cancelled && !t.stalled && (t.steps[t.steps.length - 1]?.real || isSlotFADeparted(t))).length;
+  const stalled = todays.filter((t) => t.stalled && !t.cancelled).length;
   return {
     trains: todays.length,
     departed,
     stalled,
-    pending: todays.length - departed - stalled,
+    cancelled,
+    pending: todays.length - departed - stalled - cancelled,
     shuttles: Object.keys(shuttles || {}).length,
     arrivals: Object.keys(arrivals || {}).length,
   };
@@ -3796,7 +3900,7 @@ function openEndDayModal() {
     title: '🌙 Clôturer la journée',
     bodyHTML: `
       <form id="endDayForm" class="stacked-form">
-        <p class="help-text">${escapeHtml(formatDateLongFR(currentDate))} — ${c.trains} train(s) : ${c.departed} parti(s), ${c.stalled} calé(s), ${c.pending} non terminé(s) · ${c.shuttles} navette(s) · ${c.arrivals} arrivée(s).</p>
+        <p class="help-text">${escapeHtml(formatDateLongFR(currentDate))} — ${c.trains} train(s) : ${c.departed} parti(s), ${c.stalled} calé(s), ${c.cancelled} supprimé(s), ${c.pending} non terminé(s) · ${c.shuttles} navette(s) · ${c.arrivals} arrivée(s).</p>
         ${c.pending > 0 ? `<p class="end-day-warning">⚠ ${c.pending} train(s) n'ont pas fini leur séquence : ils apparaîtront tels quels dans le PDF (pensez à « ⛔ Train calé » si besoin).</p>` : ''}
         <label class="checkbox-row"><input type="checkbox" id="fEndDayPdf" checked> Télécharger le PDF récap (il est archivé dans « 🗄 Archives » dans tous les cas)</label>
         <label class="checkbox-row"><input type="checkbox" id="fEndDaySheets" ${hasSheets ? 'checked' : 'disabled'}> Renvoyer les heures du jour vers Google Sheets${hasSheets ? '' : ' (non configuré)'}</label>
