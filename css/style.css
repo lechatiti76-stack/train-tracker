@@ -1635,3 +1635,56 @@ html.theme-dark .stalled-banner { background: rgba(124, 58, 237, 0.16); border-c
 .outro-end-date { margin: 0; color: #a5b4fc; }
 .outro-end-list { list-style: none; margin: 0.4rem 0; padding: 0; color: #d1fae5; display: flex; flex-direction: column; gap: 0.25rem; }
 .outro-end-hint { margin: 0.4rem 0 0.8rem; color: #cbd5e1; }
+
+/* ---------- Vignettes navettes / arrivées : texte plus lisible ----------
+   Heures et état de progression ("Partie du terminal", passages
+   intermédiaires…) en couleur de texte principale (blanc en thème sombre)
+   au lieu de la couleur de la famille, qui restait trop sombre (NL bleu
+   nuit sur fond nuit). La couleur de la famille reste sur le cadre et en
+   fond léger de l'étiquette d'état. */
+.shuttle-times { color: var(--text); }
+.shuttle-times-empty { color: var(--text-muted); font-weight: 400; }
+.shuttle-chip.state-departed .shuttle-state-label,
+.shuttle-chip.state-enroute .shuttle-state-label,
+.arrival-chip.state-departed .shuttle-state-label,
+.arrival-chip.state-enroute .shuttle-state-label {
+  color: var(--text);
+  background: color-mix(in srgb, var(--shuttle-color, var(--arrival-color)) 28%, transparent);
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+}
+.arrival-chip.state-departed .shuttle-state-label,
+.arrival-chip.state-enroute .shuttle-state-label { background: color-mix(in srgb, var(--arrival-color) 28%, transparent); }
+.shuttle-code, .quickboard-code { color: color-mix(in srgb, var(--shuttle-color) 72%, #000); }
+.arrival-label { color: color-mix(in srgb, var(--arrival-color) 72%, #000); }
+html.theme-dark .shuttle-code,
+html.theme-dark .quickboard-code,
+html.theme-dark .arrival-label { color: #fff; }
+html.theme-dark .quickboard-time { color: #fff; }
+
+/* Croix "✕ Supprimer le voyage" en haut à droite d'une vignette remplie. */
+.shuttle-chip, .arrival-chip, .quickboard-cell { position: relative; }
+.chip-delete {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.chip-delete:hover, .chip-delete:focus-visible { opacity: 1; background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+.quickboard-cell .chip-delete { top: 2px; right: 2px; width: 18px; height: 18px; }
+
+/* Train SLOT parti de l'autre site (FA) avec heure de départ saisie. */
+.status-pill.tone-departedFA { background: var(--success-bg); color: var(--success); }
