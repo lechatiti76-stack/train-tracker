@@ -211,6 +211,10 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     // étapes déjà enregistrées restent affichées — voir computeTrainStatus.
     stalled: false,
     stalledAt: null,
+    // Voyage supprimé (bouton "🚫 Supprimer le voyage") : le train ne roule
+    // pas aujourd'hui — vignette grisée avec bannière "SUPPRIMÉ".
+    cancelled: false,
+    cancelledAt: null,
     // Observation libre (bouton "📝 Observation"), reprise dans le PDF
     // récap, la copie stylée et l'email.
     observation: '',
