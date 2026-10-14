@@ -103,6 +103,9 @@ export function computeTrainStatus(train) {
   // Train déclaré "calé" (bouton "⛔ Train calé" de la vignette) : validé
   // même si la séquence n'est pas finie — l'état l'emporte sur le reste,
   // les étapes déjà faites restent affichées telles quelles.
+  // Voyage supprimé (bouton "🚫 Supprimer le voyage") : le train ne roule
+  // pas aujourd'hui — l'emporte sur tout le reste.
+  if (train.cancelled) return { label: 'SUPPRIMÉ — NE ROULE PAS', tone: 'cancelled' };
   if (train.stalled) {
     const at = train.stalledAt ? ` À ${formatHHMM(new Date(train.stalledAt))}` : '';
     return { label: `TRAIN CALÉ${at}`, tone: 'stalled' };
