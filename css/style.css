@@ -1688,3 +1688,82 @@ html.theme-dark .quickboard-time { color: #fff; }
 
 /* Train SLOT parti de l'autre site (FA) avec heure de départ saisie. */
 .status-pill.tone-departedFA { background: var(--success-bg); color: var(--success); }
+
+/* ---------- Voyage supprimé (ne roule pas) ----------
+   Vignette grisée + bannière rouge "SUPPRIMÉ" en diagonale, sur les 4
+   lignes (arrivées/départs navettes, arrivées trains, départs trains).
+   Seul le contenu est grisé : la bannière et le bouton ↺ (rétablir)
+   restent en couleur. */
+.cancel-banner {
+  position: absolute;
+  left: -30%;
+  right: -30%;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%) rotate(-14deg);
+  padding: 0.12rem 0;
+  text-align: center;
+  background: rgba(254, 226, 226, 0.94);
+  color: #dc2626;
+  border-top: 2px solid #dc2626;
+  border-bottom: 2px solid #dc2626;
+  font-family: var(--font-sans);
+  font-weight: 900;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+html.theme-dark .cancel-banner { background: rgba(48, 10, 16, 0.92); color: #f87171; border-color: #ef4444; }
+.shuttle-chip.state-cancelled,
+.arrival-chip.state-cancelled,
+.quickboard-cell.is-cancelled,
+.quick-train-btn.is-cancelled {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--border);
+  border-style: solid;
+  background: var(--surface-2);
+  box-shadow: none;
+  animation: none;
+  filter: none;
+  opacity: 1;
+}
+.shuttle-chip.state-cancelled > :not(.cancel-banner):not(.chip-delete),
+.arrival-chip.state-cancelled > :not(.cancel-banner):not(.chip-delete),
+.quickboard-cell.is-cancelled > :not(.cancel-banner):not(.chip-delete),
+.quick-train-btn.is-cancelled > :not(.cancel-banner) {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.quick-train-btn.is-cancelled,
+.quick-train-btn.has-operator-color.is-cancelled,
+.quick-train-btn.has-operator-color.btn-primary.is-cancelled {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.quick-train-btn.is-cancelled .cancel-banner { font-size: 0.6rem; transform: translateY(-50%) rotate(-12deg); }
+.quickboard-cell.is-cancelled .cancel-banner { font-size: 0.6rem; letter-spacing: 0.12em; }
+.chip-restore { color: var(--success); opacity: 1; z-index: 3; }
+.chip-restore:hover, .chip-restore:focus-visible { background: var(--success-bg); color: var(--success); border-color: var(--success); }
+.btn-cancel-trip { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.btn-cancel-trip.is-active { color: var(--success); border-color: var(--success); }
+
+/* Vignette train (départs) supprimée */
+.train-card { position: relative; }
+.card-cancel-banner { display: none; }
+.train-card.is-cancelled { overflow: hidden; background: var(--surface-2); }
+.train-card.is-cancelled .card-cancel-banner {
+  display: block;
+  left: 15%;
+  right: 15%;
+  transform: translateY(-50%) rotate(-4deg);
+  font-size: 1rem;
+  padding: 0.25rem 0;
+}
+.train-card.is-cancelled > :not(.card-cancel-banner) { filter: grayscale(1); opacity: 0.5; }
+.train-card.is-cancelled .btn-cancel-trip { filter: none; }
+.status-pill.tone-cancelled { background: var(--danger-bg); color: var(--danger); }
