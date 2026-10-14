@@ -107,6 +107,12 @@ export function computeTrainStatus(train) {
     const at = train.stalledAt ? ` À ${formatHHMM(new Date(train.stalledAt))}` : '';
     return { label: `TRAIN CALÉ${at}`, tone: 'stalled' };
   }
+  // Train SLOT parti de l'autre site (FA) avec une heure de départ saisie
+  // dans "Infos SLOT" : considéré comme parti même sans les 7 étapes.
+  const lastStepReal = train.steps[train.steps.length - 1]?.real;
+  if (!lastStepReal && train.trainType === 'slots' && train.slot?.departure === 'FA' && train.slot.departureTime) {
+    return { label: `PARTI (FA) À ${train.slot.departureTime}`, tone: 'departedFA' };
+  }
   const delays = computeAllStepDelays(train);
   let lastRecordedIndex = -1;
   for (let i = delays.length - 1; i >= 0; i--) {
