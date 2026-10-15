@@ -218,6 +218,13 @@ export function createEmptyTrain({ number, date, stepLabels, order = 0, source =
     // Observation libre (bouton "📝 Observation"), reprise dans le PDF
     // récap, la copie stylée et l'email.
     observation: '',
+    // Infos départ (ligne "⚡ Poussé sous caténaire / 🚂 N° machine / ✉ Mail
+    // reçu" de la vignette), reprises dans l'email, la copie et le PDF récap.
+    pushedCatenary: false,
+    pushedCatenaryAt: null,
+    machineNumber: '',
+    mailReceived: false,
+    mailReceivedAt: null,
     steps: Array.from({ length: STEP_COUNT }, (_, i) => ({
       key: `step${i + 1}`,
       label: stepLabels[i] || `Étape ${i + 1}`,
