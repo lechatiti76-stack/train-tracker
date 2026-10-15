@@ -1465,6 +1465,23 @@ html.theme-dark .stalled-banner { background: rgba(124, 58, 237, 0.16); border-c
 }
 #fObservation { width: 100%; min-height: 8rem; resize: vertical; font: inherit; }
 
+/* ---------- Infos départ : poussé sous caténaire / N° machine / mail reçu ---------- */
+.train-depart-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.btn-catenary.is-active { background: #0284c7; border-color: #0284c7; color: #fff; }
+.btn-mail-received { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.btn-mail-received.is-active { background: #15803d; border-color: #15803d; color: #fff; }
+.machine-field { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+.machine-input { width: 7.5rem; padding: 0.3rem 0.5rem; font: inherit; font-weight: 700; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
 /* ---------- "🌙 Journée finie" ---------- */
 .btn-endday {
   background: linear-gradient(135deg, #0f2a5f, #1d4ed8);
