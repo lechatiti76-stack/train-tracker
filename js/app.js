@@ -361,6 +361,45 @@ function toggleTrainStalled(train) {
   refreshTrainCard(train);
 }
 
+// ---------- Infos départ : poussé sous caténaire / N° machine / mail reçu ----------
+// Ligne de boutons sous "Train calé / Observation" sur chaque vignette :
+// "⚡ Poussé sous caténaire" (bascule, l'heure du clic est notée),
+// "🚂 N° machine" (saisie libre) et "✉ Mail reçu" (bascule OUI/NON, heure
+// notée). Repris dans l'email (copie stylée + texte), la copie simple et
+// le PDF récap.
+function toggleTrainCatenary(train) {
+  train.pushedCatenary = !train.pushedCatenary;
+  train.pushedCatenaryAt = train.pushedCatenary ? new Date().toISOString() : null;
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+  showToast(train.pushedCatenary ? `Train ${train.number} : poussé sous caténaire ⚡` : `Train ${train.number} : « poussé sous caténaire » annulé`);
+}
+
+function toggleTrainMailReceived(train) {
+  train.mailReceived = !train.mailReceived;
+  train.mailReceivedAt = train.mailReceived ? new Date().toISOString() : null;
+  train.updatedAt = new Date().toISOString();
+  persist();
+  refreshTrainCard(train);
+  showToast(train.mailReceived ? `Train ${train.number} : mail reçu ✉` : `Train ${train.number} : mail non reçu`);
+}
+
+// Valeurs prêtes à afficher (email / PDF) — OUI en vert, NON en gris
+// (caténaire) ou en rouge (mail non reçu).
+function trainDepartInfo(train) {
+  const at = (iso) => (iso ? formatHHMM(new Date(iso)) : '');
+  return {
+    catenary: train.pushedCatenary
+      ? { text: `OUI${train.pushedCatenaryAt ? ` à ${at(train.pushedCatenaryAt)}` : ''}`, color: '#15803d' }
+      : { text: 'NON', color: '#64748b' },
+    machine: (train.machineNumber || '').trim(),
+    mail: train.mailReceived
+      ? { text: `OUI${train.mailReceivedAt ? ` à ${at(train.mailReceivedAt)}` : ''}`, color: '#15803d' }
+      : { text: 'NON', color: '#dc2626' },
+  };
+}
+
 // "🚫 Supprimer le voyage" : le train ne roule pas aujourd'hui. La vignette
 // reste (grisée, bannière rouge "SUPPRIMÉ" en diagonale, réduite) pour
 // garder une trace dans le récap, le PDF et l'email ; un second clic
@@ -712,6 +751,13 @@ function buildTrainReportText(train, destination) {
   const slotSummary = train.trainType === 'slots' ? formatSlotSummary(train.slot) : '';
   if (slotSummary) lines.push(`🎰 SLOT : ${slotSummary}`);
 
+  if (!train.cancelled) {
+    const info = trainDepartInfo(train);
+    lines.push(`⚡ Poussé sous caténaire : ${info.catenary.text}`);
+    if (info.machine) lines.push(`🚂 N° machine : ${info.machine}`);
+    lines.push(`✉ Mail reçu : ${info.mail.text}`);
+  }
+
   if (train.observation) {
     lines.push('');
     lines.push(`📝 Observation : ${train.observation}`);
@@ -1031,6 +1077,12 @@ function buildTrainReportHTML(train, destination) {
             ${causeLabel ? summaryRow('⚠', 'Cause principale', causeLabel) : ''}
             ${compositionSummary ? summaryRow('🚃', 'Composition', escapeHtml(compositionSummary)) : ''}
             ${slotSummary ? summaryRow('🎰', 'SLOT', escapeHtml(slotSummary)) : ''}
+            ${situation.kind === 'cancelled' ? '' : (() => {
+    const info = trainDepartInfo(train);
+    return summaryRow('⚡', 'Poussé sous caténaire', `<span style="color:${info.catenary.color};">${escapeHtml(info.catenary.text)}</span>`)
+      + (info.machine ? summaryRow('🚂', 'N° machine', escapeHtml(info.machine)) : '')
+      + summaryRow('✉', 'Mail reçu', `<span style="color:${info.mail.color};">${escapeHtml(info.mail.text)}</span>`);
+  })()}
           </table>
         </td>
         <td width="12">&nbsp;</td>
@@ -1108,8 +1160,12 @@ function getTrainRecipients(number) {
   return { to, bcc };
 }
 
+// Séparateur réglable (Réglages) : la virgule est le format standard des
+// liens mailto (RFC 6068) ; le point-virgule reste proposé pour les
+// versions d'Outlook classique qui l'exigent.
 function encodeMailAddresses(list) {
-  return list.split(';').filter(Boolean).map((a) => encodeURIComponent(a).replace(/%40/g, '@')).join(';');
+  const sep = settings.mailAddressSeparator === ';' ? ';' : ',';
+  return list.split(';').filter(Boolean).map((a) => encodeURIComponent(a).replace(/%40/g, '@')).join(sep);
 }
 
 function trainMailSubject(train, destination) {
@@ -1140,17 +1196,19 @@ async function emailTrainData(train) {
   const text = buildTrainReportText(train, destination);
   const copied = await writeRichClipboard(buildTrainReportHTML(train, destination), text);
   const { to, bcc } = getTrainRecipients(train.number);
-  // Destinataires principaux passés en paramètre "to=" (comme "bcc=") plutôt
-  // que juste après "mailto:" : certaines versions d'Outlook ignoraient les
-  // adresses placées avant le "?" alors qu'elles lisaient bien la Cci.
+  // Destinataires principaux placés juste après "mailto:" (format standard,
+  // lu par toutes les versions d'Outlook — Outlook classique ignore le
+  // paramètre "to=") ; Cci en paramètre "bcc=". Séparateur : voir
+  // encodeMailAddresses.
   const params = [];
-  if (to) params.push(`to=${encodeMailAddresses(to)}`);
   if (bcc) params.push(`bcc=${encodeMailAddresses(bcc)}`);
   params.push(`subject=${encodeURIComponent(trainMailSubject(train, destination))}`);
   if (!copied) params.push(`body=${encodeURIComponent(text)}`);
-  window.location.href = `mailto:?${params.join('&')}`;
+  const href = `mailto:${to ? encodeMailAddresses(to) : ''}?${params.join('&')}`;
+  window.__lastMailto = href;
+  window.location.href = href;
   if (copied) {
-    showToast('Message stylé copié ✓ — dans Outlook, cliquez dans le corps du mail puis Ctrl+V', 'success', 7000);
+    showToast(`Message stylé copié ✓ — dans Outlook, cliquez dans le corps du mail puis Ctrl+V${to ? ` · À : ${to.split(';').join(', ')}` : ''}`, 'success', 8000);
   } else if (!to) {
     showToast('Aucun destinataire réglé pour ce train (Réglages → Trains à accès rapide)', 'error');
   }
@@ -1194,6 +1252,8 @@ function onGridClick(e) {
     case 'open-slot': openSlotModal(train); break;
     case 'toggle-stalled': toggleTrainStalled(train); break;
     case 'toggle-cancelled': toggleTrainCancelled(train); break;
+    case 'toggle-catenary': toggleTrainCatenary(train); break;
+    case 'toggle-mail-received': toggleTrainMailReceived(train); break;
     case 'open-observation': openObservationModal(train); break;
     case 'collapse-card': setCardCollapsed(train, true); break;
     case 'expand-card': setCardCollapsed(train, false); break;
@@ -1202,6 +1262,19 @@ function onGridClick(e) {
 }
 
 function wireSillonInputs(grid) {
+  grid.addEventListener('change', (e) => {
+    const input = e.target.closest('[data-role="machine-number"]');
+    if (!input) return;
+    const train = findTrain(input.closest('.train-card')?.dataset.trainId);
+    if (!train) return;
+    train.machineNumber = input.value.trim();
+    train.updatedAt = new Date().toISOString();
+    persist();
+    if (train.machineNumber) showToast(`Train ${train.number} : machine ${train.machineNumber} enregistrée`);
+  });
+  grid.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.closest('[data-role="machine-number"]')) { e.preventDefault(); e.target.blur(); }
+  });
   grid.addEventListener('change', (e) => {
     const input = e.target.closest('[data-role="sillon-time"]');
     if (!input) return;
@@ -1630,6 +1703,25 @@ function settingsBodyHTML() {
 
       <div class="steps-form-list">
         <p class="help-text">
+          Arrivées navettes — heure théorique d'arrivée de chaque navette.
+          Utilisée dans le PDF récap pour calculer le retard ou l'avance par
+          rapport à l'heure d'arrivée réelle (au lieu de l'arrivée estimée
+          départ + durée du trajet). Laissez vide pour garder l'estimation.
+        </p>
+        ${getAllShuttleGroups().map((g) => `
+          <fieldset class="shuttle-timing-fieldset" style="border-color:${escapeHtml(g.color || '#94a3b8')}">
+            <legend style="color:${escapeHtml(g.color || '#94a3b8')}">${escapeHtml(g.codes.join(', '))} — arrivée théorique</legend>
+            <div class="form-row">
+              ${g.codes.map((code) => `
+                <label>${escapeHtml(code)} — arrivée théorique
+                  <input type="time" class="sShuttleArrivalTheoretical" data-code="${escapeHtml(code)}" value="${escapeHtml(settings.shuttleArrivalTheoretical?.[code] || '')}">
+                </label>`).join('')}
+            </div>
+          </fieldset>`).join('')}
+      </div>
+
+      <div class="steps-form-list">
+        <p class="help-text">
           Tableau rapide des départs navettes (LF/LN/LA) — heure théorique de
           départ réglable navette par navette (chaque navette a son propre
           horaire), utilisée pour calculer l'écart avec l'heure réelle
@@ -1698,6 +1790,12 @@ function settingsBodyHTML() {
           </label>
           <label>👁‍🗨 Cci — par défaut (invisibles)
             <input type="text" id="sMailDefaultBcc" inputmode="email" autocomplete="off" placeholder="ex : archives@exemple.fr" value="${escapeHtml(settings.mailDefaultBcc || '')}">
+          </label>
+          <label>Séparateur des adresses envoyées à Outlook
+            <select id="sMailSeparator">
+              <option value=","${settings.mailAddressSeparator === ';' ? '' : ' selected'}>« , » virgule — standard (nouvel Outlook, Outlook Web)</option>
+              <option value=";"${settings.mailAddressSeparator === ';' ? ' selected' : ''}>« ; » point-virgule — Outlook classique</option>
+            </select>
           </label>
         </div>
         <div id="sQuickTrainsContainer" class="extra-dates"></div>
@@ -1872,6 +1970,13 @@ function openSettingsModal() {
           quickboardTimings[familyId] = input.value || null;
         });
         settings.quickboardTimings = quickboardTimings;
+
+        const shuttleArrivalTheoretical = { ...(settings.shuttleArrivalTheoretical || {}) };
+        panel.querySelectorAll('.sShuttleArrivalTheoretical').forEach((input) => {
+          shuttleArrivalTheoretical[input.dataset.code] = input.value || null;
+        });
+        settings.shuttleArrivalTheoretical = shuttleArrivalTheoretical;
+        settings.mailAddressSeparator = panel.querySelector('#sMailSeparator')?.value === ';' ? ';' : ',';
 
         settings.delayThresholds = {
           moderate: Number(panel.querySelector('#sDelayModerate').value) || null,
@@ -3877,29 +3982,43 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
   const timeColor = (e) => (e.kind === 'late' ? C.red : (e.kind === 'onTime' || e.kind === 'early') ? C.green : C.ink);
 
   // ---- 1. Arrivées Navettes (ligne 1) ----
-  sectionTitle('Arrivées Navettes', '#f59e0b', 'écart = arrivée réelle - arrivée estimée');
+  sectionTitle('Arrivées Navettes', '#f59e0b', 'écart = arrivée réelle - arrivée théorique (à défaut : estimée*)');
+  let usedEstimateFallback = false;
   if (shuttleCodes.length === 0) emptyNote('Aucune navette configurée.');
   else {
     table([
-      { title: 'NAVETTE', w: 28 }, { title: 'DÉPART', w: 24, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 30, align: 'center' },
-      { title: 'ARRIVÉE RÉELLE', w: 30, align: 'center' }, { title: 'ÉCART', w: 28, align: 'center' }, { title: 'ÉTAT', w: CW - 140 },
+      { title: 'NAVETTE', w: 22 }, { title: 'DÉPART', w: 20, align: 'center' }, { title: 'ARR. THÉORIQUE', w: 26, align: 'center' },
+      { title: 'ARR. ESTIMÉE', w: 24, align: 'center' }, { title: 'ARR. RÉELLE', w: 26, align: 'center' }, { title: 'ÉCART', w: 24, align: 'center' },
+      { title: 'ÉTAT', w: CW - 142 },
     ], shuttleCodes.map((code) => {
       const rec = shuttlesSnapshot[code] || {};
       const group = findShuttleGroup(code);
       const eta = rec.departure ? computeShuttleArrival(code, rec.departure) : null;
-      const delta = computeArrivalDeltaFromRecord(rec, group);
-      const e = delta ? pdfEcartInfo(delta.diffMin) : ecartsMuted;
+      const theo = settings.shuttleArrivalTheoretical?.[code] || '';
+      const parsedTheo = parseHHMM(theo);
+      let e = ecartsMuted;
+      let fallback = false;
+      if (rec.arrivedManually && rec.arrivedAt && parsedTheo) {
+        const arr = new Date(rec.arrivedAt);
+        const theoDate = new Date(arr.getFullYear(), arr.getMonth(), arr.getDate(), parsedTheo.h, parsedTheo.m, 0, 0);
+        e = pdfEcartInfo(diffMinutes(theoDate, arr));
+      } else {
+        const delta = computeArrivalDeltaFromRecord(rec, group);
+        if (delta) { e = pdfEcartInfo(delta.diffMin); fallback = true; usedEstimateFallback = true; }
+      }
+      if (fallback) e = { ...e, label: `${e.label}*` };
       const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
       let status;
       if (rec.cancelled) status = { cancelled: true };
       else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
-      else if (rec.departure) status = { status: { text: rec.delayFlag ? 'Partie — retard signalé' : 'Partie — arrivée non confirmée', color: rec.delayFlag ? C.red : C.amber } };
+      else if (rec.departure) status = { status: { text: rec.delayFlag ? 'Partie — retard signalé' : 'Partie, non confirmée', color: rec.delayFlag ? C.red : C.amber } };
       else status = { status: { text: 'Non partie', color: C.faint } };
       return {
         cancelled: Boolean(rec.cancelled),
         cells: [
           { chip: { color: group?.color || '#94a3b8', text: code } },
           { text: rec.departure || '--:--', bold: Boolean(rec.departure), color: rec.departure ? C.ink : C.faint },
+          { text: theo || '--:--', bold: Boolean(theo), color: theo ? C.ink : C.faint },
           { text: eta || '--:--', color: eta ? C.muted : C.faint },
           { time: { value: arrivalReal, e } },
           { pill: e },
@@ -3907,6 +4026,12 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
         ],
       };
     }));
+  }
+
+  if (usedEstimateFallback) {
+    y -= 2;
+    txt("* pas d'heure théorique réglée pour cette navette (Réglages) : écart calculé sur l'arrivée estimée (départ + durée du trajet).", M + 2, y, { size: 7, style: 'italic', color: C.muted });
+    y += 5;
   }
 
   // ---- 2. Départs Navettes (tableau rapide, ligne 2) ----
@@ -4025,7 +4150,8 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     const stepsH = showSteps ? 6 + STEP_H * train.steps.length + 3 : (train.cancelled ? 0 : 8);
     const extrasH = extras.length ? extras.length * 5 + 2 : 0;
     const obsH = obsLines.length ? 9 + obsLines.length * 4.2 + 3 : 0;
-    const cardH = train.cancelled ? HEAD + 8 + obsH : HEAD + stepsH + extrasH + obsH + 3;
+    const infoH = train.cancelled ? 0 : 12;
+    const cardH = train.cancelled ? HEAD + 8 + obsH : HEAD + stepsH + extrasH + infoH + obsH + 3;
     if (y + cardH > BOTTOM && cardH < BOTTOM - 21) newPage();
     const top = y;
     const cancelled = Boolean(train.cancelled);
@@ -4109,6 +4235,24 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
         y += 5;
       });
       y += 1;
+    }
+    if (!cancelled) {
+      // Infos départ : poussé sous caténaire / N° machine / mail reçu
+      const info = trainDepartInfo(train);
+      const cells = [
+        ['POUSSÉ SOUS CATÉNAIRE', info.catenary.text, info.catenary.color],
+        ['N° MACHINE', info.machine || '—', info.machine ? C.ink : C.faint],
+        ['MAIL REÇU', info.mail.text, info.mail.color],
+      ];
+      const gapI = 3;
+      const iw = (CW - 8 - gapI * 2) / 3;
+      cells.forEach(([k, v, col], i) => {
+        const x = M + 4 + i * (iw + gapI);
+        box(x, y, iw, 9.5, { fillColor: '#f8fafc', stroke: C.border, r: 1.5, lw: 0.25 });
+        txt(k, x + 3, y + 3.7, { size: 6.2, style: 'bold', color: C.muted });
+        txt(v, x + 3, y + 8, { size: 9, style: 'bold', color: col, maxW: iw - 6 });
+      });
+      y += 12;
     }
     if (obsLines.length) {
       const oh = 9 + obsLines.length * 4.2;
