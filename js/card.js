@@ -155,6 +155,19 @@ function lastDoneLabel(train) {
 }
 
 // Bandeau affiché en haut d'une vignette de train calé.
+// Libellés des boutons "infos départ" (poussé sous caténaire / mail reçu).
+export function catenaryButtonLabel(train) {
+  return train.pushedCatenary
+    ? `⚡ Poussé sous caténaire ✓${train.pushedCatenaryAt ? ` ${formatHHMM(new Date(train.pushedCatenaryAt))}` : ''}`
+    : '⚡ Poussé sous caténaire';
+}
+
+export function mailReceivedButtonLabel(train) {
+  return train.mailReceived
+    ? `✉ Mail reçu ✓${train.mailReceivedAt ? ` ${formatHHMM(new Date(train.mailReceivedAt))}` : ''}`
+    : '✉ Mail non reçu';
+}
+
 function stalledBannerHTML(train) {
   const at = train.stalledAt ? ` à ${formatHHMM(new Date(train.stalledAt))}` : '';
   const last = lastDoneLabel(train);
@@ -223,6 +236,13 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
             <button type="button" class="btn btn-outline btn-sm btn-stall${train.stalled ? ' is-active' : ''}" data-action="toggle-stalled" data-role="stall-btn" aria-pressed="${Boolean(train.stalled)}" title="Valider le train même si la séquence n'est pas finie (état : calé)">${train.stalled ? '⛔ Train calé ✓' : '⛔ Train calé'}</button>
             <button type="button" class="btn btn-outline btn-sm btn-observation${train.observation ? ' is-active' : ''}" data-action="open-observation" data-role="observation-btn" title="Ajouter une observation (reprise dans le PDF récap et l'email)">📝 Observation</button>
             <button type="button" class="btn btn-outline btn-sm btn-cancel-trip${train.cancelled ? ' is-active' : ''}" data-action="toggle-cancelled" data-role="cancel-btn" title="Le train ne roule pas aujourd'hui : vignette grisée et marquée « SUPPRIMÉ »">${train.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
+          </div>
+          <div class="train-depart-info" data-role="depart-info">
+            <button type="button" class="btn btn-outline btn-sm btn-catenary${train.pushedCatenary ? ' is-active' : ''}" data-action="toggle-catenary" data-role="catenary-btn" aria-pressed="${Boolean(train.pushedCatenary)}" title="Train poussé sous caténaire (l'heure est notée) — repris dans l'email et le PDF">${escapeHtml(catenaryButtonLabel(train))}</button>
+            <label class="machine-field">🚂 N° machine
+              <input type="text" class="machine-input" data-role="machine-number" value="${escapeHtml(train.machineNumber || '')}" placeholder="ex : 37042" autocomplete="off" maxlength="24">
+            </label>
+            <button type="button" class="btn btn-outline btn-sm btn-mail-received${train.mailReceived ? ' is-active' : ''}" data-action="toggle-mail-received" data-role="mailrecv-btn" aria-pressed="${Boolean(train.mailReceived)}" title="Mail reçu ou pas — repris dans l'email et le PDF">${escapeHtml(mailReceivedButtonLabel(train))}</button>
           </div>`}
         <p class="observation-preview" data-role="observation-preview" ${train.observation ? '' : 'hidden'}>📝 ${escapeHtml(train.observation || '')}</p>
 
@@ -307,6 +327,20 @@ export function updateCardDynamicParts(cardEl, train) {
     cancelBtn.classList.toggle('is-active', Boolean(train.cancelled));
     cancelBtn.textContent = train.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage';
   }
+  const catenaryBtn = cardEl.querySelector('[data-role="catenary-btn"]');
+  if (catenaryBtn) {
+    catenaryBtn.classList.toggle('is-active', Boolean(train.pushedCatenary));
+    catenaryBtn.setAttribute('aria-pressed', String(Boolean(train.pushedCatenary)));
+    catenaryBtn.textContent = catenaryButtonLabel(train);
+  }
+  const mailRecvBtn = cardEl.querySelector('[data-role="mailrecv-btn"]');
+  if (mailRecvBtn) {
+    mailRecvBtn.classList.toggle('is-active', Boolean(train.mailReceived));
+    mailRecvBtn.setAttribute('aria-pressed', String(Boolean(train.mailReceived)));
+    mailRecvBtn.textContent = mailReceivedButtonLabel(train);
+  }
+  const machineInput = cardEl.querySelector('[data-role="machine-number"]');
+  if (machineInput && document.activeElement !== machineInput) machineInput.value = train.machineNumber || '';
   const observationBtn = cardEl.querySelector('[data-role="observation-btn"]');
   if (observationBtn) observationBtn.classList.toggle('is-active', Boolean(train.observation));
   const observationPreview = cardEl.querySelector('[data-role="observation-preview"]');
