@@ -4,7 +4,7 @@
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
 import { DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals } from './storage.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart } from './storage.js';
 import { computeAllStepDelays, computeStepDelay, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM, diffMinutes, delayTone, pad2 } from './time-utils.js';
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet, pushShuttleLogToSheet } from './sheets-sync.js';
@@ -1977,6 +1977,7 @@ function openSettingsModal() {
         });
         settings.shuttleArrivalTheoretical = shuttleArrivalTheoretical;
         settings.mailAddressSeparator = panel.querySelector('#sMailSeparator')?.value === ';' ? ';' : ',';
+        recordDayTheo();
 
         settings.delayThresholds = {
           moderate: Number(panel.querySelector('#sDelayModerate').value) || null,
@@ -2198,6 +2199,7 @@ function startClock() {
       });
 
       currentDate = iso;
+      try { recordDayTheo(); } catch (err) { console.warn(err); }
       updateDateLabel();
       renderGrid();
       // Remise à zéro automatique des navettes internes à chaque changement
@@ -4373,7 +4375,7 @@ async function archivesBodyListHTML() {
       <tbody>
         ${entries.map((e) => `
           <tr>
-            <td>${escapeHtml(formatDateFR(e.date))}</td>
+            <td>${e.kind === 'stats' ? `📊 ${escapeHtml(e.title || 'Statistiques')}` : escapeHtml(formatDateFR(e.date))}</td>
             <td>${escapeHtml(archiveSizeLabel(e.size))}</td>
             <td>${e.generatedAt ? escapeHtml(formatHHMM(new Date(e.generatedAt))) : '—'}</td>
             <td><button type="button" class="btn btn-ghost" data-archive-download="${escapeHtml(e.date)}">Télécharger</button></td>
@@ -4400,7 +4402,7 @@ function openArchivesModal() {
             const url = URL.createObjectURL(entry.blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `recap-${dateISO}.pdf`;
+            a.download = entry.kind === 'stats' ? (entry.fileName || 'statistiques.pdf') : `recap-${dateISO}.pdf`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -4410,7 +4412,7 @@ function openArchivesModal() {
         container.querySelectorAll('[data-archive-delete]').forEach((btn) => {
           btn.addEventListener('click', async () => {
             const dateISO = btn.dataset.archiveDelete;
-            if (!confirm(`Supprimer l'archive du ${formatDateFR(dateISO)} ?`)) return;
+            if (!confirm(dateISO.startsWith('stats-') ? 'Supprimer ces statistiques enregistrées ?' : `Supprimer l'archive du ${formatDateFR(dateISO)} ?`)) return;
             await deleteArchivePdf(dateISO);
             refresh();
           });
@@ -4418,6 +4420,604 @@ function openArchivesModal() {
       };
       refresh();
     },
+  });
+}
+
+// ---------- "📊 Statistiques" : semaine / mois / année, par type et par voyage ----------
+// Bouton en haut de l'écran. Choix de la catégorie (Arrivées navettes,
+// Départs navettes, Arrivées trains, Départs trains), de la période (semaine,
+// mois, année — avec ◀ ▶ pour naviguer) et des voyages (un seul, ex. FL1,
+// toute une famille, ex. FL1+FL2+FL3, ou tout). Affiche des chiffres clés,
+// un graphique (nombre de voyages en avance / à l'heure / en retard /
+// supprimés par jour ou par mois), un tableau par voyage et le détail voyage
+// par voyage — même code couleur que le PDF récap. Exportable en PDF,
+// imprimable, et enregistrable dans "🗄 Archives".
+//
+// Sources : les trains sont conservés jour par jour depuis toujours
+// (STORAGE_KEYS.trains) ; navettes, départs navettes et arrivées le sont
+// depuis la mise en place de l'historique (loadDayHistory dans storage.js).
+const STATS_CATEGORIES = [
+  { id: 'shuttleArrivals', label: 'Arrivées navettes', color: '#f59e0b' },
+  { id: 'shuttleDepartures', label: 'Départs navettes', color: '#f59e0b' },
+  { id: 'trainArrivals', label: 'Arrivées trains', color: '#0ea5e9' },
+  { id: 'trainDepartures', label: 'Départs trains', color: '#1d4ed8' },
+];
+const STATS_PERIODS = [
+  { id: 'week', label: 'Semaine' },
+  { id: 'month', label: 'Mois' },
+  { id: 'year', label: 'Année' },
+];
+// Couleurs d'état (mêmes que le mail / le PDF récap) — toujours avec une
+// légende et le libellé écrit dans les tableaux.
+const STATS_STATES = [
+  { id: 'early', label: 'En avance', color: '#15803d' },
+  { id: 'onTime', label: "À l'heure", color: '#94a3b8' },
+  { id: 'late', label: 'En retard', color: '#dc2626' },
+  { id: 'cancelled', label: 'Supprimé', color: '#475569' },
+];
+
+const statsState = { category: 'shuttleArrivals', period: 'week', ref: null, selected: [], detail: true };
+let statsChart = null;
+// En thème sombre, "Supprimé" passe en gris clair (lisible sur fond foncé)
+// et "À l'heure" en gris moyen, pour garder les deux gris bien distincts.
+function statsStateColor(id) {
+  const st = STATS_STATES.find((x) => x.id === id);
+  if (computeIsDark()) {
+    if (id === 'cancelled') return '#e2e8f0';
+    if (id === 'onTime') return '#64748b';
+  }
+  return st ? st.color : '#94a3b8';
+}
+
+function isoFromDate(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function dateFromISO(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function formatDateShortFR(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function statsRange(period, refISO) {
+  const ref = dateFromISO(refISO);
+  if (period === 'week') {
+    const start = new Date(ref);
+    start.setDate(ref.getDate() - ((ref.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { from: isoFromDate(start), to: isoFromDate(end), label: `Semaine du ${formatDateFR(isoFromDate(start))} au ${formatDateFR(isoFromDate(end))}` };
+  }
+  if (period === 'month') {
+    const start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    const end = new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
+    const name = start.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    return { from: isoFromDate(start), to: isoFromDate(end), label: name.charAt(0).toUpperCase() + name.slice(1) };
+  }
+  return { from: `${ref.getFullYear()}-01-01`, to: `${ref.getFullYear()}-12-31`, label: `Année ${ref.getFullYear()}` };
+}
+
+function shiftStatsRef(period, refISO, dir) {
+  const d = dateFromISO(refISO);
+  if (period === 'week') d.setDate(d.getDate() + 7 * dir);
+  else if (period === 'month') { d.setDate(1); d.setMonth(d.getMonth() + dir); }
+  else d.setFullYear(d.getFullYear() + dir);
+  return isoFromDate(d);
+}
+
+// Barres du graphique : un par jour (semaine, mois) ou par mois (année).
+function statsBuckets(period, range) {
+  if (period === 'year') {
+    const year = Number(range.from.slice(0, 4));
+    return Array.from({ length: 12 }, (_, i) => {
+      const label = new Date(year, i, 1).toLocaleDateString('fr-FR', { month: 'short' });
+      return { key: `${year}-${pad2(i + 1)}`, label: label.replace('.', '') };
+    });
+  }
+  const out = [];
+  const d = dateFromISO(range.from);
+  const end = dateFromISO(range.to);
+  while (d <= end) {
+    const iso = isoFromDate(d);
+    out.push({
+      key: iso,
+      label: period === 'week'
+        ? d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }).replace('.', '')
+        : String(d.getDate()),
+    });
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+function statsStateFromDiff(diffMin) {
+  if (diffMin === null || diffMin === undefined) return 'unknown';
+  if (Math.abs(diffMin) < DELAY_THRESHOLDS.onTime) return 'onTime';
+  return diffMin < 0 ? 'early' : 'late';
+}
+
+function hhmmOnDate(dateObj, hhmm) {
+  const p = parseHHMM(hhmm);
+  if (!p) return null;
+  return new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), p.h, p.m, 0, 0);
+}
+
+function addMinutesHHMM(hhmm, minutes) {
+  const p = parseHHMM(hhmm);
+  if (!p) return null;
+  return formatHHMM(new Date(new Date(2000, 0, 1, p.h, p.m, 0, 0).getTime() + (Number(minutes) || 0) * 60000));
+}
+
+// Groupes / voyages sélectionnables pour une catégorie.
+function statsItemGroups(category, rows) {
+  if (category === 'shuttleArrivals') {
+    return getAllShuttleGroups().map((g) => ({ id: g.id, label: g.label || g.id, color: g.color || '#94a3b8', items: g.codes.map((c) => ({ key: c, label: c })) }));
+  }
+  if (category === 'shuttleDepartures') {
+    return SHUTTLE_QUICKBOARD_GROUPS.map((g) => ({ id: g.id, label: g.id, color: g.color, items: [...g.codes.map((c) => ({ key: c, label: c })), { key: g.id, label: `Réserve ${g.id}` }] }));
+  }
+  if (category === 'trainArrivals') {
+    return [{ id: 'arrivals', label: 'Toutes les arrivées', color: '#0ea5e9', items: getAllArrivalGroups().map((g) => ({ key: g.id, label: g.label, color: g.color })) }];
+  }
+  const numbers = new Set((settings.quickTrains || []).map((t) => t.number).filter(Boolean));
+  rows.forEach((r) => numbers.add(r.key));
+  return [{ id: 'trains', label: 'Tous les trains', color: '#1d4ed8', items: [...numbers].sort().map((n) => ({ key: n, label: n })) }];
+}
+
+// Une ligne par voyage effectué (ou supprimé) sur la période :
+// { date, key, label, color, theo, theoKind, real, diffMin, state, extra }.
+function collectStatsRows(category, range) {
+  const rows = [];
+  if (category === 'trainDepartures') {
+    trains
+      .filter((t) => t.date >= range.from && t.date <= range.to)
+      .forEach((t) => {
+        const delays = computeAllStepDelays(t);
+        const lastIndex = t.steps.length - 1;
+        const last = delays[lastIndex];
+        let state;
+        let diffMin = null;
+        let real = last?.realDate ? formatHHMM(last.realDate) : '';
+        if (t.cancelled) state = 'cancelled';
+        else if (t.stalled) state = 'stalled';
+        else if (last?.status === 'recorded') { diffMin = last.diffMin; state = statsStateFromDiff(diffMin); }
+        else if (isSlotFADeparted(t)) { state = 'departedFA'; real = t.slot.departureTime; }
+        else if (last?.realDate) state = 'unknown';
+        else state = 'pending';
+        const cause = computeMainCause(t);
+        const info = trainDepartInfo(t);
+        rows.push({
+          date: t.date,
+          key: t.number,
+          label: t.number,
+          color: '#1d4ed8',
+          theo: t.steps[lastIndex]?.theoretical || '',
+          theoKind: 'theo',
+          real,
+          diffMin,
+          state,
+          extra: {
+            destination: getQuickTrainDestination(t.number) || '',
+            cause: delays.some((d) => d.realDate) && cause.cause && !t.cancelled ? `${cause.cause}${cause.amountLabel && cause.amountLabel !== '--' ? ` (${cause.amountLabel})` : ''}` : '',
+            machine: info.machine,
+            catenary: t.cancelled ? '' : info.catenary.text,
+            mail: t.cancelled ? '' : info.mail.text,
+            stepDiffs: delays.map((d) => (d.status === 'recorded' ? d.diffMin : null)),
+            stepLabels: t.steps.map((s) => s.label),
+          },
+        });
+      });
+    return rows.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
+  }
+
+  const days = loadDayHistory(range.from, range.to);
+  // Aujourd'hui : toujours l'état en mémoire (le plus à jour).
+  if (currentDate >= range.from && currentDate <= range.to) {
+    const idx = days.findIndex((d) => d.date === currentDate);
+    const live = { ...(idx >= 0 ? days[idx] : {}), date: currentDate, shuttles, reserves: shuttleReserves, arrivals };
+    if (idx >= 0) days[idx] = live; else days.push(live);
+  }
+
+  days.forEach((day) => {
+    const dayDate = dateFromISO(day.date);
+    if (category === 'shuttleArrivals') {
+      Object.entries(day.shuttles || {}).forEach(([code, rec]) => {
+        if (!rec || (!rec.departure && !rec.cancelled && !rec.arrivedManually)) return;
+        const group = findShuttleGroup(code);
+        const theo = day.theo?.shuttleArrival?.[code] ?? settings.shuttleArrivalTheoretical?.[code] ?? '';
+        const eta = rec.departure && group ? addMinutesHHMM(rec.departure, group.offsetMinutes) : '';
+        const ref = theo || eta;
+        let state;
+        let diffMin = null;
+        let real = '';
+        if (rec.cancelled) state = 'cancelled';
+        else if (rec.arrivedManually && rec.arrivedAt) {
+          const arr = new Date(rec.arrivedAt);
+          real = formatHHMM(arr);
+          const refDate = ref ? hhmmOnDate(arr, ref) : null;
+          if (refDate) { diffMin = diffMinutes(refDate, arr); state = statsStateFromDiff(diffMin); } else state = 'unknown';
+        } else state = 'unconfirmed';
+        rows.push({ date: day.date, key: code, label: code, color: group?.color || '#94a3b8', theo: ref, theoKind: theo ? 'theo' : 'eta', real, diffMin, state, extra: { departure: rec.departure || '' } });
+      });
+    } else if (category === 'shuttleDepartures') {
+      const res = day.reserves || {};
+      const cancelledMap = res._cancelled || {};
+      [...SHUTTLE_QUICKBOARD_CODES, ...SHUTTLE_QUICKBOARD_RESERVE_FAMILIES].forEach((key) => {
+        const isReserve = SHUTTLE_QUICKBOARD_RESERVE_FAMILIES.includes(key);
+        const real = res[key] || '';
+        const cancelled = Boolean(cancelledMap[key]);
+        const theo = day.theo?.quickboard?.[key] ?? settings.quickboardTimings?.[key] ?? '';
+        if (!real && !cancelled && (isReserve || !theo || !day.reserves)) return;
+        let state;
+        let diffMin = null;
+        if (cancelled) state = 'cancelled';
+        else if (real && theo) {
+          const t = hhmmOnDate(dayDate, theo);
+          const r = hhmmOnDate(dayDate, real);
+          diffMin = t && r ? diffMinutes(t, r) : null;
+          state = statsStateFromDiff(diffMin);
+        } else if (real) state = 'unknown';
+        else state = 'missing';
+        rows.push({ date: day.date, key, label: isReserve ? `Réserve ${key}` : key, color: quickboardGroupOf(key)?.color || '#94a3b8', theo, theoKind: 'theo', real, diffMin, state, extra: {} });
+      });
+    } else if (category === 'trainArrivals') {
+      Object.entries(day.arrivals || {}).forEach(([id, rec]) => {
+        if (!rec || (!rec.departure && !rec.cancelled && !rec.arrivedManually)) return;
+        const group = findArrivalGroup(id);
+        if (!group) return;
+        const eta = rec.departure ? addMinutesHHMM(rec.departure, group.offsetMinutes) : '';
+        let state;
+        let diffMin = null;
+        let real = '';
+        if (rec.cancelled) state = 'cancelled';
+        else if (rec.arrivedManually && rec.arrivedAt) {
+          const arr = new Date(rec.arrivedAt);
+          real = formatHHMM(arr);
+          const refDate = eta ? hhmmOnDate(arr, eta) : null;
+          if (refDate) { diffMin = diffMinutes(refDate, arr); state = statsStateFromDiff(diffMin); } else state = 'unknown';
+        } else state = rec.delayFlag ? 'flagged' : 'unconfirmed';
+        rows.push({ date: day.date, key: id, label: group.label, color: group.color || '#94a3b8', theo: eta, theoKind: 'eta', real, diffMin, state, extra: { departure: rec.departure || '' } });
+      });
+    }
+  });
+  return rows.sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
+}
+
+const STATS_STATE_LABELS = {
+  early: 'En avance', onTime: "À l'heure", late: 'En retard', cancelled: 'Supprimé', stalled: 'Calé',
+  departedFA: 'Parti (FA)', pending: 'Non terminé', unconfirmed: 'Arrivée non confirmée', missing: 'Non parti',
+  flagged: 'Retard signalé', unknown: 'Sans référence',
+};
+const STATS_STATE_COLORS = {
+  early: '#15803d', onTime: '#64748b', late: '#dc2626', cancelled: '#dc2626', stalled: '#7c3aed',
+  departedFA: '#15803d', pending: '#d97706', unconfirmed: '#d97706', missing: '#94a3b8', flagged: '#dc2626', unknown: '#94a3b8',
+};
+
+function summarizeStatsRows(rows) {
+  const s = { total: rows.length, early: 0, onTime: 0, late: 0, cancelled: 0, stalled: 0, other: 0, measured: 0, sumDiff: 0, sumLate: 0, maxLate: null, maxEarly: null };
+  rows.forEach((r) => {
+    if (r.state === 'early' || r.state === 'onTime' || r.state === 'late') {
+      s[r.state] += 1;
+      s.measured += 1;
+      s.sumDiff += r.diffMin;
+      if (r.state === 'late') { s.sumLate += r.diffMin; s.maxLate = Math.max(s.maxLate ?? r.diffMin, r.diffMin); }
+      if (r.state === 'early') s.maxEarly = Math.min(s.maxEarly ?? r.diffMin, r.diffMin);
+    } else if (r.state === 'cancelled') s.cancelled += 1;
+    else if (r.state === 'stalled') s.stalled += 1;
+    else s.other += 1;
+  });
+  s.avgDiff = s.measured ? Math.round(s.sumDiff / s.measured) : null;
+  s.avgLate = s.late ? Math.round(s.sumLate / s.late) : null;
+  s.punctuality = s.measured ? Math.round(((s.early + s.onTime) / s.measured) * 100) : null;
+  return s;
+}
+
+function statsDiffLabel(diffMin) {
+  if (diffMin === null || diffMin === undefined) return '—';
+  if (Math.abs(diffMin) < DELAY_THRESHOLDS.onTime) return '0 min';
+  return `${diffMin > 0 ? '+' : '-'}${pad2(diffMin)} min`;
+}
+
+// Calcule tout le rapport (utilisé par l'écran ET par le PDF).
+function buildStatsReport() {
+  const range = statsRange(statsState.period, statsState.ref);
+  const category = STATS_CATEGORIES.find((c) => c.id === statsState.category);
+  const allRows = collectStatsRows(statsState.category, range);
+  const groups = statsItemGroups(statsState.category, allRows);
+  const selected = new Set(statsState.selected);
+  const rows = selected.size ? allRows.filter((r) => selected.has(r.key)) : allRows;
+  const buckets = statsBuckets(statsState.period, range).map((b) => {
+    const inBucket = rows.filter((r) => (statsState.period === 'year' ? r.date.slice(0, 7) === b.key : r.date === b.key));
+    const counts = {};
+    STATS_STATES.forEach((st) => { counts[st.id] = inBucket.filter((r) => r.state === st.id).length; });
+    return { ...b, counts };
+  });
+  const itemOrder = groups.flatMap((g) => g.items.map((i) => i.key));
+  const byItemMap = new Map();
+  rows.forEach((r) => {
+    if (!byItemMap.has(r.key)) byItemMap.set(r.key, { key: r.key, label: r.label, color: r.color, rows: [] });
+    byItemMap.get(r.key).rows.push(r);
+  });
+  const byItem = [...byItemMap.values()]
+    .sort((a, b) => (itemOrder.indexOf(a.key) - itemOrder.indexOf(b.key)) || a.label.localeCompare(b.label))
+    .map((it) => ({ ...it, summary: summarizeStatsRows(it.rows) }));
+  let stepStats = null;
+  if (statsState.category === 'trainDepartures' && rows.length) {
+    const labels = rows[0].extra.stepLabels || [];
+    stepStats = labels.map((label, i) => {
+      const diffs = rows.map((r) => r.extra.stepDiffs?.[i]).filter((v) => v !== null && v !== undefined);
+      return {
+        label,
+        count: diffs.length,
+        avg: diffs.length ? Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length) : null,
+        late: diffs.filter((v) => v >= DELAY_THRESHOLDS.onTime).length,
+        max: diffs.length ? Math.max(...diffs) : null,
+      };
+    });
+  }
+  const selectionLabel = selected.size
+    ? groups.flatMap((g) => g.items).filter((i) => selected.has(i.key)).map((i) => i.label).join(', ')
+    : 'Tous';
+  return { range, category, groups, rows, buckets, byItem, stepStats, summary: summarizeStatsRows(rows), selectionLabel, period: statsState.period };
+}
+
+// ---- Écran ----
+function statsPillHTML(row) {
+  if (row.state === 'cancelled') return '<span class="stats-pill stats-pill--cancelled">SUPPRIMÉ</span>';
+  if (row.diffMin === null || row.diffMin === undefined) return '<span class="stats-pill stats-pill--none">—</span>';
+  return `<span class="stats-pill stats-pill--${row.state}">${escapeHtml(statsDiffLabel(row.diffMin))}</span>`;
+}
+
+function statsTimeHTML(value, state) {
+  if (!value) return '<span class="stats-time stats-time--empty">--:--</span>';
+  const cls = state === 'late' ? 'late' : (state === 'early' || state === 'onTime' || state === 'departedFA') ? 'ok' : 'neutral';
+  return `<span class="stats-time stats-time--${cls}">${escapeHtml(value)}</span>`;
+}
+
+function statsBodyHTML(report) {
+  const { summary: s, category } = report;
+  const isTrains = statsState.category === 'trainDepartures';
+  const selected = new Set(statsState.selected);
+  const kpis = [
+    { label: 'VOYAGES', value: String(s.total), color: 'var(--text)' },
+    { label: 'PONCTUALITÉ', value: s.punctuality === null ? '—' : `${s.punctuality} %`, color: s.punctuality === null ? '#94a3b8' : s.punctuality >= 90 ? '#15803d' : s.punctuality >= 75 ? '#d97706' : '#dc2626' },
+    { label: 'EN AVANCE', value: String(s.early), color: '#15803d' },
+    { label: "À L'HEURE", value: String(s.onTime), color: '#64748b' },
+    { label: 'EN RETARD', value: String(s.late), color: s.late ? '#dc2626' : '#15803d' },
+    { label: 'RETARD MOYEN', value: s.avgLate === null ? '—' : `+${pad2(s.avgLate)} min`, color: '#dc2626' },
+    { label: 'RETARD MAX', value: s.maxLate === null ? '—' : `+${pad2(s.maxLate)} min`, color: '#dc2626' },
+    { label: 'SUPPRIMÉS', value: String(s.cancelled), color: s.cancelled ? '#dc2626' : '#64748b' },
+  ];
+  if (isTrains) kpis.splice(7, 0, { label: 'CALÉS', value: String(s.stalled), color: '#7c3aed' });
+  const refLabel = statsState.category === 'shuttleArrivals' ? 'Théorique / estimée*' : statsState.category === 'trainArrivals' ? 'Arrivée estimée' : 'Théorique';
+
+  return `
+    <div class="stats-kpis">${kpis.map((k) => `<div class="stats-kpi" style="--kpi-color:${k.color}"><span>${escapeHtml(k.label)}</span><strong>${escapeHtml(k.value)}</strong></div>`).join('')}</div>
+    ${s.total === 0 ? `<p class="stats-empty">Aucun voyage enregistré pour cette sélection sur cette période.${statsState.category === 'trainDepartures' ? '' : " L'historique des navettes et des arrivées est conservé jour par jour depuis cette version de l'application."}</p>` : `
+    <div class="stats-chart-card">
+      <div class="stats-chart-head">
+        <h3>${escapeHtml(category.label)} — voyages par ${report.period === 'year' ? 'mois' : 'jour'}</h3>
+        <div class="stats-legend">${STATS_STATES.map((st) => `<span><i style="background:${statsStateColor(st.id)}"></i>${escapeHtml(st.label)}</span>`).join('')}</div>
+      </div>
+      <div class="stats-chart-holder"><canvas id="statsChart" aria-label="Graphique des voyages par état"></canvas></div>
+    </div>
+    <h3 class="stats-h3">Par voyage</h3>
+    <div class="stats-table-wrap"><table class="stats-table">
+      <thead><tr><th>Voyage</th><th>Voyages</th><th>En avance</th><th>À l'heure</th><th>En retard</th><th>Supprimés</th>${isTrains ? '<th>Calés</th>' : ''}<th>Écart moyen</th><th>Retard max</th><th>Ponctualité</th></tr></thead>
+      <tbody>${report.byItem.map((it) => `
+        <tr>
+          <td><span class="stats-dot" style="background:${escapeHtml(it.color)}"></span><strong>${escapeHtml(it.label)}</strong></td>
+          <td>${it.summary.total}</td><td class="c-early">${it.summary.early}</td><td>${it.summary.onTime}</td><td class="c-late">${it.summary.late}</td><td>${it.summary.cancelled}</td>${isTrains ? `<td>${it.summary.stalled}</td>` : ''}
+          <td>${it.summary.avgDiff === null ? '—' : statsPillHTML({ state: statsStateFromDiff(it.summary.avgDiff), diffMin: it.summary.avgDiff })}</td>
+          <td>${it.summary.maxLate === null ? '—' : `<span class="c-late">+${pad2(it.summary.maxLate)} min</span>`}</td>
+          <td>${it.summary.punctuality === null ? '—' : `${it.summary.punctuality} %`}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>
+    ${report.stepStats ? `
+    <h3 class="stats-h3">Écart moyen par étape</h3>
+    <div class="stats-table-wrap"><table class="stats-table">
+      <thead><tr><th>Étape</th><th>Mesures</th><th>Écart moyen</th><th>En retard</th><th>Retard max</th></tr></thead>
+      <tbody>${report.stepStats.map((st) => `
+        <tr><td><strong>${escapeHtml(st.label)}</strong></td><td>${st.count}</td>
+        <td>${st.avg === null ? '—' : statsPillHTML({ state: statsStateFromDiff(st.avg), diffMin: st.avg })}</td>
+        <td class="${st.late ? 'c-late' : ''}">${st.late}</td><td>${st.max === null || st.max <= 0 ? '—' : `<span class="c-late">+${pad2(st.max)} min</span>`}</td></tr>`).join('')}</tbody>
+    </table></div>` : ''}
+    <div class="stats-detail-head">
+      <h3 class="stats-h3">Détail voyage par voyage (${report.rows.length})</h3>
+      <label class="checkbox-row"><input type="checkbox" id="statsDetailPdf" ${statsState.detail ? 'checked' : ''}> Inclure le détail dans le PDF</label>
+    </div>
+    <div class="stats-table-wrap stats-table-wrap--detail"><table class="stats-table">
+      <thead><tr><th>Date</th><th>Voyage</th>${statsState.category.endsWith('Arrivals') ? '<th>Départ</th>' : ''}<th>${escapeHtml(refLabel)}</th><th>Réel</th><th>Écart</th><th>État</th>${isTrains ? '<th>Cause</th><th>Machine</th><th>Caténaire</th><th>Mail reçu</th>' : ''}</tr></thead>
+      <tbody>${report.rows.map((r) => `
+        <tr class="${r.state === 'cancelled' ? 'is-cancelled' : ''}">
+          <td>${escapeHtml(formatDateShortFR(r.date))}</td>
+          <td><span class="stats-dot" style="background:${escapeHtml(r.color)}"></span><strong>${escapeHtml(r.label)}</strong>${isTrains && r.extra.destination ? ` <small>» ${escapeHtml(r.extra.destination)}</small>` : ''}</td>
+          ${statsState.category.endsWith('Arrivals') ? `<td>${escapeHtml(r.extra.departure || '--:--')}</td>` : ''}
+          <td>${escapeHtml(r.theo || '--:--')}${r.theoKind === 'eta' && statsState.category === 'shuttleArrivals' && r.theo ? '*' : ''}</td>
+          <td>${statsTimeHTML(r.real, r.state)}</td>
+          <td>${statsPillHTML(r)}</td>
+          <td style="color:${STATS_STATE_COLORS[r.state] || '#64748b'};font-weight:700">${escapeHtml(STATS_STATE_LABELS[r.state] || '')}</td>
+          ${isTrains ? `<td>${escapeHtml(r.extra.cause || '')}</td><td>${escapeHtml(r.extra.machine || '—')}</td><td>${escapeHtml(r.extra.catenary || '')}</td><td class="${r.extra.mail === 'NON' ? 'c-late' : 'c-early'}">${escapeHtml(r.extra.mail || '')}</td>` : ''}
+        </tr>`).join('')}</tbody>
+    </table></div>
+    ${statsState.category === 'shuttleArrivals' ? '<p class="help-text">* pas d\'heure théorique réglée pour cette navette (Réglages) : écart calculé sur l\'arrivée estimée (départ + durée du trajet).</p>' : ''}`}
+    <p class="help-text">Sélection : ${escapeHtml(report.selectionLabel)}.</p>`;
+}
+
+function renderStatsChart(panel, report) {
+  if (statsChart) { try { statsChart.destroy(); } catch (e) { /* ignore */ } statsChart = null; }
+  const canvas = panel.querySelector('#statsChart');
+  if (!canvas || !window.Chart) return;
+  const dark = computeIsDark();
+  const ink = dark ? '#cbd5e1' : '#5b6577';
+  const grid = dark ? 'rgba(148,163,184,0.15)' : 'rgba(15,42,95,0.08)';
+  statsChart = new window.Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: report.buckets.map((b) => b.label),
+      datasets: STATS_STATES.map((st) => ({
+        label: st.label,
+        data: report.buckets.map((b) => b.counts[st.id]),
+        backgroundColor: statsStateColor(st.id),
+        borderColor: dark ? '#131c30' : '#ffffff',
+        borderWidth: { top: 2, bottom: 0, left: 0, right: 0 },
+        borderRadius: 3,
+        borderSkipped: 'bottom',
+        maxBarThickness: 28,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { footer: (items) => `Total : ${items.reduce((a, i) => a + (i.parsed.y || 0), 0)} voyage(s)` } },
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { color: ink, autoSkip: true, maxRotation: 0 } },
+        y: { stacked: true, beginAtZero: true, grid: { color: grid }, ticks: { color: ink, precision: 0 }, title: { display: true, text: 'Voyages', color: ink } },
+      },
+    },
+  });
+}
+
+function statsControlsHTML(report) {
+  const selected = new Set(statsState.selected);
+  return `
+    <div class="stats-toolbar">
+      <div class="stats-seg" role="group" aria-label="Catégorie">
+        ${STATS_CATEGORIES.map((c) => `<button type="button" class="stats-seg-btn${c.id === statsState.category ? ' is-active' : ''}" data-stats-category="${c.id}" style="--seg-color:${c.color}">${escapeHtml(c.label)}</button>`).join('')}
+      </div>
+      <div class="stats-period">
+        <div class="stats-seg" role="group" aria-label="Période">
+          ${STATS_PERIODS.map((p) => `<button type="button" class="stats-seg-btn${p.id === statsState.period ? ' is-active' : ''}" data-stats-period="${p.id}">${p.label}</button>`).join('')}
+        </div>
+        <button type="button" class="icon-btn" data-stats-shift="-1" aria-label="Période précédente">◀</button>
+        <strong class="stats-range-label">${escapeHtml(report.range.label)}</strong>
+        <button type="button" class="icon-btn" data-stats-shift="1" aria-label="Période suivante">▶</button>
+        <input type="date" class="stats-ref-input" value="${escapeHtml(statsState.ref)}" aria-label="Choisir une date">
+      </div>
+    </div>
+    <div class="stats-items">
+      <button type="button" class="stats-chip${selected.size === 0 ? ' is-active' : ''}" data-stats-all>Tout</button>
+      ${report.groups.map((g) => {
+    const keys = g.items.map((i) => i.key);
+    const allIn = keys.length > 0 && keys.every((k) => selected.has(k));
+    return `<span class="stats-item-group">
+          ${report.groups.length > 1 ? `<button type="button" class="stats-chip stats-chip--group${allIn ? ' is-active' : ''}" data-stats-group="${escapeHtml(g.id)}" style="--chip-color:${escapeHtml(g.color)}">Toutes ${escapeHtml(g.label)}</button>` : ''}
+          ${g.items.map((i) => `<button type="button" class="stats-chip${selected.has(i.key) ? ' is-active' : ''}" data-stats-item="${escapeHtml(i.key)}" style="--chip-color:${escapeHtml(i.color || g.color)}">${escapeHtml(i.label)}</button>`).join('')}
+        </span>`;
+  }).join('')}
+    </div>
+    <div class="stats-actions">
+      <button type="button" class="btn btn-primary" data-stats-export>📄 Exporter PDF</button>
+      <button type="button" class="btn btn-outline" data-stats-print>🖨 Imprimer</button>
+      <button type="button" class="btn btn-outline" data-stats-save>💾 Enregistrer (Archives)</button>
+    </div>`;
+}
+
+function openStatsModal() {
+  if (!statsState.ref) statsState.ref = currentDate;
+  openModal({
+    title: '📊 Statistiques',
+    wide: true,
+    bodyHTML: '<div id="statsRoot" class="stats-root"></div>',
+    onMount: (panel) => {
+      panel.classList.add('modal-stats');
+      const root = panel.querySelector('#statsRoot');
+      let report = null;
+      const render = () => {
+        report = buildStatsReport();
+        root.innerHTML = `${statsControlsHTML(report)}<div class="stats-body">${statsBodyHTML(report)}</div>`;
+        renderStatsChart(root, report);
+      };
+      root.addEventListener('click', async (e) => {
+        const t = e.target.closest('button');
+        if (!t) return;
+        if (t.dataset.statsCategory) { statsState.category = t.dataset.statsCategory; statsState.selected = []; render(); return; }
+        if (t.dataset.statsPeriod) { statsState.period = t.dataset.statsPeriod; statsState.detail = statsState.period !== 'year'; render(); return; }
+        if (t.dataset.statsShift) { statsState.ref = shiftStatsRef(statsState.period, statsState.ref, Number(t.dataset.statsShift)); render(); return; }
+        if (t.hasAttribute('data-stats-all')) { statsState.selected = []; render(); return; }
+        if (t.dataset.statsGroup) {
+          const g = report.groups.find((x) => x.id === t.dataset.statsGroup);
+          const keys = g ? g.items.map((i) => i.key) : [];
+          const sel = new Set(statsState.selected);
+          const allIn = keys.every((k) => sel.has(k));
+          keys.forEach((k) => (allIn ? sel.delete(k) : sel.add(k)));
+          statsState.selected = [...sel];
+          render();
+          return;
+        }
+        if (t.dataset.statsItem) {
+          const sel = new Set(statsState.selected);
+          if (sel.has(t.dataset.statsItem)) sel.delete(t.dataset.statsItem); else sel.add(t.dataset.statsItem);
+          statsState.selected = [...sel];
+          render();
+          return;
+        }
+        if (t.hasAttribute('data-stats-export')) { exportStatsPdf(report, 'download'); return; }
+        if (t.hasAttribute('data-stats-print')) { exportStatsPdf(report, 'print'); return; }
+        if (t.hasAttribute('data-stats-save')) { exportStatsPdf(report, 'save'); }
+      });
+      root.addEventListener('change', (e) => {
+        if (e.target.classList.contains('stats-ref-input') && e.target.value) { statsState.ref = e.target.value; render(); }
+        if (e.target.id === 'statsDetailPdf') statsState.detail = e.target.checked;
+      });
+      render();
+    },
+  });
+}
+
+function statsFileSlug(report) {
+  const sel = report.selectionLabel === 'Tous' ? 'tous' : report.selectionLabel.replace(/[^A-Za-z0-9]+/g, '-').slice(0, 40);
+  return `stats-${report.category.id}-${report.period}-${report.range.from}-${sel}`.toLowerCase();
+}
+
+async function exportStatsPdf(report, mode) {
+  const doc = buildStatsPdfDoc(report, { includeDetail: statsState.detail });
+  if (!doc) {
+    showToast('Génération PDF indisponible (bibliothèque non chargée — vérifiez la connexion réseau au premier chargement)', 'error');
+    return;
+  }
+  const slug = statsFileSlug(report);
+  if (mode === 'download') { doc.save(`${slug}.pdf`); showToast('PDF des statistiques téléchargé ✓'); return; }
+  if (mode === 'save') {
+    try {
+      const title = `${report.category.label} — ${report.range.label} — ${report.selectionLabel}`;
+      await saveArchivePdf(`stats-${Date.now()}`, doc.output('blob'), { kind: 'stats', title, fileName: `${slug}.pdf` });
+      showToast('Statistiques enregistrées dans « 🗄 Archives » ✓');
+    } catch (err) {
+      console.warn(err);
+      showToast("Enregistrement impossible sur cet appareil", 'error');
+    }
+    return;
+  }
+  // Impression : le PDF est chargé dans un cadre invisible puis la fenêtre
+  // d'impression du navigateur s'ouvre ; à défaut, ouverture dans un onglet.
+  if (typeof doc.autoPrint === 'function') doc.autoPrint();
+  const url = URL.createObjectURL(doc.output('blob'));
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  frame.src = url;
+  frame.onload = () => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (err) { window.open(url, '_blank'); }
+    setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000);
+  };
+  document.body.appendChild(frame);
+  showToast("Ouverture de l'impression…");
+}
+
+// Heures théoriques en vigueur ce jour-là, gardées avec l'historique du jour
+// (voir recordDayPart dans storage.js) pour que les statistiques passées
+// restent justes même si les réglages changent ensuite.
+function recordDayTheo() {
+  recordDayPart(currentDate, 'theo', {
+    shuttleArrival: { ...(settings.shuttleArrivalTheoretical || {}) },
+    quickboard: { ...(settings.quickboardTimings || {}) },
   });
 }
 
@@ -4652,6 +5252,9 @@ function wireHeaderButtons() {
   // openArchivesModal ci-dessus.
   const archivesBtn = el('btnArchives');
   if (archivesBtn) archivesBtn.addEventListener('click', openArchivesModal);
+  // Bouton "📊 Statistiques" — voir openStatsModal ci-dessus.
+  const statsBtn = el('btnStats');
+  if (statsBtn) statsBtn.addEventListener('click', openStatsModal);
 }
 
 // Une PWA installée peut rester "suspendue" en arrière-plan pendant des
@@ -4885,6 +5488,7 @@ function init() {
   renderGrid();
   startClock();
   pruneOldArchives().catch(() => {});
+  try { recordDayTheo(); } catch (err) { console.warn(err); }
 
   const grid = el('trainsGrid');
   grid.addEventListener('click', onGridClick);
