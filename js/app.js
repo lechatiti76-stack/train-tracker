@@ -4097,7 +4097,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
       let status;
       if (rec.cancelled) status = { cancelled: true };
-      else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivé en retard' : 'Arrivé', color: e.kind === 'late' ? C.red : C.green } };
+      else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
       else if (rec.delayFlag) status = { status: { text: 'Retard signalé', color: C.red } };
       else if (rec.departure) status = { status: { text: 'En route', color: C.amber } };
       else status = { status: { text: 'En attente', color: C.faint } };
