@@ -5011,6 +5011,337 @@ async function exportStatsPdf(report, mode) {
   showToast("Ouverture de l'impression…");
 }
 
+// ---- PDF des statistiques (même présentation que le PDF récap) ----
+function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
+  if (!window.jspdf || !window.jspdf.jsPDF) return null;
+  const { jsPDF } = window.jspdf;
+  const isTrains = report.category.id === 'trainDepartures';
+  const isArrivals = report.category.id.endsWith('Arrivals');
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: isTrains ? 'landscape' : 'portrait' });
+  const PAGE_W = doc.internal.pageSize.getWidth();
+  const PAGE_H = doc.internal.pageSize.getHeight();
+  const M = 12;
+  const CW = PAGE_W - 2 * M;
+  const BOTTOM = PAGE_H - 16;
+  const PT = 0.3528;
+  const C = {
+    ink: '#0f2a5f', text: '#1f2937', muted: '#5b6577', faint: '#94a3b8', border: '#d7dce6', line: '#eef1f6',
+    accent: '#1d4ed8', headBg: '#f6f8fc', bandBg: '#eef4ff', green: '#15803d', red: '#dc2626', purple: '#7c3aed',
+    amber: '#d97706', greyBg: '#f1f5f9',
+  };
+  let y = M;
+  const rgb = (hex) => {
+    const h = String(hex || '#000000').replace('#', '');
+    const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.padEnd(6, '0');
+    return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+  };
+  const fill = (hex) => doc.setFillColor(...rgb(hex));
+  const draw = (hex) => doc.setDrawColor(...rgb(hex));
+  const font = (size, style = 'normal') => { doc.setFont('helvetica', style); doc.setFontSize(size); };
+  const width = (s) => doc.getTextWidth(s);
+  const txt = (s, x, yy, { size = 9, style = 'normal', color = C.text, align = 'left', maxW = null } = {}) => {
+    font(size, style);
+    doc.setTextColor(...rgb(color));
+    let str = pdfSafeText(s);
+    if (maxW && width(str) > maxW) {
+      while (str.length > 1 && width(`${str}…`) > maxW) str = str.slice(0, -1);
+      str = `${str.trimEnd()}…`;
+    }
+    doc.text(str, x, yy, align === 'left' ? undefined : { align });
+    return width(str);
+  };
+  const box = (x, yy, w, h, { fillColor = null, stroke = C.border, r = 2, lw = 0.3 } = {}) => {
+    doc.setLineWidth(lw);
+    if (fillColor) fill(fillColor);
+    if (stroke) draw(stroke);
+    doc.roundedRect(x, yy, w, h, r, r, fillColor && stroke ? 'FD' : fillColor ? 'F' : 'S');
+  };
+  const baseline = (top, h, size) => top + h / 2 + size * PT * 0.35;
+  const pill = (e, cx, top, h, size = 7.5) => {
+    font(size, 'bold');
+    const label = pdfSafeText(e.label);
+    const w = Math.max(width(label) + 4, 11);
+    box(cx - w / 2, top, w, h, { fillColor: e.bg, stroke: null, r: 1.2 });
+    txt(label, cx, baseline(top, h, size), { size, style: 'bold', color: e.fg, align: 'center' });
+  };
+  const ecartPill = (diffMin) => (diffMin === null || diffMin === undefined ? { label: '—', fg: C.muted, bg: C.line } : mailEcart({ status: 'recorded', diffMin }));
+  const cancelledTag = (x, top, h, size = 6.8) => {
+    font(size, 'bold');
+    const w = width('SUPPRIMÉ') + 4;
+    box(x, top, w, h, { fillColor: '#fee2e2', stroke: C.red, r: 1.2, lw: 0.3 });
+    txt('SUPPRIMÉ', x + w / 2, baseline(top, h, size), { size, style: 'bold', color: C.red, align: 'center' });
+  };
+  const header = (cont) => {
+    box(M, cont ? 8 : y, CW, cont ? 8 : 10, { fillColor: C.bandBg, stroke: C.border, r: 2 });
+    const top = cont ? 8 : y;
+    const h = cont ? 8 : 10;
+    txt(`STATISTIQUES — ${report.category.label.toUpperCase()}${cont ? ' (suite)' : ''}`, M + 4, baseline(top, h, 8.5), { size: 8.5, style: 'bold', color: C.accent });
+    txt(cont ? report.range.label : `Généré le ${formatDateFR(todayISO())} à ${formatHHMMSS(new Date())}`, M + CW - 4, baseline(top, h, 8), { size: 8, color: C.muted, align: 'right' });
+  };
+  const newPage = () => { doc.addPage(); header(true); y = 21; };
+  const ensure = (h) => { if (y + h > BOTTOM) newPage(); };
+
+  header(false);
+  y += 19;
+  txt(`${report.category.label} — ${report.range.label}`, M, y, { size: 16, style: 'bold', color: C.ink, maxW: CW - 60 });
+  txt('LHTE', M + CW, y - 4, { size: 13, style: 'bold', color: C.ink, align: 'right' });
+  txt('Le Havre Terminal Exploitation', M + CW, y + 0.5, { size: 7.5, color: C.muted, align: 'right' });
+  y += 6;
+  txt(`Sélection : ${report.selectionLabel}`, M, y, { size: 8.5, color: C.muted, maxW: CW });
+  y += 5;
+
+  // Chiffres clés
+  const s = report.summary;
+  const tiles = [
+    ['VOYAGES', String(s.total), C.ink],
+    ['PONCTUALITÉ', s.punctuality === null ? '—' : `${s.punctuality} %`, s.punctuality === null ? C.faint : s.punctuality >= 90 ? C.green : s.punctuality >= 75 ? C.amber : C.red],
+    ['EN AVANCE', String(s.early), C.green],
+    ["À L'HEURE", String(s.onTime), '#64748b'],
+    ['EN RETARD', String(s.late), s.late ? C.red : C.green],
+    ['RETARD MOYEN', s.avgLate === null ? '—' : `+${pad2(s.avgLate)} min`, C.red],
+    ['RETARD MAX', s.maxLate === null ? '—' : `+${pad2(s.maxLate)} min`, C.red],
+    ['SUPPRIMÉS', String(s.cancelled), s.cancelled ? C.red : C.muted],
+  ];
+  if (isTrains) tiles.splice(7, 0, ['CALÉS', String(s.stalled), C.purple]);
+  const gap = 2.5;
+  const tileW = (CW - gap * (tiles.length - 1)) / tiles.length;
+  tiles.forEach(([label, value, color], i) => {
+    const x = M + i * (tileW + gap);
+    box(x, y, tileW, 15, { fillColor: '#ffffff', stroke: C.border, r: 2 });
+    fill(color);
+    doc.rect(x + 0.15, y + 3, 1.1, 9, 'F');
+    txt(label, x + tileW / 2, y + 5, { size: 5.8, style: 'bold', color: C.muted, align: 'center', maxW: tileW - 3 });
+    txt(value, x + tileW / 2, y + 11.6, { size: 11.5, style: 'bold', color, align: 'center', maxW: tileW - 3 });
+  });
+  y += 20;
+
+  const sectionTitle = (title, subtitle = '', need = 14) => {
+    ensure(10.5 + need);
+    box(M, y, CW, 8.5, { fillColor: C.headBg, stroke: C.border, r: 2 });
+    fill(report.category.color);
+    doc.rect(M + 0.15, y + 1.4, 1.6, 5.7, 'F');
+    txt(title.toUpperCase(), M + 5, baseline(y, 8.5, 10), { size: 10, style: 'bold', color: C.ink });
+    if (subtitle) txt(subtitle, M + CW - 4, baseline(y, 8.5, 7.5), { size: 7.5, color: C.muted, align: 'right' });
+    y += 10.5;
+  };
+
+  if (s.total === 0) {
+    txt('Aucun voyage enregistré pour cette sélection sur cette période.', M + 2, y + 4, { size: 10, style: 'italic', color: C.muted });
+    y += 10;
+  } else {
+    // Graphique : barres empilées par jour / par mois
+    const chartH = 50;
+    sectionTitle(`Voyages par ${report.period === 'year' ? 'mois' : 'jour'}`, 'nombre de voyages par état', chartH + 16);
+    const cx0 = M + 10;
+    const cw = CW - 14;
+    const top = y + 2;
+    const maxTotal = Math.max(1, ...report.buckets.map((b) => STATS_STATES.reduce((a, st) => a + b.counts[st.id], 0)));
+    const step = maxTotal <= 5 ? 1 : maxTotal <= 10 ? 2 : maxTotal <= 25 ? 5 : maxTotal <= 50 ? 10 : Math.ceil(maxTotal / 50) * 10;
+    const yMax = Math.ceil(maxTotal / step) * step;
+    for (let v = 0; v <= yMax; v += step) {
+      const yy = top + chartH - (v / yMax) * chartH;
+      draw(C.line);
+      doc.setLineWidth(0.2);
+      doc.line(cx0, yy, cx0 + cw, yy);
+      txt(String(v), cx0 - 2, yy + 1, { size: 6.5, color: C.muted, align: 'right' });
+    }
+    const slot = cw / report.buckets.length;
+    const barW = Math.min(9, slot * 0.68);
+    const labelEvery = Math.ceil(report.buckets.length / 16);
+    report.buckets.forEach((b, i) => {
+      const bx = cx0 + i * slot + (slot - barW) / 2;
+      let acc = 0;
+      STATS_STATES.forEach((st) => {
+        const n = b.counts[st.id];
+        if (!n) return;
+        const h = (n / yMax) * chartH;
+        const yy = top + chartH - ((acc + n) / yMax) * chartH;
+        fill(st.color);
+        doc.rect(bx, yy, barW, Math.max(h - 0.5, 0.3), 'F');
+        acc += n;
+      });
+      if (acc) txt(String(acc), bx + barW / 2, top + chartH - (acc / yMax) * chartH - 1.2, { size: 6, style: 'bold', color: C.text, align: 'center' });
+      if (i % labelEvery === 0) txt(b.label, bx + barW / 2, top + chartH + 4, { size: 6.3, color: C.muted, align: 'center' });
+    });
+    draw(C.border);
+    doc.setLineWidth(0.3);
+    doc.line(cx0, top + chartH, cx0 + cw, top + chartH);
+    let lx = cx0;
+    const ly = top + chartH + 9;
+    STATS_STATES.forEach((st) => {
+      fill(st.color);
+      doc.roundedRect(lx, ly - 2.6, 3.2, 3.2, 0.6, 0.6, 'F');
+      lx += 4.5;
+      lx += txt(st.label, lx, ly, { size: 7.5, color: C.text }) + 6;
+    });
+    y = ly + 6;
+
+    // Tableau générique (reprise de l'en-tête après un saut de page)
+    const table = (columns, rows) => {
+      const HEAD_H = 6.5;
+      const ROW_H = 6.6;
+      const xs = [];
+      columns.reduce((acc, col) => { xs.push(acc); return acc + col.w; }, M);
+      let segTop = y;
+      const head = () => {
+        segTop = y;
+        fill(C.headBg);
+        doc.rect(M + 0.2, y + 0.2, CW - 0.4, HEAD_H - 0.2, 'F');
+        columns.forEach((col, i) => {
+          const center = col.align === 'center';
+          txt(col.title, center ? xs[i] + col.w / 2 : xs[i] + 2.5, baseline(y, HEAD_H, 6.5), { size: 6.5, style: 'bold', color: C.muted, align: center ? 'center' : 'left', maxW: col.w - 2 });
+        });
+        draw(C.border);
+        doc.setLineWidth(0.25);
+        doc.line(M, y + HEAD_H, M + CW, y + HEAD_H);
+        y += HEAD_H;
+      };
+      const close = () => box(M, segTop, CW, y - segTop, { stroke: C.border, r: 2 });
+      const fullH = HEAD_H + rows.length * ROW_H + 2;
+      ensure(fullH <= BOTTOM - 21 ? fullH : HEAD_H + ROW_H * 3);
+      head();
+      rows.forEach((row, ri) => {
+        if (y + ROW_H > BOTTOM) { close(); newPage(); head(); }
+        if (row.cancelled) { fill(C.greyBg); doc.rect(M + 0.2, y, CW - 0.4, ROW_H, 'F'); }
+        row.cells.forEach((cell, i) => {
+          if (cell === null || cell === undefined) return;
+          const col = columns[i];
+          const center = col.align === 'center';
+          const cx = xs[i] + col.w / 2;
+          const left = xs[i] + 2.5;
+          if (cell.cancelled) { cancelledTag(left, y + 1.3, ROW_H - 2.6); return; }
+          if (cell.pill) { pill(cell.pill, cx, y + 1.2, ROW_H - 2.4, 7); return; }
+          if (cell.chip) {
+            fill(row.cancelled ? '#cbd5e1' : cell.chip.color);
+            doc.circle(left + 1.1, y + ROW_H / 2, 1.2, 'F');
+            txt(cell.chip.text, left + 3.6, baseline(y, ROW_H, 8.5), { size: 8.5, style: 'bold', color: row.cancelled ? C.faint : C.ink, maxW: col.w - 6 });
+            return;
+          }
+          txt(cell.text ?? '', center ? cx : left, baseline(y, ROW_H, 8.3), { size: 8.3, style: cell.bold ? 'bold' : 'normal', color: row.cancelled && !cell.keepColor ? C.faint : (cell.color || C.text), align: center ? 'center' : 'left', maxW: col.w - 3 });
+        });
+        y += ROW_H;
+        if (ri < rows.length - 1) { draw(C.line); doc.setLineWidth(0.2); doc.line(M + 1, y, M + CW - 1, y); }
+      });
+      close();
+      y += 5;
+    };
+
+    // Par voyage
+    const tableNeed = (n) => Math.min(6.5 + n * 6.6 + 2, BOTTOM - 21 - 10.5);
+    sectionTitle('Par voyage', `${report.byItem.length} voyage(s)`, tableNeed(report.byItem.length));
+    const fixed = isTrains ? [30, 20, 20, 20, 20, 20, 18] : [30, 20, 20, 20, 20, 20];
+    const restW = (CW - fixed.reduce((a, b) => a + b, 0)) / 3;
+    const itemCols = [
+      { title: 'VOYAGE', w: fixed[0] }, { title: 'VOYAGES', w: fixed[1], align: 'center' }, { title: 'EN AVANCE', w: fixed[2], align: 'center' },
+      { title: "À L'HEURE", w: fixed[3], align: 'center' }, { title: 'EN RETARD', w: fixed[4], align: 'center' }, { title: 'SUPPRIMÉS', w: fixed[5], align: 'center' },
+      ...(isTrains ? [{ title: 'CALÉS', w: fixed[6], align: 'center' }] : []),
+      { title: 'ÉCART MOY.', w: restW, align: 'center' }, { title: 'RETARD MAX', w: restW, align: 'center' }, { title: 'PONCTUALITÉ', w: restW, align: 'center' },
+    ];
+    table(itemCols, report.byItem.map((it) => {
+      const sm = it.summary;
+      return {
+        cells: [
+          { chip: { color: it.color, text: it.label } },
+          { text: String(sm.total), bold: true },
+          { text: String(sm.early), color: sm.early ? C.green : C.faint, bold: true },
+          { text: String(sm.onTime), color: sm.onTime ? '#64748b' : C.faint, bold: true },
+          { text: String(sm.late), color: sm.late ? C.red : C.faint, bold: true },
+          { text: String(sm.cancelled), color: sm.cancelled ? C.red : C.faint, bold: true },
+          ...(isTrains ? [{ text: String(sm.stalled), color: sm.stalled ? C.purple : C.faint, bold: true }] : []),
+          sm.avgDiff === null ? { text: '—', color: C.faint } : { pill: ecartPill(sm.avgDiff) },
+          { text: sm.maxLate === null ? '—' : `+${pad2(sm.maxLate)} min`, color: sm.maxLate === null ? C.faint : C.red, bold: true },
+          { text: sm.punctuality === null ? '—' : `${sm.punctuality} %`, bold: true, color: sm.punctuality === null ? C.faint : sm.punctuality >= 90 ? C.green : sm.punctuality >= 75 ? C.amber : C.red },
+        ],
+      };
+    }));
+
+    if (report.stepStats) {
+      sectionTitle('Écart moyen par étape', '', tableNeed(report.stepStats.length));
+      table([
+        { title: 'ÉTAPE', w: CW - 120 }, { title: 'MESURES', w: 30, align: 'center' }, { title: 'ÉCART MOYEN', w: 30, align: 'center' },
+        { title: 'EN RETARD', w: 30, align: 'center' }, { title: 'RETARD MAX', w: 30, align: 'center' },
+      ], report.stepStats.map((st) => ({
+        cells: [
+          { text: String(st.label).toUpperCase(), bold: true, color: C.ink },
+          { text: String(st.count) },
+          st.avg === null ? { text: '—', color: C.faint } : { pill: ecartPill(st.avg) },
+          { text: String(st.late), bold: true, color: st.late ? C.red : C.faint },
+          { text: st.max === null || st.max <= 0 ? '—' : `+${pad2(st.max)} min`, bold: true, color: st.max > 0 ? C.red : C.faint },
+        ],
+      })));
+    }
+
+    if (includeDetail) {
+      sectionTitle('Détail voyage par voyage', `${report.rows.length} ligne(s)`, tableNeed(Math.min(report.rows.length, 3)));
+      const refTitle = report.category.id === 'shuttleArrivals' ? 'THÉORIQUE*' : report.category.id === 'trainArrivals' ? 'ARR. ESTIMÉE' : 'THÉORIQUE';
+      const cols = [
+        { title: 'DATE', w: 22 }, { title: isTrains ? 'TRAIN' : 'VOYAGE', w: isTrains ? 40 : 34 },
+        ...(isArrivals ? [{ title: 'DÉPART', w: 20, align: 'center' }] : []),
+        { title: refTitle, w: 24, align: 'center' }, { title: 'RÉEL', w: 22, align: 'center' }, { title: 'ÉCART', w: 24, align: 'center' },
+      ];
+      const used = cols.reduce((a, c) => a + c.w, 0);
+      if (isTrains) {
+        cols.push({ title: 'ÉTAT', w: 26 }, { title: 'CAUSE', w: CW - used - 26 - 22 - 26 - 22 }, { title: 'MACHINE', w: 22, align: 'center' }, { title: 'CATÉNAIRE', w: 26, align: 'center' }, { title: 'MAIL REÇU', w: 22, align: 'center' });
+      } else {
+        cols.push({ title: 'ÉTAT', w: CW - used });
+      }
+      table(cols, report.rows.map((r) => {
+        const stateColor = STATS_STATE_COLORS[r.state] || C.muted;
+        const realColor = r.state === 'late' ? C.red : (r.state === 'early' || r.state === 'onTime' || r.state === 'departedFA') ? C.green : C.ink;
+        return {
+          cancelled: r.state === 'cancelled',
+          cells: [
+            { text: formatDateShortFR(r.date) },
+            { chip: { color: r.color, text: isTrains && r.extra.destination ? `${r.label} » ${r.extra.destination}` : r.label } },
+            ...(isArrivals ? [{ text: r.extra.departure || '--:--', color: r.extra.departure ? C.ink : C.faint }] : []),
+            { text: r.theo ? `${r.theo}${r.theoKind === 'eta' && report.category.id === 'shuttleArrivals' ? '*' : ''}` : '--:--', color: r.theo ? C.muted : C.faint },
+            { text: r.real || '--:--', bold: Boolean(r.real), color: r.real ? realColor : C.faint },
+            r.state === 'cancelled' ? { cancelled: true } : r.diffMin === null ? { text: '—', color: C.faint } : { pill: ecartPill(r.diffMin) },
+            { text: STATS_STATE_LABELS[r.state] || '', bold: true, color: stateColor, keepColor: true },
+            ...(isTrains ? [
+              { text: r.extra.cause || '', color: C.text },
+              { text: r.extra.machine || '—', bold: Boolean(r.extra.machine), color: r.extra.machine ? C.ink : C.faint },
+              { text: r.extra.catenary || '', bold: true, color: r.extra.catenary && r.extra.catenary !== 'NON' ? C.green : C.muted },
+              { text: r.extra.mail || '', bold: true, color: r.extra.mail === 'NON' ? C.red : C.green },
+            ] : []),
+          ],
+        };
+      }));
+      if (report.category.id === 'shuttleArrivals') {
+        y -= 2;
+        ensure(6);
+        txt("* heure théorique réglée dans Réglages ; à défaut, arrivée estimée (départ + durée du trajet).", M + 2, y, { size: 7, style: 'italic', color: C.muted });
+        y += 5;
+      }
+    }
+  }
+
+  // Légende + pied de page
+  ensure(14);
+  box(M, y, CW, 10, { fillColor: C.headBg, stroke: C.border, r: 2 });
+  txt('LÉGENDE', M + 4, y + 6.3, { size: 7.5, style: 'bold', color: C.accent });
+  let lx2 = M + 26;
+  [[{ label: '-', fg: '#ffffff', bg: '#15803d' }, 'En avance'], [{ label: '0', fg: '#334155', bg: '#e2e8f0' }, "À l'heure"], [{ label: '+', fg: '#ffffff', bg: '#dc2626' }, 'En retard']].forEach(([e, label]) => {
+    pill(e, lx2 + 5.5, y + 2.8, 4.6, 7.5);
+    lx2 += 13;
+    lx2 += txt(label, lx2, y + 6.3, { size: 8, color: C.text }) + 8;
+  });
+  cancelledTag(lx2, y + 2.8, 4.6, 6.5);
+  font(6.5, 'bold');
+  lx2 += width('SUPPRIMÉ') + 6;
+  txt('Voyage supprimé (ne roule pas)', lx2, y + 6.3, { size: 8, color: C.text });
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    draw(C.border);
+    doc.setLineWidth(0.25);
+    doc.line(M, PAGE_H - 11, M + CW, PAGE_H - 11);
+    txt('LHTE — Le Havre Terminal Exploitation · Service régulation', M, PAGE_H - 6.5, { size: 7.5, style: 'bold', color: C.ink });
+    txt(`Statistiques ${report.range.label} — page ${p} / ${pages}`, M + CW, PAGE_H - 6.5, { size: 7.5, color: C.muted, align: 'right' });
+  }
+  return doc;
+}
+
 // Heures théoriques en vigueur ce jour-là, gardées avec l'historique du jour
 // (voir recordDayPart dans storage.js) pour que les statistiques passées
 // restent justes même si les réglages changent ensuite.
