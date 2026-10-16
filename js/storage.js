@@ -113,6 +113,7 @@ export function loadShuttles() {
 export function saveShuttles(shuttles) {
   try {
     localStorage.setItem(STORAGE_KEYS.shuttles, JSON.stringify({ date: todayISO(), data: shuttles }));
+    recordDayPart(todayISO(), 'shuttles', shuttles);
     return true;
   } catch (err) {
     console.error('Impossible d\'enregistrer les navettes.', err);
@@ -136,6 +137,7 @@ export function loadArrivals() {
 export function saveArrivals(arrivals) {
   try {
     localStorage.setItem(STORAGE_KEYS.arrivals, JSON.stringify({ date: todayISO(), data: arrivals }));
+    recordDayPart(todayISO(), 'arrivals', arrivals);
     return true;
   } catch (err) {
     console.error('Impossible d\'enregistrer les arrivées.', err);
@@ -159,6 +161,7 @@ export function loadShuttleReserves() {
 export function saveShuttleReserves(shuttleReserves) {
   try {
     localStorage.setItem(STORAGE_KEYS.shuttleReserves, JSON.stringify({ date: todayISO(), data: shuttleReserves }));
+    recordDayPart(todayISO(), 'reserves', shuttleReserves);
     return true;
   } catch (err) {
     console.error('Impossible d\'enregistrer les réserves navettes.', err);
@@ -289,4 +292,83 @@ export function seedDemoTrains(stepLabels) {
     });
     return train;
   });
+}
+
+// ---------- Historique jour par jour (bouton "📊 Statistiques") ----------
+// Navettes, tableau rapide des départs et arrivées sont remis à zéro chaque
+// jour (voir loadShuttles plus haut) : pour pouvoir faire des statistiques
+// à la semaine / au mois / à l'année, chaque enregistrement est AUSSI copié
+// dans une entrée par jour, clé "traintrack:day:YYYY-MM-DD" →
+// { date, shuttles, reserves, arrivals, theo }. `theo` (heures théoriques
+// en vigueur ce jour-là) est renseigné par app.js (recordDayTheo). Les
+// trains, eux, sont déjà conservés jour par jour dans STORAGE_KEYS.trains.
+// Stockage local à cet appareil, comme le reste ; nettoyé au-delà de
+// DAY_HISTORY_RETENTION_DAYS jours.
+const DAY_HISTORY_PREFIX = 'traintrack:day:';
+export const DAY_HISTORY_RETENTION_DAYS = 800;
+
+function readDayHistory(dateISO) {
+  return safeParse(localStorage.getItem(DAY_HISTORY_PREFIX + dateISO), null);
+}
+
+export function recordDayPart(dateISO, part, data) {
+  try {
+    const day = readDayHistory(dateISO) || { date: dateISO };
+    day[part] = data;
+    day.updatedAt = new Date().toISOString();
+    localStorage.setItem(DAY_HISTORY_PREFIX + dateISO, JSON.stringify(day));
+    return true;
+  } catch (err) {
+    console.warn("Historique du jour non enregistré (stockage plein ?)", err);
+    return false;
+  }
+}
+
+// Jours enregistrés entre fromISO et toISO inclus, triés par date.
+export function loadDayHistory(fromISO, toISO) {
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(DAY_HISTORY_PREFIX)) continue;
+    const date = key.slice(DAY_HISTORY_PREFIX.length);
+    if ((fromISO && date < fromISO) || (toISO && date > toISO)) continue;
+    const day = safeParse(localStorage.getItem(key), null);
+    if (day && typeof day === 'object') out.push({ ...day, date });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Au démarrage : récupère dans l'historique les données d'un jour précédent
+// encore présentes (application fermée pendant la nuit, ou données saisies
+// avant la mise en place de l'historique), AVANT qu'un premier
+// enregistrement du jour ne les écrase.
+export function harvestStaleDayData() {
+  [['shuttles', STORAGE_KEYS.shuttles], ['arrivals', STORAGE_KEYS.arrivals], ['reserves', STORAGE_KEYS.shuttleReserves]].forEach(([part, key]) => {
+    const raw = safeParse(localStorage.getItem(key), null);
+    if (!raw || typeof raw !== 'object' || !raw.date || !raw.data || typeof raw.data !== 'object') return;
+    if (Object.keys(raw.data).length === 0) return;
+    const day = readDayHistory(raw.date);
+    if (day && day[part] && Object.keys(day[part]).length) return;
+    recordDayPart(raw.date, part, raw.data);
+  });
+}
+
+export function pruneDayHistory(maxDays = DAY_HISTORY_RETENTION_DAYS) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - maxDays);
+  const pad = (n) => String(n).padStart(2, '0');
+  const cutoffISO = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`;
+  const stale = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(DAY_HISTORY_PREFIX) && key.slice(DAY_HISTORY_PREFIX.length) < cutoffISO) stale.push(key);
+  }
+  stale.forEach((key) => localStorage.removeItem(key));
+}
+
+try {
+  harvestStaleDayData();
+  pruneDayHistory();
+} catch (err) {
+  console.warn('Historique : initialisation impossible', err);
 }
