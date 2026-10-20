@@ -1802,6 +1802,16 @@ function settingsBodyHTML() {
         <button type="button" class="btn btn-ghost btn-sm" id="btnAddQuickTrainRow">+ Ajouter un train à accès rapide</button>
       </div>
 
+      <div class="steps-form-list">
+        <p class="help-text">Son des vidéos d'ouverture et de fermeture (« Journée terminée »). 0 % = muet.</p>
+        <label>Volume vidéo de début : <strong data-role="sIntroVolumeVal">${settings.introVolume ?? 100} %</strong>
+          <input type="range" id="sIntroVolume" min="0" max="100" step="5" value="${settings.introVolume ?? 100}">
+        </label>
+        <label>Volume vidéo de fin : <strong data-role="sOutroVolumeVal">${settings.outroVolume ?? 100} %</strong>
+          <input type="range" id="sOutroVolume" min="0" max="100" step="5" value="${settings.outroVolume ?? 100}">
+        </label>
+      </div>
+
       <label>Thème
         <select id="sTheme">
           <option value="auto" ${settings.theme === 'auto' ? 'selected' : ''}>Automatique (système)</option>
@@ -1826,6 +1836,11 @@ function openSettingsModal() {
     wide: true,
     bodyHTML: settingsBodyHTML(),
     onMount: (panel) => {
+      [['#sIntroVolume', 'sIntroVolumeVal'], ['#sOutroVolume', 'sOutroVolumeVal']].forEach(([sel, role]) => {
+        const range = panel.querySelector(sel);
+        const out = panel.querySelector(`[data-role="${role}"]`);
+        if (range && out) range.addEventListener('input', () => { out.textContent = `${range.value} %`; });
+      });
       panel.querySelector('#btnSyncNow').addEventListener('click', async () => {
         settings.sheetsWebAppUrl = panel.querySelector('#sSheetUrl').value.trim();
         saveSettings(settings);
@@ -1985,6 +2000,8 @@ function openSettingsModal() {
         };
         applyEffectiveDelayThresholds();
 
+        settings.introVolume = Number(panel.querySelector('#sIntroVolume').value);
+        settings.outroVolume = Number(panel.querySelector('#sOutroVolume').value);
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
@@ -2448,6 +2465,57 @@ function chipDeleteHTML(label) {
   return `<span class="chip-delete" data-chip-delete role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">✕</span>`;
 }
 
+// Petit symbole "▶ Départ maintenant" à gauche de la croix ✕ : enregistre
+// l'heure de départ actuelle en un clic, exactement comme "Maintenant" +
+// "Enregistrer" dans la fenêtre de la vignette (qui reste accessible au clic
+// sur le reste de la vignette). N'apparaît que tant qu'aucun départ n'est
+// saisi, pour ne jamais écraser une heure par erreur.
+function chipDepartHTML(label) {
+  return `<span class="chip-depart" data-chip-depart role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">▶</span>`;
+}
+
+// Case "FA" des arrivées trains : signale que le train est stocké à FA.
+// L'heure du clic est mémorisée (rec.faStoredAt) mais n'apparaît que dans
+// le PDF récap — sur la vignette, seule la case cochée est visible.
+function chipFAHTML(checked, label) {
+  return `<span class="chip-fa${checked ? ' is-checked' : ''}" data-chip-fa role="checkbox" aria-checked="${checked}" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><span class="chip-fa-box" aria-hidden="true">${checked ? '✓' : ''}</span>FA</span>`;
+}
+
+function recordShuttleDepartureNow(code) {
+  const current = shuttles[code] || {};
+  current.departure = formatHHMM(new Date());
+  shuttles[code] = current;
+  saveShuttles(shuttles);
+  renderShuttlesBar();
+  pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, null, current.departure, null);
+  showToast(`Navette ${code} : départ ${current.departure}`);
+}
+
+function recordArrivalDepartureNow(id) {
+  const group = findArrivalGroup(id);
+  if (!group) return;
+  const current = arrivals[id] || {};
+  current.departure = formatHHMM(new Date());
+  arrivals[id] = current;
+  saveArrivals(arrivals);
+  renderArrivalsBar();
+  pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, null, current.departure, null);
+  showToast(`${group.label} : départ ${current.departure}`);
+}
+
+function toggleArrivalFA(id) {
+  const group = findArrivalGroup(id);
+  if (!group) return false;
+  const current = arrivals[id] || {};
+  current.faStored = !current.faStored;
+  current.faStoredAt = current.faStored ? new Date().toISOString() : null;
+  arrivals[id] = current;
+  saveArrivals(arrivals);
+  renderArrivalsBar();
+  showToast(current.faStored ? `${group.label} : stocké à FA (${formatHHMM(new Date(current.faStoredAt))})` : `${group.label} : FA retiré`);
+  return current.faStored;
+}
+
 function chipRestoreHTML(label) {
   return `<span class="chip-delete chip-restore" data-chip-restore role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">↺</span>`;
 }
@@ -2521,6 +2589,7 @@ function shuttleChipInnerHTML(code) {
   }
   return `
     ${chipDeleteHTML(`Supprimer le voyage ${code} (ne roule pas)`)}
+    ${!departure && !rec?.arrivedManually ? chipDepartHTML(`Départ maintenant — ${code}`) : ''}
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || arrival}</span>`
@@ -2982,6 +3051,7 @@ function wireShuttlesBar() {
     const btn = e.target.closest('[data-shuttle-code]');
     if (btn && e.target.closest('[data-chip-restore]')) { e.preventDefault(); setShuttleCancelled(btn.dataset.shuttleCode, false); return; }
     if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); setShuttleCancelled(btn.dataset.shuttleCode, true); return; }
+    if (btn && e.target.closest('[data-chip-depart]')) { e.preventDefault(); recordShuttleDepartureNow(btn.dataset.shuttleCode); return; }
     if (btn) openShuttleModal(btn.dataset.shuttleCode);
   });
   setInterval(updateShuttleStates, 15000);
@@ -3369,6 +3439,7 @@ function arrivalChipInnerHTML(id) {
   }
   return `
     ${chipDeleteHTML(`Supprimer le voyage ${group.label} (ne roule pas)`)}
+    ${!departure && !rec?.arrivedManually ? chipDepartHTML(`Départ maintenant — ${group.label}`) : ''}
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || eta}</span>`
@@ -3378,7 +3449,8 @@ function arrivalChipInnerHTML(id) {
     <span class="shuttle-countdown" data-role="arrival-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
     <span class="shuttle-overdue-badge" data-role="arrival-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
     ${arrivalDeltaBadgeHTML(delta)}
-    <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
+    <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>
+    ${chipFAHTML(Boolean(rec?.faStored), rec?.faStored ? `Train stocké à FA — décocher` : `Cocher si le train est stocké à FA`)}`;
 }
 
 function arrivalChipClass(id) {
@@ -3511,6 +3583,7 @@ function openArrivalModal(id) {
         <div class="shuttle-quick-actions">
           <button type="button" class="btn ${arrivedManually ? 'btn-primary' : 'btn-outline'}" id="btnArrivalArrived" aria-pressed="${arrivedManually}">✓ Arrivée effectuée</button>
           <button type="button" class="btn ${delayFlag ? 'btn-danger' : 'btn-outline'}" id="btnArrivalDelay" aria-pressed="${delayFlag}">⚠ Retard / souci</button>
+          <button type="button" class="btn ${rec.faStored ? 'btn-primary' : 'btn-outline'}" id="btnArrivalFA" aria-pressed="${Boolean(rec.faStored)}">${rec.faStored ? '☑' : '☐'} Stocké à FA</button>
         </div>
         <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
 
@@ -3587,6 +3660,14 @@ function openArrivalModal(id) {
           pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, current.departure ? computeArrivalETA(id, current.departure) : null, formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
         }
         showToast(current.arrivedManually ? `${group.label} marquée arrivée` : `${group.label} réactivée`);
+      });
+      const faBtn = panel.querySelector('#btnArrivalFA');
+      faBtn.addEventListener('click', () => {
+        const on = toggleArrivalFA(id);
+        faBtn.classList.toggle('btn-primary', on);
+        faBtn.classList.toggle('btn-outline', !on);
+        faBtn.setAttribute('aria-pressed', String(on));
+        faBtn.textContent = `${on ? '☑' : '☐'} Stocké à FA`;
       });
       delayBtn.addEventListener('click', () => {
         const current = arrivals[id] || {};
@@ -3699,6 +3780,8 @@ function wireArrivalsBar() {
     const btn = e.target.closest('[data-arrival-id]');
     if (btn && e.target.closest('[data-chip-restore]')) { e.preventDefault(); setArrivalCancelled(btn.dataset.arrivalId, false); return; }
     if (btn && e.target.closest('[data-chip-delete]')) { e.preventDefault(); setArrivalCancelled(btn.dataset.arrivalId, true); return; }
+    if (btn && e.target.closest('[data-chip-depart]')) { e.preventDefault(); recordArrivalDepartureNow(btn.dataset.arrivalId); return; }
+    if (btn && e.target.closest('[data-chip-fa]')) { e.preventDefault(); toggleArrivalFA(btn.dataset.arrivalId); return; }
     if (btn) openArrivalModal(btn.dataset.arrivalId);
   });
   setInterval(updateArrivalStates, 1000);
@@ -4087,14 +4170,15 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
   if (arrivalGroups.length === 0) emptyNote('Aucune arrivée configurée.');
   else {
     table([
-      { title: 'ORIGINE', w: 46 }, { title: 'DÉPART ORIGINE', w: 26, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 28, align: 'center' },
-      { title: 'ARRIVÉE RÉELLE', w: 28, align: 'center' }, { title: 'ÉCART', w: 24, align: 'center' }, { title: 'ÉTAT', w: CW - 152 },
+      { title: 'ORIGINE', w: 44 }, { title: 'DÉPART ORIGINE', w: 23, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 24, align: 'center' },
+      { title: 'ARRIVÉE RÉELLE', w: 24, align: 'center' }, { title: 'ÉCART', w: 20, align: 'center' }, { title: 'STOCKÉ FA', w: 18, align: 'center' }, { title: 'ÉTAT', w: CW - 153 },
     ], arrivalGroups.map((group) => {
       const rec = arrivalsSnapshot[group.id] || {};
       const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
       const delta = computeArrivalDeltaFromRecord(rec, getArrivalEffectiveConfig(group.id));
       const e = delta ? pdfEcartInfo(delta.diffMin) : ecartsMuted;
       const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
+      const faTime = rec.faStored && rec.faStoredAt ? formatHHMM(new Date(rec.faStoredAt)) : null;
       let status;
       if (rec.cancelled) status = { cancelled: true };
       else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
@@ -4109,6 +4193,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
           { text: eta || '--:--', color: eta ? C.muted : C.faint },
           { time: { value: arrivalReal, e } },
           { pill: e },
+          { text: faTime || '—', bold: Boolean(faTime), color: faTime ? C.ink : C.faint },
           status,
         ],
       };
@@ -5447,13 +5532,15 @@ async function runEndOfDay({ downloadPdf = true, pushSheets = false } = {}) {
 // coupé (même réglage, voir readIntroMutedPref).
 function playOutroChime() {
   if (readIntroMutedPref()) return;
+  const outroLevel = Math.max(0, Math.min(100, Number(settings.outroVolume ?? 100))) / 100;
+  if (outroLevel <= 0) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
     const now = ctx.currentTime;
     const master = ctx.createGain();
-    master.gain.value = 0.16;
+    master.gain.value = 0.16 * outroLevel;
     master.connect(ctx.destination);
     [146.83, 220, 293.66, 369.99].forEach((f) => {
       const o = ctx.createOscillator();
@@ -5788,7 +5875,10 @@ function playIntroSplash() {
   // Vidéo qui ne démarre pas (hors-ligne sans cache, décodage impossible...).
   safetyTimer = setTimeout(dismiss, INTRO_START_TIMEOUT_MS);
 
-  video.muted = readIntroMutedPref();
+  // Volume réglable dans Réglages (0 % = muet).
+  const introLevel = Math.max(0, Math.min(100, Number(settings.introVolume ?? 100))) / 100;
+  try { video.volume = introLevel; } catch (err) { /* iOS : volume non pilotable */ }
+  video.muted = readIntroMutedPref() || introLevel <= 0;
   video.play().then(updateSoundBtn).catch((err) => {
     if (dismissed) return;
     if (err && err.name === 'NotAllowedError' && !video.muted) {

@@ -90,6 +90,9 @@ export const DEFAULT_SETTINGS = {
   mailDefaultTo: '',
   mailDefaultBcc: '',
   theme: 'auto', // 'auto' | 'light' | 'dark'
+  // Volume (0-100 %) des vidéos d'ouverture et de fermeture — Réglages.
+  introVolume: 100,
+  outroVolume: 100,
   hasSeeded: false,
   lastSyncAt: null,
   lastSyncStatus: null, // 'ok' | 'error' | null
