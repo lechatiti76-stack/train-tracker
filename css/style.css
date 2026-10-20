@@ -1703,6 +1703,64 @@ html.theme-dark .quickboard-time { color: #fff; }
 .chip-delete:hover, .chip-delete:focus-visible { opacity: 1; background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 .quickboard-cell .chip-delete { top: 2px; right: 2px; width: 18px; height: 18px; }
 
+/* Symbole "▶ Départ maintenant", juste à gauche de la croix ✕. La 1re ligne
+   (code / nom) garde une marge à droite pour ne jamais passer sous les deux
+   symboles ; les lignes suivantes sont sous les symboles, donc libres. */
+.chip-depart {
+  position: absolute;
+  top: 3px;
+  right: 27px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--success);
+  font-size: 0.6rem;
+  line-height: 1;
+  padding-left: 1px;
+  opacity: 0.85;
+  cursor: pointer;
+}
+.chip-depart:hover, .chip-depart:focus-visible { opacity: 1; background: var(--success-bg); border-color: var(--success); }
+.shuttle-chip > .shuttle-code,
+.arrival-chip > .arrival-label { padding-right: 48px; }
+
+/* Case "FA" (train stocké à FA) en bas à droite des arrivées trains, dans
+   le flux de la vignette : elle ne recouvre jamais le texte. */
+.chip-fa {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  padding: 0.12rem 0.45rem 0.12rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.chip-fa-box {
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.chip-fa:hover, .chip-fa:focus-visible { border-color: var(--success); color: var(--success); }
+.chip-fa.is-checked { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+
 /* Train SLOT parti de l'autre site (FA) avec heure de départ saisie. */
 .status-pill.tone-departedFA { background: var(--success-bg); color: var(--success); }
 
