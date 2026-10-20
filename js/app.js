@@ -2516,6 +2516,21 @@ function toggleArrivalFA(id) {
   return current.faStored;
 }
 
+// Temps entre le stockage à FA (case FA cochée) et l'arrivée confirmée
+// ("✓ Arrivée effectuée"), en minutes — null si l'une des deux heures manque.
+function faToArrivalMinutes(rec) {
+  if (!rec?.faStored || !rec.faStoredAt || !rec.arrivedManually || !rec.arrivedAt) return null;
+  const ms = new Date(rec.arrivedAt).getTime() - new Date(rec.faStoredAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.round(Math.abs(ms) / 60000);
+}
+
+function formatDurationMin(min) {
+  if (min === null || min === undefined) return '—';
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${pad2(min % 60)}`;
+}
+
 function chipRestoreHTML(label) {
   return `<span class="chip-delete chip-restore" data-chip-restore role="button" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">↺</span>`;
 }
@@ -4170,8 +4185,9 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
   if (arrivalGroups.length === 0) emptyNote('Aucune arrivée configurée.');
   else {
     table([
-      { title: 'ORIGINE', w: 44 }, { title: 'DÉPART ORIGINE', w: 23, align: 'center' }, { title: 'ARRIVÉE ESTIMÉE', w: 24, align: 'center' },
-      { title: 'ARRIVÉE RÉELLE', w: 24, align: 'center' }, { title: 'ÉCART', w: 20, align: 'center' }, { title: 'STOCKÉ FA', w: 18, align: 'center' }, { title: 'ÉTAT', w: CW - 153 },
+      { title: 'ORIGINE', w: 40 }, { title: 'DÉP. ORIGINE', w: 21, align: 'center' }, { title: 'ARR. ESTIMÉE', w: 22, align: 'center' },
+      { title: 'ARR. RÉELLE', w: 22, align: 'center' }, { title: 'ÉCART', w: 18, align: 'center' }, { title: 'STOCKÉ FA', w: 17, align: 'center' },
+      { title: 'FA » ARRIVÉE', w: 20, align: 'center' }, { title: 'ÉTAT', w: CW - 160 },
     ], arrivalGroups.map((group) => {
       const rec = arrivalsSnapshot[group.id] || {};
       const eta = rec.departure ? computeArrivalETA(group.id, rec.departure) : null;
@@ -4179,6 +4195,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       const e = delta ? pdfEcartInfo(delta.diffMin) : ecartsMuted;
       const arrivalReal = rec.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : null;
       const faTime = rec.faStored && rec.faStoredAt ? formatHHMM(new Date(rec.faStoredAt)) : null;
+      const faMin = faToArrivalMinutes(rec);
       let status;
       if (rec.cancelled) status = { cancelled: true };
       else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
@@ -4194,6 +4211,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
           { time: { value: arrivalReal, e } },
           { pill: e },
           { text: faTime || '—', bold: Boolean(faTime), color: faTime ? C.ink : C.faint },
+          { text: formatDurationMin(faMin), bold: faMin !== null, color: faMin !== null ? C.accent : C.faint },
           status,
         ],
       };
@@ -4763,7 +4781,8 @@ function collectStatsRows(category, range) {
           const refDate = eta ? hhmmOnDate(arr, eta) : null;
           if (refDate) { diffMin = diffMinutes(refDate, arr); state = statsStateFromDiff(diffMin); } else state = 'unknown';
         } else state = rec.delayFlag ? 'flagged' : 'unconfirmed';
-        rows.push({ date: day.date, key: id, label: group.label, color: group.color || '#94a3b8', theo: eta, theoKind: 'eta', real, diffMin, state, extra: { departure: rec.departure || '' } });
+        const faTime = rec.faStored && rec.faStoredAt ? formatHHMM(new Date(rec.faStoredAt)) : '';
+        rows.push({ date: day.date, key: id, label: group.label, color: group.color || '#94a3b8', theo: eta, theoKind: 'eta', real, diffMin, state, extra: { departure: rec.departure || '', faTime, faMin: faToArrivalMinutes(rec) } });
       });
     }
   });
@@ -4781,7 +4800,7 @@ const STATS_STATE_COLORS = {
 };
 
 function summarizeStatsRows(rows) {
-  const s = { total: rows.length, early: 0, onTime: 0, late: 0, cancelled: 0, stalled: 0, other: 0, measured: 0, sumDiff: 0, sumLate: 0, maxLate: null, maxEarly: null };
+  const s = { total: rows.length, early: 0, onTime: 0, late: 0, cancelled: 0, stalled: 0, other: 0, measured: 0, sumDiff: 0, sumLate: 0, maxLate: null, maxEarly: null, faCount: 0, faMeasured: 0, faSum: 0, faMax: null };
   rows.forEach((r) => {
     if (r.state === 'early' || r.state === 'onTime' || r.state === 'late') {
       s[r.state] += 1;
@@ -4792,7 +4811,14 @@ function summarizeStatsRows(rows) {
     } else if (r.state === 'cancelled') s.cancelled += 1;
     else if (r.state === 'stalled') s.stalled += 1;
     else s.other += 1;
+    if (r.extra?.faTime) s.faCount += 1;
+    if (r.extra?.faMin !== null && r.extra?.faMin !== undefined) {
+      s.faMeasured += 1;
+      s.faSum += r.extra.faMin;
+      s.faMax = Math.max(s.faMax ?? r.extra.faMin, r.extra.faMin);
+    }
   });
+  s.faAvg = s.faMeasured ? Math.round(s.faSum / s.faMeasured) : null;
   s.avgDiff = s.measured ? Math.round(s.sumDiff / s.measured) : null;
   s.avgLate = s.late ? Math.round(s.sumLate / s.late) : null;
   s.punctuality = s.measured ? Math.round(((s.early + s.onTime) / s.measured) * 100) : null;
@@ -4876,6 +4902,14 @@ function statsBodyHTML(report) {
     { label: 'SUPPRIMÉS', value: String(s.cancelled), color: s.cancelled ? '#dc2626' : '#64748b' },
   ];
   if (isTrains) kpis.splice(7, 0, { label: 'CALÉS', value: String(s.stalled), color: '#7c3aed' });
+  const isTrainArr = statsState.category === 'trainArrivals';
+  if (isTrainArr) {
+    kpis.push(
+      { label: 'STOCKÉS FA', value: String(s.faCount), color: '#1d4ed8' },
+      { label: 'FA → ARRIVÉE MOY.', value: formatDurationMin(s.faAvg), color: '#1d4ed8' },
+      { label: 'FA → ARRIVÉE MAX', value: formatDurationMin(s.faMax), color: '#1d4ed8' },
+    );
+  }
   const refLabel = statsState.category === 'shuttleArrivals' ? 'Théorique / estimée*' : statsState.category === 'trainArrivals' ? 'Arrivée estimée' : 'Théorique';
 
   return `
@@ -4890,11 +4924,11 @@ function statsBodyHTML(report) {
     </div>
     <h3 class="stats-h3">Par voyage</h3>
     <div class="stats-table-wrap"><table class="stats-table">
-      <thead><tr><th>Voyage</th><th>Voyages</th><th>En avance</th><th>À l'heure</th><th>En retard</th><th>Supprimés</th>${isTrains ? '<th>Calés</th>' : ''}<th>Écart moyen</th><th>Retard max</th><th>Ponctualité</th></tr></thead>
+      <thead><tr><th>Voyage</th><th>Voyages</th><th>En avance</th><th>À l'heure</th><th>En retard</th><th>Supprimés</th>${isTrains ? '<th>Calés</th>' : ''}${isTrainArr ? '<th>Stockés FA</th><th>FA → arrivée moy.</th>' : ''}<th>Écart moyen</th><th>Retard max</th><th>Ponctualité</th></tr></thead>
       <tbody>${report.byItem.map((it) => `
         <tr>
           <td><span class="stats-dot" style="background:${escapeHtml(it.color)}"></span><strong>${escapeHtml(it.label)}</strong></td>
-          <td>${it.summary.total}</td><td class="c-early">${it.summary.early}</td><td>${it.summary.onTime}</td><td class="c-late">${it.summary.late}</td><td>${it.summary.cancelled}</td>${isTrains ? `<td>${it.summary.stalled}</td>` : ''}
+          <td>${it.summary.total}</td><td class="c-early">${it.summary.early}</td><td>${it.summary.onTime}</td><td class="c-late">${it.summary.late}</td><td>${it.summary.cancelled}</td>${isTrains ? `<td>${it.summary.stalled}</td>` : ''}${isTrainArr ? `<td>${it.summary.faCount}</td><td>${escapeHtml(formatDurationMin(it.summary.faAvg))}</td>` : ''}
           <td>${it.summary.avgDiff === null ? '—' : statsPillHTML({ state: statsStateFromDiff(it.summary.avgDiff), diffMin: it.summary.avgDiff })}</td>
           <td>${it.summary.maxLate === null ? '—' : `<span class="c-late">+${pad2(it.summary.maxLate)} min</span>`}</td>
           <td>${it.summary.punctuality === null ? '—' : `${it.summary.punctuality} %`}</td>
@@ -4914,7 +4948,7 @@ function statsBodyHTML(report) {
       <label class="checkbox-row"><input type="checkbox" id="statsDetailPdf" ${statsState.detail ? 'checked' : ''}> Inclure le détail dans le PDF</label>
     </div>
     <div class="stats-table-wrap stats-table-wrap--detail"><table class="stats-table">
-      <thead><tr><th>Date</th><th>Voyage</th>${statsState.category.endsWith('Arrivals') ? '<th>Départ</th>' : ''}<th>${escapeHtml(refLabel)}</th><th>Réel</th><th>Écart</th><th>État</th>${isTrains ? '<th>Cause</th><th>Machine</th><th>Caténaire</th><th>Mail reçu</th>' : ''}</tr></thead>
+      <thead><tr><th>Date</th><th>Voyage</th>${statsState.category.endsWith('Arrivals') ? '<th>Départ</th>' : ''}<th>${escapeHtml(refLabel)}</th><th>Réel</th><th>Écart</th>${isTrainArr ? '<th>Stocké FA</th><th>FA → arrivée</th>' : ''}<th>État</th>${isTrains ? '<th>Cause</th><th>Machine</th><th>Caténaire</th><th>Mail reçu</th>' : ''}</tr></thead>
       <tbody>${report.rows.map((r) => `
         <tr class="${r.state === 'cancelled' ? 'is-cancelled' : ''}">
           <td>${escapeHtml(formatDateShortFR(r.date))}</td>
@@ -4923,6 +4957,7 @@ function statsBodyHTML(report) {
           <td>${escapeHtml(r.theo || '--:--')}${r.theoKind === 'eta' && statsState.category === 'shuttleArrivals' && r.theo ? '*' : ''}</td>
           <td>${statsTimeHTML(r.real, r.state)}</td>
           <td>${statsPillHTML(r)}</td>
+          ${isTrainArr ? `<td>${escapeHtml(r.extra.faTime || '—')}</td><td><strong>${escapeHtml(formatDurationMin(r.extra.faMin))}</strong></td>` : ''}
           <td style="color:${STATS_STATE_COLORS[r.state] || '#64748b'};font-weight:700">${escapeHtml(STATS_STATE_LABELS[r.state] || '')}</td>
           ${isTrains ? `<td>${escapeHtml(r.extra.cause || '')}</td><td>${escapeHtml(r.extra.machine || '—')}</td><td>${escapeHtml(r.extra.catenary || '')}</td><td class="${r.extra.mail === 'NON' ? 'c-late' : 'c-early'}">${escapeHtml(r.extra.mail || '')}</td>` : ''}
         </tr>`).join('')}</tbody>
@@ -5188,17 +5223,22 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
     ['SUPPRIMÉS', String(s.cancelled), s.cancelled ? C.red : C.muted],
   ];
   if (isTrains) tiles.splice(7, 0, ['CALÉS', String(s.stalled), C.purple]);
+  const isTrainArr = report.category.id === 'trainArrivals';
+  if (isTrainArr) tiles.push(['STOCKÉS FA', String(s.faCount), C.accent], ['FA » ARR. MOY.', formatDurationMin(s.faAvg), C.accent], ['FA » ARR. MAX', formatDurationMin(s.faMax), C.accent]);
   const gap = 2.5;
-  const tileW = (CW - gap * (tiles.length - 1)) / tiles.length;
+  // Plus de 9 chiffres clés (ex : Arrivées trains + temps FA) : 2 rangées.
+  const perRow = tiles.length > 9 ? Math.ceil(tiles.length / 2) : tiles.length;
+  const tileW = (CW - gap * (perRow - 1)) / perRow;
   tiles.forEach(([label, value, color], i) => {
-    const x = M + i * (tileW + gap);
-    box(x, y, tileW, 15, { fillColor: '#ffffff', stroke: C.border, r: 2 });
+    const x = M + (i % perRow) * (tileW + gap);
+    const ty = y + Math.floor(i / perRow) * 18;
+    box(x, ty, tileW, 15, { fillColor: '#ffffff', stroke: C.border, r: 2 });
     fill(color);
-    doc.rect(x + 0.15, y + 3, 1.1, 9, 'F');
-    txt(label, x + tileW / 2, y + 5, { size: 5.8, style: 'bold', color: C.muted, align: 'center', maxW: tileW - 3 });
-    txt(value, x + tileW / 2, y + 11.6, { size: 11.5, style: 'bold', color, align: 'center', maxW: tileW - 3 });
+    doc.rect(x + 0.15, ty + 3, 1.1, 9, 'F');
+    txt(label, x + tileW / 2, ty + 5, { size: 5.8, style: 'bold', color: C.muted, align: 'center', maxW: tileW - 3 });
+    txt(value, x + tileW / 2, ty + 11.6, { size: 11.5, style: 'bold', color, align: 'center', maxW: tileW - 3 });
   });
-  y += 20;
+  y += 20 + (Math.ceil(tiles.length / perRow) - 1) * 18;
 
   const sectionTitle = (title, subtitle = '', need = 14) => {
     ensure(10.5 + need);
@@ -5314,12 +5354,13 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
     // Par voyage
     const tableNeed = (n) => Math.min(6.5 + n * 6.6 + 2, BOTTOM - 21 - 10.5);
     sectionTitle('Par voyage', `${report.byItem.length} voyage(s)`, tableNeed(report.byItem.length));
-    const fixed = isTrains ? [30, 20, 20, 20, 20, 20, 18] : [30, 20, 20, 20, 20, 20];
+    const fixed = isTrains ? [30, 20, 20, 20, 20, 20, 18] : isTrainArr ? [28, 14, 15, 15, 15, 15, 16, 20] : [30, 20, 20, 20, 20, 20];
     const restW = (CW - fixed.reduce((a, b) => a + b, 0)) / 3;
     const itemCols = [
       { title: 'VOYAGE', w: fixed[0] }, { title: 'VOYAGES', w: fixed[1], align: 'center' }, { title: 'EN AVANCE', w: fixed[2], align: 'center' },
       { title: "À L'HEURE", w: fixed[3], align: 'center' }, { title: 'EN RETARD', w: fixed[4], align: 'center' }, { title: 'SUPPRIMÉS', w: fixed[5], align: 'center' },
       ...(isTrains ? [{ title: 'CALÉS', w: fixed[6], align: 'center' }] : []),
+      ...(isTrainArr ? [{ title: 'STOCKÉS FA', w: fixed[6], align: 'center' }, { title: 'FA » ARR. MOY.', w: fixed[7], align: 'center' }] : []),
       { title: 'ÉCART MOY.', w: restW, align: 'center' }, { title: 'RETARD MAX', w: restW, align: 'center' }, { title: 'PONCTUALITÉ', w: restW, align: 'center' },
     ];
     table(itemCols, report.byItem.map((it) => {
@@ -5333,6 +5374,10 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
           { text: String(sm.late), color: sm.late ? C.red : C.faint, bold: true },
           { text: String(sm.cancelled), color: sm.cancelled ? C.red : C.faint, bold: true },
           ...(isTrains ? [{ text: String(sm.stalled), color: sm.stalled ? C.purple : C.faint, bold: true }] : []),
+          ...(isTrainArr ? [
+            { text: String(sm.faCount), color: sm.faCount ? C.accent : C.faint, bold: true },
+            { text: formatDurationMin(sm.faAvg), color: sm.faAvg === null ? C.faint : C.accent, bold: true },
+          ] : []),
           sm.avgDiff === null ? { text: '—', color: C.faint } : { pill: ecartPill(sm.avgDiff) },
           { text: sm.maxLate === null ? '—' : `+${pad2(sm.maxLate)} min`, color: sm.maxLate === null ? C.faint : C.red, bold: true },
           { text: sm.punctuality === null ? '—' : `${sm.punctuality} %`, bold: true, color: sm.punctuality === null ? C.faint : sm.punctuality >= 90 ? C.green : sm.punctuality >= 75 ? C.amber : C.red },
@@ -5359,7 +5404,11 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
     if (includeDetail) {
       sectionTitle('Détail voyage par voyage', `${report.rows.length} ligne(s)`, tableNeed(Math.min(report.rows.length, 3)));
       const refTitle = report.category.id === 'shuttleArrivals' ? 'THÉORIQUE*' : report.category.id === 'trainArrivals' ? 'ARR. ESTIMÉE' : 'THÉORIQUE';
-      const cols = [
+      const cols = isTrainArr ? [
+        { title: 'DATE', w: 20 }, { title: 'VOYAGE', w: 30 }, { title: 'DÉPART', w: 16, align: 'center' },
+        { title: refTitle, w: 18, align: 'center' }, { title: 'RÉEL', w: 16, align: 'center' }, { title: 'ÉCART', w: 20, align: 'center' },
+        { title: 'STOCKÉ FA', w: 16, align: 'center' }, { title: 'FA » ARR.', w: 18, align: 'center' },
+      ] : [
         { title: 'DATE', w: 22 }, { title: isTrains ? 'TRAIN' : 'VOYAGE', w: isTrains ? 40 : 34 },
         ...(isArrivals ? [{ title: 'DÉPART', w: 20, align: 'center' }] : []),
         { title: refTitle, w: 24, align: 'center' }, { title: 'RÉEL', w: 22, align: 'center' }, { title: 'ÉCART', w: 24, align: 'center' },
@@ -5382,6 +5431,10 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
             { text: r.theo ? `${r.theo}${r.theoKind === 'eta' && report.category.id === 'shuttleArrivals' ? '*' : ''}` : '--:--', color: r.theo ? C.muted : C.faint },
             { text: r.real || '--:--', bold: Boolean(r.real), color: r.real ? realColor : C.faint },
             r.state === 'cancelled' ? { cancelled: true } : r.diffMin === null ? { text: '—', color: C.faint } : { pill: ecartPill(r.diffMin) },
+            ...(isTrainArr ? [
+              { text: r.extra.faTime || '—', bold: Boolean(r.extra.faTime), color: r.extra.faTime ? C.ink : C.faint },
+              { text: formatDurationMin(r.extra.faMin), bold: r.extra.faMin !== null && r.extra.faMin !== undefined, color: r.extra.faMin !== null && r.extra.faMin !== undefined ? C.accent : C.faint },
+            ] : []),
             { text: STATS_STATE_LABELS[r.state] || '', bold: true, color: stateColor, keepColor: true },
             ...(isTrains ? [
               { text: r.extra.cause || '', color: C.text },
