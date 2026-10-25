@@ -10,6 +10,10 @@ export const DEFAULT_SETTINGS = {
   // Sinon, laissez vide : chaque utilisateur peut la définir via Réglages
   // (elle est alors stockée dans son navigateur).
   sheetsWebAppUrl: '',
+  // Adresse /exec du serveur « Suivi des circulations » (lecture seule, sans
+  // clé) : les départs/arrivées de navettes validés dans sa saisie sont
+  // reportés ici toutes les 20 s. Vide = lien désactivé.
+  circulationsUrl: '',
   // Checklist de préparation avant le départ commercial (100 % modifiable
   // par train via "Modifier", ou ici pour changer le défaut des nouveaux
   // trains). La dernière étape n'est pas forcément une "arrivée" : le
@@ -223,4 +227,7 @@ export const STORAGE_KEYS = {
   // saveShuttleReserves dans storage.js. Remise à zéro quotidienne comme
   // shuttles/arrivals ci-dessus.
   shuttleReserves: 'traintrack:shuttleReserves:v1',
+  // Dernières valeurs lues sur le suivi des circulations (voir
+  // circulations-sync.js), remises à zéro chaque jour.
+  circulationsSeen: 'traintrack:circulationsSeen:v1',
 };

@@ -169,6 +169,21 @@ export function saveShuttleReserves(shuttleReserves) {
   }
 }
 
+// Mémoire du lien avec le suivi des circulations ({ clé: 'HH:MM' }), du jour
+// seulement, comme les navettes.
+export function loadCirculationsSeen() {
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.circulationsSeen), {});
+  return raw && raw.date === todayISO() && raw.data && typeof raw.data === 'object' ? raw.data : {};
+}
+
+export function saveCirculationsSeen(seen) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.circulationsSeen, JSON.stringify({ date: todayISO(), data: seen }));
+  } catch (err) {
+    console.error('Impossible d\'enregistrer le lien avec le suivi des circulations.', err);
+  }
+}
+
 function uuid() {
   if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);

@@ -268,6 +268,25 @@ Réinitialiser aux valeurs par défaut"** juste en dessous remet les 7
 champs aux valeurs ci-dessus (celles de l'application) — pensez à cliquer
 ensuite sur **"Enregistrer"** pour les appliquer.
 
+### 6.5. Lien avec le Suivi des circulations
+
+Les deux applications se tiennent à jour l'une l'autre, en moins d'une
+minute :
+
+- **Suivi trains → Suivi des circulations** : chaque départ, arrivée ou
+  effacement de navette, du tableau rapide des départs et des arrivées fret
+  part dans l'onglet "Navettes" du Sheet ; la saisie du suivi des
+  circulations le relit (adresse du Sheet dans ses Paramètres).
+- **Suivi des circulations → Suivi trains** : dans **⚙ Réglages**, collez
+  l'adresse `/exec` du serveur « Suivi des circulations » (lecture seule,
+  sans clé). Toutes les 20 secondes, les navettes marquées partie / parti /
+  arrivée dans la saisie et les arrivées fret (Vénissieux, SPCO, Bordeaux,
+  Vierzon, Clermont) sont reportées ici. Rien n'est renvoyé au Sheet pour
+  ces reports (la saisie les a déjà).
+- **Le dernier changement gagne** : une heure n'est reportée que si elle
+  est nouvelle ou a changé dans l'autre application ; une correction faite
+  ici reste donc tant que la saisie n'envoie pas une nouvelle heure.
+
 ## 7. Installer la PWA sur smartphone
 
 ### Android (Chrome)

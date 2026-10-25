@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v47';
+const CACHE_NAME = 'traintrack-cache-v48';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -26,6 +26,7 @@ const APP_SHELL = [
   './js/card.js',
   './js/stopwatch.js',
   './js/archives.js',
+  './js/circulations-sync.js',
   './manifest.json',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',

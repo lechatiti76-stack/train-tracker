@@ -4,7 +4,8 @@
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
 import { DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart } from './storage.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart, loadCirculationsSeen, saveCirculationsSeen } from './storage.js';
+import { fetchCirculationsDiffusion, circulationsValues, planCirculationsUpdates } from './circulations-sync.js';
 import { computeAllStepDelays, computeStepDelay, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM, diffMinutes, delayTone, pad2 } from './time-utils.js';
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet, pushShuttleLogToSheet } from './sheets-sync.js';
@@ -1646,6 +1647,10 @@ function settingsBodyHTML() {
         <input type="url" id="sSheetUrl" value="${escapeHtml(settings.sheetsWebAppUrl || '')}" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
       </label>
       <p class="help-text">Laissez vide pour saisir les horaires uniquement à la main. Cette même URL sert désormais aussi à envoyer automatiquement vers un onglet "Journal" chaque heure réelle enregistrée (mise à jour de apps-script/Code.gs requise — voir le README).</p>
+      <label>Adresse du serveur « Suivi des circulations » (se termine par /exec)
+        <input type="url" id="sCirculationsUrl" value="${escapeHtml(settings.circulationsUrl || '')}" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
+      </label>
+      <p class="help-text">Lecture seule, sans clé : toutes les 20 secondes, les navettes validées dans la saisie du suivi des circulations (FL1 partie, LF1 partie, arrivées, arrivées fret) sont reportées ici. ${escapeHtml(circulationsInfoText())} Laissez vide pour désactiver.</p>
 
       <div class="steps-form-list">
         <p class="help-text">Libellés par défaut des 7 étapes (nouveaux trains uniquement) :</p>
@@ -1931,6 +1936,7 @@ function openSettingsModal() {
       panel.querySelector('#settingsForm').addEventListener('submit', (e) => {
         e.preventDefault();
         settings.sheetsWebAppUrl = panel.querySelector('#sSheetUrl').value.trim();
+        settings.circulationsUrl = panel.querySelector('#sCirculationsUrl').value.trim();
         settings.defaultStepLabels = sortedByIndex([...panel.querySelectorAll('.sStepLabel')]).map((i) => i.value.trim());
         settings.sillonStepOffsets = sortedByIndex([...panel.querySelectorAll('.sSillonOffset')]).map((i) => Number(i.value) || 0);
 
@@ -2158,6 +2164,101 @@ function pushStepIfConfigured(train, stepIndex) {
 function pushShuttleLogIfConfigured(type, code, label, theoreticalHHMM, realHHMM, diffMin) {
   if (!settings.sheetsWebAppUrl) return;
   pushShuttleLogToSheet(settings.sheetsWebAppUrl, todayISO(), type, code, label, theoreticalHHMM, realHHMM, diffMin).catch(() => {});
+}
+
+// ---------- Lien avec le suivi des circulations (saisie + écrans TV) ----------
+// Toutes les 20 s, relit ce que reçoivent les écrans du suivi des circulations
+// (voir circulations-sync.js) et reporte ici les navettes validées dans sa
+// saisie. Ces reports ne sont pas renvoyés au Sheet : la saisie les a déjà.
+let circulationsLastRead = null; // { at: Date, error?: string }
+let circulationsBusy = false;
+
+function circulationsInfoText() {
+  if (!settings.circulationsUrl) return '';
+  if (!circulationsLastRead) return 'Pas encore lu.';
+  const at = formatHHMM(circulationsLastRead.at);
+  return circulationsLastRead.error ? `Dernière lecture à ${at} : ${circulationsLastRead.error}.` : `Dernière lecture réussie à ${at}.`;
+}
+
+function circulationsCurrentValue(kind, code) {
+  const arrivedHHMM = (rec) => (rec?.arrivedManually && rec?.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : '');
+  if (kind === 'shuttleDeparture') return shuttles[code]?.departure || '';
+  if (kind === 'shuttleArrival') return arrivedHHMM(shuttles[code]);
+  if (kind === 'quickboard') return shuttleReserves[code] || '';
+  if (kind === 'arrivalDeparture') return arrivals[code]?.departure || '';
+  if (kind === 'arrivalArrival') return arrivedHHMM(arrivals[code]);
+  return '';
+}
+
+function circulationsKnows(v) {
+  if (v.kind === 'shuttleDeparture' || v.kind === 'shuttleArrival') return Boolean(findShuttleGroup(v.code));
+  if (v.kind === 'quickboard') return SHUTTLE_QUICKBOARD_CODES.includes(v.code);
+  return Boolean(findArrivalGroup(v.code));
+}
+
+// 'HH:MM' du jour → ISO, comme arrivedAt quand on clique « arrivée ».
+function todayAtHHMM(hhmm) {
+  const parsed = parseHHMM(hhmm);
+  const d = new Date();
+  d.setHours(parsed ? parsed.h : 0, parsed ? parsed.m : 0, 0, 0);
+  return d.toISOString();
+}
+
+function applyCirculationsUpdate(u) {
+  if (u.kind === 'quickboard') {
+    shuttleReserves[u.code] = u.value || null;
+    return;
+  }
+  const store = u.kind.startsWith('shuttle') ? shuttles : arrivals;
+  const rec = store[u.code] || {};
+  if (u.kind === 'shuttleDeparture' || u.kind === 'arrivalDeparture') {
+    rec.departure = u.value || null;
+  } else {
+    rec.arrivedManually = Boolean(u.value);
+    rec.arrivedAt = u.value ? todayAtHHMM(u.value) : null;
+  }
+  store[u.code] = rec;
+}
+
+function circulationsUpdateLabel(u) {
+  const name = u.kind.startsWith('arrival') ? (findArrivalGroup(u.code)?.label || u.code) : u.code;
+  const what = u.kind === 'shuttleArrival' || u.kind === 'arrivalArrival' ? 'arrivée' : 'départ';
+  return u.value ? `${name} ${what} ${u.value}` : `${name} ${what} retiré`;
+}
+
+async function syncFromCirculations() {
+  if (!settings.circulationsUrl || circulationsBusy) return;
+  // Pas pendant une saisie dans une fenêtre : on relira au tour suivant.
+  if (document.body.classList.contains('modal-open')) return;
+  circulationsBusy = true;
+  try {
+    const diffusion = await fetchCirculationsDiffusion(settings.circulationsUrl);
+    circulationsLastRead = { at: new Date() };
+    const values = circulationsValues(diffusion, todayISO());
+    // journée pas encore ouverte dans la saisie, ou fenêtre ouverte entre-temps
+    if (!values || currentDate !== todayISO() || document.body.classList.contains('modal-open')) return;
+    const seen = loadCirculationsSeen();
+    const updates = planCirculationsUpdates(values.filter(circulationsKnows), seen, circulationsCurrentValue);
+    saveCirculationsSeen(seen);
+    if (!updates.length) return;
+    updates.forEach(applyCirculationsUpdate);
+    saveShuttles(shuttles);
+    saveShuttleReserves(shuttleReserves);
+    saveArrivals(arrivals);
+    renderShuttlesBar();
+    renderShuttleQuickboard();
+    renderArrivalsBar();
+    showToast(`Suivi des circulations : ${updates.map(circulationsUpdateLabel).join(' · ')}`);
+  } catch (err) {
+    circulationsLastRead = { at: new Date(), error: err.name === 'AbortError' ? 'serveur trop lent' : err.message };
+  } finally {
+    circulationsBusy = false;
+  }
+}
+
+function startCirculationsSync() {
+  syncFromCirculations();
+  setInterval(syncFromCirculations, 20000);
 }
 
 async function pushTodayToSheet() {
@@ -2857,6 +2958,9 @@ function openShuttleModal(code) {
         if (current.arrivedManually && current.arrivedAt) {
           const delta = computeShuttleArrivalDelta(code);
           pushShuttleLogIfConfigured('Navette', `${code}-arr`, `${code} (arrivée)`, computeShuttleArrival(code, current.departure), formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
+        } else {
+          // arrivée annulée : heure vide, pour que le suivi des circulations la retire aussi
+          pushShuttleLogIfConfigured('Navette', `${code}-arr`, `${code} (arrivée)`, null, null, null);
         }
         showToast(current.arrivedManually ? `Navette ${code} marquée arrivée` : `Navette ${code} réactivée`);
       });
@@ -2890,6 +2994,8 @@ function openShuttleModal(code) {
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
+        // heure vide envoyée au Sheet : le suivi des circulations retire aussi ce départ
+        pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, null, null, null);
         showToast(`Navette ${code} : heure de départ effacée`);
       });
       panel.querySelector('#btnCancelShuttle').addEventListener('click', () => {
@@ -3190,6 +3296,7 @@ function openQuickboardTimeEditor(key, label) {
         saveShuttleReserves(shuttleReserves);
         renderShuttleQuickboard();
         closeModal();
+        pushQuickboardLog(key, label);
         showToast(`${label} : heure de départ effacée`);
       });
       panel.querySelector('#btnQuickboardCancel').addEventListener('click', () => {
@@ -3673,6 +3780,8 @@ function openArrivalModal(id) {
         if (current.arrivedManually && current.arrivedAt) {
           const delta = computeArrivalArrivalDelta(id);
           pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, current.departure ? computeArrivalETA(id, current.departure) : null, formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
+        } else {
+          pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, null, null, null);
         }
         showToast(current.arrivedManually ? `${group.label} marquée arrivée` : `${group.label} réactivée`);
       });
@@ -3714,6 +3823,7 @@ function openArrivalModal(id) {
         saveArrivals(arrivals);
         renderArrivalsBar();
         closeModal();
+        pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, null, null, null);
         showToast(`${group.label} : heure de départ effacée`);
       });
       panel.querySelector('#btnCancelArrival').addEventListener('click', () => {
@@ -5755,6 +5865,7 @@ function refreshFromStorage() {
   renderArrivalsBar();
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');
   if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
+  syncFromCirculations();
 }
 
 function wireVisibilityRefresh() {
@@ -5986,6 +6097,7 @@ function init() {
   setSyncIndicator(settings.sheetsWebAppUrl ? 'loading' : 'none');
 
   if (settings.sheetsWebAppUrl) syncWithSheet({ silent: true });
+  startCirculationsSync();
 }
 
 document.addEventListener('DOMContentLoaded', init);
