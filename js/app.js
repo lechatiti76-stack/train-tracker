@@ -2589,7 +2589,7 @@ function recordShuttleDepartureNow(code) {
   shuttles[code] = current;
   saveShuttles(shuttles);
   renderShuttlesBar();
-  pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, null, current.departure, null);
+  pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, computeShuttleArrival(code, current.departure), current.departure, null);
   showToast(`Navette ${code} : départ ${current.departure}`);
 }
 
@@ -2601,7 +2601,7 @@ function recordArrivalDepartureNow(id) {
   arrivals[id] = current;
   saveArrivals(arrivals);
   renderArrivalsBar();
-  pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, null, current.departure, null);
+  pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, computeArrivalETA(id, current.departure), current.departure, null);
   showToast(`${group.label} : départ ${current.departure}`);
 }
 
@@ -2614,6 +2614,8 @@ function toggleArrivalFA(id) {
   arrivals[id] = current;
   saveArrivals(arrivals);
   renderArrivalsBar();
+  // case FA envoyée au Sheet (heure vide si décochée) : le suivi des circulations affiche « À FA »
+  pushShuttleLogIfConfigured('Arrivée', `${id}-fa`, `${group.label} (FA)`, null, current.faStored ? formatHHMM(new Date(current.faStoredAt)) : null, null);
   showToast(current.faStored ? `${group.label} : stocké à FA (${formatHHMM(new Date(current.faStoredAt))})` : `${group.label} : FA retiré`);
   return current.faStored;
 }
@@ -2983,7 +2985,7 @@ function openShuttleModal(code) {
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
-        if (current.departure) pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, null, current.departure, null);
+        if (current.departure) pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, computeShuttleArrival(code, current.departure), current.departure, null);
         showToast(`Navette ${code} mise à jour`);
       });
       // "Effacer" : retire seulement l'heure de départ saisie (la vignette
@@ -3813,7 +3815,7 @@ function openArrivalModal(id) {
         saveArrivals(arrivals);
         renderArrivalsBar();
         closeModal();
-        if (current.departure) pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, null, current.departure, null);
+        if (current.departure) pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, computeArrivalETA(id, current.departure), current.departure, null);
         showToast(`${group.label} mise à jour`);
       });
       // "Effacer" : retire seulement l'heure de départ saisie.
