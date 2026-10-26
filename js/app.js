@@ -167,6 +167,7 @@ function toggleQuickTrain(number) {
     trains = trains.filter((t) => t.id !== existing.id);
     persist();
     renderGrid();
+    clearTrainInSheet(existing);
     showToast(`Train ${number} retiré — ne circule pas aujourd'hui`);
     return;
   }
@@ -637,7 +638,23 @@ function deleteTrain(train) {
   trains = trains.filter((t) => t.id !== train.id);
   persist();
   renderGrid();
+  clearTrainInSheet(train);
   showToast('Train supprimé');
+}
+
+// Train retiré de la journée ou supprimé : ses heures (et l'état calé) sont
+// vidées dans l'onglet "Journal" du Sheet, sinon le suivi des circulations
+// continuerait d'afficher sa dernière étape sur les écrans. Envois l'un après
+// l'autre, comme pushAllStepsToSheet (verrou côté Apps Script).
+async function clearTrainInSheet(train) {
+  if (!settings.sheetsWebAppUrl || !(train.steps.some((s) => s.real) || train.stalled)) return;
+  const blank = { ...train, stalled: false, stalledAt: null, steps: train.steps.map((s) => ({ ...s, real: null })) };
+  try {
+    for (let i = 0; i < blank.steps.length; i++) await pushStepToSheet(settings.sheetsWebAppUrl, blank, i, computeAllStepDelays);
+    await pushStalledToSheet(settings.sheetsWebAppUrl, blank);
+  } catch (err) {
+    // réseau indisponible : rien de plus à faire ici
+  }
 }
 
 function moveTrain(train, direction) {
