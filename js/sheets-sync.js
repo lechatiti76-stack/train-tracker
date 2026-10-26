@@ -242,6 +242,26 @@ function stepLogPayload(train, stepIndex, delay) {
   };
 }
 
+// "⛔ Train calé" (ou son annulation) : une ligne "Train calé" dans l'onglet
+// "Journal", heure vide quand l'état est annulé. Le suivi des circulations
+// l'affiche en priorité sur ses écrans TV.
+export async function pushStalledToSheet(webAppUrl, train) {
+  const at = train.stalled && train.stalledAt ? new Date(train.stalledAt) : null;
+  const p = (n) => String(n).padStart(2, '0');
+  return postToSheet(webAppUrl, {
+    action: 'logStep',
+    date: train.date,
+    train: train.number,
+    etape: 'Train calé',
+    heureTheorique: '',
+    heureReelle: at ? `${p(at.getHours())}:${p(at.getMinutes())}:${p(at.getSeconds())}` : '',
+    ecartMin: '',
+    ...compositionFields(train),
+    cause: '',
+    misAJour: new Date().toISOString(),
+  });
+}
+
 export async function pushStepToSheet(webAppUrl, train, stepIndex, computeAllStepDelaysFn) {
   const delays = computeAllStepDelaysFn(train);
   return postToSheet(webAppUrl, stepLogPayload(train, stepIndex, delays[stepIndex]));

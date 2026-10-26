@@ -8,7 +8,7 @@ import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, t
 import { fetchCirculationsDiffusion, circulationsValues, planCirculationsUpdates } from './circulations-sync.js';
 import { computeAllStepDelays, computeStepDelay, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM, diffMinutes, delayTone, pad2 } from './time-utils.js';
-import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet, pushShuttleLogToSheet } from './sheets-sync.js';
+import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet, pushShuttleLogToSheet, pushStalledToSheet } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
@@ -360,6 +360,7 @@ function toggleTrainStalled(train) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
+  if (settings.sheetsWebAppUrl) pushStalledToSheet(settings.sheetsWebAppUrl, train).catch(() => {});
 }
 
 // ---------- Infos départ : poussé sous caténaire / N° machine / mail reçu ----------
