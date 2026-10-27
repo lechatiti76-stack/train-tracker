@@ -121,19 +121,22 @@ function groupRowsByTrainForDate(rows, dateISO) {
 // - Ne touche JAMAIS aux heures réelles déjà enregistrées.
 // - Met à jour l'heure théorique + la cause d'une étape existante.
 // - Crée un nouveau train si son numéro n'existe pas encore pour cette date.
-export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabels) {
+// `skipNumbers` : trains retirés à la main pour ce jour (« ne circule pas ») ;
+// ils ne sont pas recréés, même si le Sheet les fait circuler ce jour-là.
+export function mergeSheetRowsIntoTrains(rows, trains, dateISO, defaultStepLabels, skipNumbers = new Set()) {
   const result = trains.map((t) => ({ ...t, steps: t.steps.map((s) => ({ ...s })) }));
   const touchedNumbers = new Set();
   const byTrainNumber = groupRowsByTrainForDate(rows, dateISO);
   let maxOrder = result.reduce((m, t) => Math.max(m, t.order || 0), -1);
 
   for (const [number, sheetRows] of byTrainNumber) {
-    touchedNumbers.add(number);
     let train = result.find((t) => t.number === number && t.date === dateISO);
     if (!train) {
+      if (skipNumbers.has(number)) continue;
       train = createEmptyTrain({ number, date: dateISO, stepLabels: defaultStepLabels, order: ++maxOrder, source: 'sheet' });
       result.push(train);
     }
+    touchedNumbers.add(number);
     applySillonRowsToTrain(train, sheetRows);
     applyOffsetSteps(train);
     train.updatedAt = new Date().toISOString();

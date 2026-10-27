@@ -184,6 +184,20 @@ export function saveCirculationsSeen(seen) {
   }
 }
 
+// Numéros des trains retirés à la main aujourd'hui (voir STORAGE_KEYS.removedTrains).
+export function loadRemovedTrains() {
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.removedTrains), {});
+  return raw && raw.date === todayISO() && Array.isArray(raw.numbers) ? raw.numbers : [];
+}
+
+export function saveRemovedTrains(numbers) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.removedTrains, JSON.stringify({ date: todayISO(), numbers }));
+  } catch (err) {
+    console.error('Impossible d\'enregistrer les trains retirés.', err);
+  }
+}
+
 function uuid() {
   if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);

@@ -230,4 +230,7 @@ export const STORAGE_KEYS = {
   // Dernières valeurs lues sur le suivi des circulations (voir
   // circulations-sync.js), remises à zéro chaque jour.
   circulationsSeen: 'traintrack:circulationsSeen:v1',
+  // Trains retirés à la main pour la journée (« ne circule pas ») : la
+  // synchronisation des horaires ne les recrée pas. Remis à zéro chaque jour.
+  removedTrains: 'traintrack:removedTrains:v1',
 };

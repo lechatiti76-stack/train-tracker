@@ -4,7 +4,7 @@
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
 import { DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart, loadCirculationsSeen, saveCirculationsSeen } from './storage.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart, loadCirculationsSeen, saveCirculationsSeen, loadRemovedTrains, saveRemovedTrains } from './storage.js';
 import { fetchCirculationsDiffusion, circulationsValues, planCirculationsUpdates } from './circulations-sync.js';
 import { computeAllStepDelays, computeStepDelay, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM, diffMinutes, delayTone, pad2 } from './time-utils.js';
@@ -166,6 +166,7 @@ function toggleQuickTrain(number) {
     if (hasRecorded && !confirm(`Le train ${number} a déjà des heures enregistrées aujourd'hui. Le retirer quand même (ne circule pas) ?`)) return;
     trains = trains.filter((t) => t.id !== existing.id);
     persist();
+    markTrainRemovedToday(number, true);
     renderGrid();
     clearTrainInSheet(existing);
     showToast(`Train ${number} retiré — ne circule pas aujourd'hui`);
@@ -175,6 +176,7 @@ function toggleQuickTrain(number) {
   const newTrain = createEmptyTrain({ number, date: currentDate, stepLabels: settings.defaultStepLabels, order: ++maxOrder, source: 'manual' });
   trains.push(newTrain);
   persist();
+  markTrainRemovedToday(number, false);
   renderGrid();
   showToast(`Train ${number} ajouté — circule aujourd'hui`);
 }
@@ -637,9 +639,19 @@ function deleteTrain(train) {
   if (!confirm(`Supprimer définitivement le train ${train.number} ?`)) return;
   trains = trains.filter((t) => t.id !== train.id);
   persist();
+  if (train.date === todayISO()) markTrainRemovedToday(train.number, true);
   renderGrid();
   clearTrainInSheet(train);
   showToast('Train supprimé');
+}
+
+// Un train retiré à la main ne doit pas être recréé par la synchronisation
+// des horaires (son sillon circule pourtant ce jour-là dans le Sheet) ; le
+// rajouter par son bouton d'accès rapide le fait de nouveau circuler.
+function markTrainRemovedToday(number, removed) {
+  const list = loadRemovedTrains().filter((n) => n !== number);
+  if (removed) list.push(number);
+  saveRemovedTrains(list);
 }
 
 // Train retiré de la journée ou supprimé : ses heures (et l'état calé) sont
@@ -1543,6 +1555,7 @@ function saveTrainForm(panel, existingTrain) {
       const newTrain = createEmptyTrain({ number, date, stepLabels: labels, order: ++maxOrder, source: 'manual' });
       applyStepFields(newTrain);
       trains.push(newTrain);
+      if (date === todayISO()) markTrainRemovedToday(number, false);
     }
     createdCount = allDates.length;
   }
@@ -2151,7 +2164,7 @@ async function syncWithSheet({ silent = false } = {}) {
     return;
   }
 
-  const { trains: merged, touchedNumbers } = mergeSheetRowsIntoTrains(res.rows, trains, currentDate, settings.defaultStepLabels);
+  const { trains: merged, touchedNumbers } = mergeSheetRowsIntoTrains(res.rows, trains, currentDate, settings.defaultStepLabels, new Set(loadRemovedTrains()));
   trains = merged;
   persist();
   settings.lastSyncStatus = 'ok';
