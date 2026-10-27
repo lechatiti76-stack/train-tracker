@@ -11,7 +11,7 @@ import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, par
 import { fetchTheoreticalFromSheet, mergeSheetRowsIntoTrains, pushStepToSheet, pushAllStepsToSheet, pushShuttleLogToSheet, pushStalledToSheet } from './sheets-sync.js';
 import { SplitFlapDisplay } from './splitflap.js';
 import { createDelayChart, updateDelayChart } from './charts.js';
-import { trainCardTemplate, updateCardDynamicParts, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
+import { trainCardTemplate, updateCardDynamicParts, trainNo, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
 import { initStopwatch } from './stopwatch.js';
 import { saveArchivePdf, listArchivePdfs, getArchivePdf, deleteArchivePdf, pruneOldArchives } from './archives.js';
 
@@ -131,6 +131,87 @@ function getQuickTrainDestination(number) {
   return found?.destination || null;
 }
 
+// ---------- Planning de la semaine (Réglages) ----------
+// settings.weeklyPlan[kind][key] = jours de circulation (0 = dimanche …
+// 6 = samedi). Pas d'entrée = circule tous les jours. Un voyage « pas prévu »
+// aujourd'hui est grisé (bouton, vignette, case) mais reste utilisable :
+// un clic demande confirmation, au cas où il circule exceptionnellement.
+// kind : 'trains' (boutons d'accès rapide), 'shuttles' (arrivées navettes),
+// 'quickboard' (départs navettes), 'arrivals' (arrivées trains).
+const WEEK_DAYS = [
+  { d: 1, short: 'L', name: 'lundi' }, { d: 2, short: 'M', name: 'mardi' }, { d: 3, short: 'M', name: 'mercredi' },
+  { d: 4, short: 'J', name: 'jeudi' }, { d: 5, short: 'V', name: 'vendredi' }, { d: 6, short: 'S', name: 'samedi' },
+  { d: 0, short: 'D', name: 'dimanche' },
+];
+
+function weekdayOfISO(dateISO) {
+  const [y, m, d] = String(dateISO).split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+function plannedDays(kind, key) {
+  const days = settings.weeklyPlan?.[kind]?.[key];
+  return Array.isArray(days) ? days : null;
+}
+
+function isPlannedOn(kind, key, dateISO = currentDate) {
+  const days = plannedDays(kind, key);
+  return !days || days.includes(weekdayOfISO(dateISO));
+}
+
+function dayNameOf(dateISO = currentDate) {
+  return WEEK_DAYS.find((w) => w.d === weekdayOfISO(dateISO))?.name || '';
+}
+
+function confirmOffDay(label) {
+  return confirm(`${label} ne circule pas le ${dayNameOf()} d'après le planning de la semaine (Réglages).\n\nL'utiliser quand même aujourd'hui ?`);
+}
+
+// Trains créés automatiquement par la synchronisation des horaires alors
+// qu'ils ne sont pas prévus aujourd'hui au planning, et encore vierges
+// (aucune heure, pas calé, pas supprimé) : retirés, pour que les boutons
+// d'accès rapide ne s'affichent pas « ● » tout seuls.
+function dropUnplannedSheetTrains() {
+  const before = trains.length;
+  trains = trains.filter((t) => !(t.date === currentDate && t.source === 'sheet'
+    && !isPlannedOn('trains', t.number) && !t.steps.some((s) => s.real) && !t.stalled && !t.cancelled));
+  if (trains.length !== before) persist();
+  return before - trains.length;
+}
+
+// Changement du numéro de sillon pour la journée (ex : 70630 roule en
+// 420944). Le numéro habituel reste celui du bouton d'accès rapide et du
+// Sheet ; le numéro du jour est affiché sur la vignette, le mail et le PDF.
+function openRunNumberEditor(train) {
+  openModal({
+    title: `Numéro de sillon du jour — train ${escapeHtml(train.number)}`,
+    bodyHTML: `
+      <form id="runNumberForm" class="stacked-form">
+        <label>Numéro sous lequel le train circule aujourd'hui
+          <input type="text" id="fRunNumber" inputmode="numeric" placeholder="ex : 420944" value="${escapeHtml(train.runNumber || '')}">
+        </label>
+        <p class="help-text">Le train garde son numéro habituel (${escapeHtml(train.number)}) pour le bouton d'accès rapide et les horaires. Le numéro du jour s'affiche sur la vignette, le mail et le PDF (« 420944 (${escapeHtml(train.number)}) »). Laisser vide pour revenir au numéro habituel. Valable pour cette journée seulement.</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-outline" id="btnRunNumberClear">Numéro habituel</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>`,
+    onMount: (panel) => {
+      const save = (value) => {
+        const v = String(value || '').trim();
+        train.runNumber = v && v !== train.number ? v : null;
+        train.updatedAt = new Date().toISOString();
+        persist();
+        closeModal();
+        renderGrid();
+        showToast(train.runNumber ? `Train ${train.number} : circule aujourd'hui en ${train.runNumber}` : `Train ${train.number} : numéro habituel`);
+      };
+      panel.querySelector('#runNumberForm').addEventListener('submit', (e) => { e.preventDefault(); save(panel.querySelector('#fRunNumber').value); });
+      panel.querySelector('#btnRunNumberClear').addEventListener('click', () => save(''));
+    },
+  });
+}
+
 // Couleur de cadre par opérateur (NAVILAND = violet, FERROVERGNE = orange),
 // calculée dynamiquement à partir du champ `operator` — voir
 // QUICK_TRAIN_OPERATOR_COLORS dans config.js.
@@ -148,13 +229,15 @@ function renderQuickTrainsBar() {
     const todayTrain = trains.find((t) => t.date === currentDate && t.number === number);
     const exists = Boolean(todayTrain);
     const cancelled = Boolean(todayTrain?.cancelled);
+    const offDay = !exists && !isPlannedOn('trains', number);
     const meta = [operator, destination].filter(Boolean).join(' · ');
     const color = quickTrainOperatorColor(operator);
     return `
-      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}${color ? ' has-operator-color' : ''}${cancelled ? ' is-cancelled' : ''}" ${color ? `style="--quick-train-color:${color}"` : ''} data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}">
+      <button type="button" class="btn quick-train-btn ${exists ? 'btn-primary' : 'btn-outline'}${color ? ' has-operator-color' : ''}${cancelled ? ' is-cancelled' : ''}${offDay ? ' is-off-day' : ''}" ${color ? `style="--quick-train-color:${color}"` : ''} data-quick-train="${escapeHtml(number)}" aria-pressed="${exists}"${offDay ? ` title="Ne circule pas le ${dayNameOf()} (planning de la semaine)"` : ''}>
         ${cancelled ? cancelBannerHTML() : ''}
         ${meta ? `<span class="quick-train-meta">${escapeHtml(meta)}</span>` : ''}
-        <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}</span>
+        <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}${todayTrain?.runNumber ? ` » ${escapeHtml(todayTrain.runNumber)}` : ''}</span>
+        ${offDay ? '<span class="quick-train-offday">pas prévu</span>' : ''}
       </button>`;
   }).join('');
 }
@@ -172,6 +255,7 @@ function toggleQuickTrain(number) {
     showToast(`Train ${number} retiré — ne circule pas aujourd'hui`);
     return;
   }
+  if (!isPlannedOn('trains', number) && !confirmOffDay(`Le train ${number}`)) return;
   let maxOrder = trains.reduce((m, t) => Math.max(m, t.order || 0), -1);
   const newTrain = createEmptyTrain({ number, date: currentDate, stepLabels: settings.defaultStepLabels, order: ++maxOrder, source: 'manual' });
   trains.push(newTrain);
@@ -294,7 +378,7 @@ function resetAllStepsForTrain(train) {
     showToast('Aucune heure enregistrée à réinitialiser');
     return;
   }
-  if (!confirm(`Réinitialiser les ${recordedCount} heure(s) enregistrée(s) pour le train ${train.number} ?`)) return;
+  if (!confirm(`Réinitialiser les ${recordedCount} heure(s) enregistrée(s) pour le train ${trainNo(train)} ?`)) return;
   train.steps.forEach((s, i) => { s.real = null; pushStepIfConfigured(train, i); });
   train.collapsed = false;
   train.updatedAt = new Date().toISOString();
@@ -347,18 +431,18 @@ function openStepTimeEditor(train, stepIndex) {
 // la vignette se réduit comme un train parti. Un second clic annule.
 function toggleTrainStalled(train) {
   if (train.stalled) {
-    if (!confirm(`Annuler l'état « calé » du train ${train.number} ?`)) return;
+    if (!confirm(`Annuler l'état « calé » du train ${trainNo(train)} ?`)) return;
     train.stalled = false;
     train.stalledAt = null;
     train.collapsed = false;
-    showToast(`Train ${train.number} : état calé annulé`);
+    showToast(`Train ${trainNo(train)} : état calé annulé`);
   } else {
     const done = train.steps.filter((s) => s.real).length;
-    if (!confirm(`Déclarer le train ${train.number} CALÉ ?\n\nIl sera validé même si la séquence n'est pas finie (${done}/${train.steps.length} étape(s) faite(s)) ; les heures déjà enregistrées sont conservées.`)) return;
+    if (!confirm(`Déclarer le train ${trainNo(train)} CALÉ ?\n\nIl sera validé même si la séquence n'est pas finie (${done}/${train.steps.length} étape(s) faite(s)) ; les heures déjà enregistrées sont conservées.`)) return;
     train.stalled = true;
     train.stalledAt = new Date().toISOString();
     train.collapsed = true;
-    showToast(`Train ${train.number} déclaré calé ⛔`);
+    showToast(`Train ${trainNo(train)} déclaré calé ⛔`);
   }
   train.updatedAt = new Date().toISOString();
   persist();
@@ -378,7 +462,7 @@ function toggleTrainCatenary(train) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
-  showToast(train.pushedCatenary ? `Train ${train.number} : poussé sous caténaire ⚡` : `Train ${train.number} : « poussé sous caténaire » annulé`);
+  showToast(train.pushedCatenary ? `Train ${trainNo(train)} : poussé sous caténaire ⚡` : `Train ${trainNo(train)} : « poussé sous caténaire » annulé`);
 }
 
 function toggleTrainMailReceived(train) {
@@ -387,7 +471,7 @@ function toggleTrainMailReceived(train) {
   train.updatedAt = new Date().toISOString();
   persist();
   refreshTrainCard(train);
-  showToast(train.mailReceived ? `Train ${train.number} : mail reçu ✉` : `Train ${train.number} : mail non reçu`);
+  showToast(train.mailReceived ? `Train ${trainNo(train)} : mail reçu ✉` : `Train ${trainNo(train)} : mail non reçu`);
 }
 
 // Valeurs prêtes à afficher (email / PDF) — OUI en vert, NON en gris
@@ -411,7 +495,7 @@ function trainDepartInfo(train) {
 // rétablit le voyage. Pour l'enlever complètement, il reste "✕" (supprimer
 // la vignette) ou le bouton du train à accès rapide.
 function toggleTrainCancelled(train) {
-  if (!train.cancelled && !confirm(`Supprimer le voyage du train ${train.number} ?\n\nLa vignette sera grisée et marquée « SUPPRIMÉ » (le train ne roule pas). Vous pourrez la rétablir.`)) return;
+  if (!train.cancelled && !confirm(`Supprimer le voyage du train ${trainNo(train)} ?\n\nLa vignette sera grisée et marquée « SUPPRIMÉ » (le train ne roule pas). Vous pourrez la rétablir.`)) return;
   train.cancelled = !train.cancelled;
   train.cancelledAt = train.cancelled ? new Date().toISOString() : null;
   train.collapsed = train.cancelled;
@@ -419,14 +503,14 @@ function toggleTrainCancelled(train) {
   persist();
   refreshTrainCard(train);
   renderQuickTrainsBar();
-  showToast(train.cancelled ? `Train ${train.number} supprimé (ne roule pas)` : `Train ${train.number} rétabli`);
+  showToast(train.cancelled ? `Train ${trainNo(train)} supprimé (ne roule pas)` : `Train ${trainNo(train)} rétabli`);
 }
 
 // "📝 Observation" : texte libre par train, repris dans le PDF récap, la
 // copie stylée, la copie texte et l'email.
 function openObservationModal(train) {
   openModal({
-    title: `Observation — Train ${escapeHtml(train.number)}`,
+    title: `Observation — Train ${escapeHtml(trainNo(train))}`,
     bodyHTML: `
       <form id="observationForm" class="stacked-form">
         <label>Observation (texte libre, repris dans le PDF récap et les emails)
@@ -464,7 +548,7 @@ function openObservationModal(train) {
 function openCompositionModal(train) {
   const comp = train.composition || {};
   openModal({
-    title: `Composition — Train ${escapeHtml(train.number)}`,
+    title: `Composition — Train ${escapeHtml(trainNo(train))}`,
     bodyHTML: `
       <form id="compositionForm" class="stacked-form">
         <label>Nombre de wagons
@@ -554,7 +638,7 @@ function setTrainType(train, type) {
 function openSlotModal(train) {
   const slot = train.slot || {};
   openModal({
-    title: `Infos SLOT — Train ${escapeHtml(train.number)}`,
+    title: `Infos SLOT — Train ${escapeHtml(trainNo(train))}`,
     bodyHTML: `
       <form id="slotForm" class="stacked-form">
         <label>Type de SLOT
@@ -636,7 +720,7 @@ function openSlotModal(train) {
 }
 
 function deleteTrain(train) {
-  if (!confirm(`Supprimer définitivement le train ${train.number} ?`)) return;
+  if (!confirm(`Supprimer définitivement le train ${trainNo(train)} ?`)) return;
   trains = trains.filter((t) => t.id !== train.id);
   persist();
   if (train.date === todayISO()) markTrainRemovedToday(train.number, true);
@@ -748,7 +832,7 @@ function buildTrainReportText(train, destination) {
     'Bonjour,',
     trainAnnouncementText(train, destination, delays),
     '',
-    `🚆 TRAIN ${train.number}${destination ? ` → ${destination}` : ''}`,
+    `🚆 TRAIN ${trainNo(train)}${destination ? ` → ${destination}` : ''}`,
   ];
 
   if (train.cancelled) {
@@ -914,26 +998,26 @@ function trainAnnouncementText(train, destination, delays) {
     const suffix = ecart.kind === 'onTime' ? ", à l'heure prévue"
       : ecart.kind === 'late' ? `, soit un retard de ${ecart.label}${prevu ? ` (prévu ${prevu})` : ''}`
         : ecart.kind === 'early' ? `, soit une avance de ${ecart.label.slice(1)}${prevu ? ` (prévu ${prevu})` : ''}` : '';
-    return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
+    return `Nous vous annonçons le départ du train N° ${trainNo(train)}${dest} à ${formatHHMM(d.realDate)}${suffix}.`;
   }
   if (situation.kind === 'cancelled') {
-    return `Nous vous informons que le train N° ${train.number}${dest} est supprimé : il ne circule pas aujourd'hui.`;
+    return `Nous vous informons que le train N° ${trainNo(train)}${dest} est supprimé : il ne circule pas aujourd'hui.`;
   }
   if (situation.kind === 'departedFA') {
-    return `Nous vous annonçons le départ du train N° ${train.number}${dest} à ${situation.time} (${slotFADetailsText(train)}).`;
+    return `Nous vous annonçons le départ du train N° ${trainNo(train)}${dest} à ${situation.time} (${slotFADetailsText(train)}).`;
   }
   if (situation.kind === 'stalled') {
     const at = situation.at ? ` depuis ${formatHHMM(situation.at)}` : '';
-    if (!situation.last) return `Nous vous informons que le train N° ${train.number}${dest} est calé${at} (aucune étape effectuée).`;
+    if (!situation.last) return `Nous vous informons que le train N° ${trainNo(train)}${dest} est calé${at} (aucune étape effectuée).`;
     const e = mailEcart(situation.last.delay);
-    return `Nous vous informons que le train N° ${train.number}${dest} est calé${at}. Dernière étape effectuée : « ${situation.last.step.label} » à ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.label})` : ''}.`;
+    return `Nous vous informons que le train N° ${trainNo(train)}${dest} est calé${at}. Dernière étape effectuée : « ${situation.last.step.label} » à ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.label})` : ''}.`;
   }
   if (situation.kind === 'progress') {
     const d = situation.last.delay;
     const ecart = mailEcart(d);
-    return `Nous vous informons que le train N° ${train.number}${dest} a effectué l'étape « ${situation.last.step.label} » à ${formatHHMM(d.realDate)}${ecart.kind !== 'none' ? ` (${ecart.label})` : ''}.`;
+    return `Nous vous informons que le train N° ${trainNo(train)}${dest} a effectué l'étape « ${situation.last.step.label} » à ${formatHHMM(d.realDate)}${ecart.kind !== 'none' ? ` (${ecart.label})` : ''}.`;
   }
-  return `Nous vous informons du suivi du train N° ${train.number}${dest} : aucune étape n'a encore été enregistrée.`;
+  return `Nous vous informons du suivi du train N° ${trainNo(train)}${dest} : aucune étape n'a encore été enregistrée.`;
 }
 
 function buildTrainReportHTML(train, destination) {
@@ -953,7 +1037,7 @@ function buildTrainReportHTML(train, destination) {
 
   // Phrase d'annonce, avec numéro / destination / heure mis en valeur.
   const destHTML = destination ? ` à destination de <strong style="color:${MAIL_ACCENT};">${escapeHtml(destination)}</strong>` : '';
-  const numberHTML = `<strong style="color:${MAIL_INK};">N° ${escapeHtml(train.number)}</strong>`;
+  const numberHTML = `<strong style="color:${MAIL_INK};">N° ${escapeHtml(trainNo(train))}</strong>`;
   let announceHTML;
   if (situation.kind === 'departed') {
     const prevuTxt = departPrevu !== '--:--' ? ` (prévu ${escapeHtml(departPrevu)})` : '';
@@ -1041,7 +1125,7 @@ function buildTrainReportHTML(train, destination) {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${MAIL_BORDER};border-radius:10px;border-collapse:separate;">
         <tr>
           <td valign="middle" style="padding:14px 16px;">
-            <div style="${F}font-size:24px;font-weight:800;color:${MAIL_INK};">🚆 TRAIN ${escapeHtml(train.number)}</div>
+            <div style="${F}font-size:24px;font-weight:800;color:${MAIL_INK};">🚆 TRAIN ${escapeHtml(trainNo(train))}</div>
             ${destination ? `<div style="${F}font-size:14px;font-weight:700;color:${MAIL_ACCENT};margin-top:2px;">→ ${escapeHtml(destination.toUpperCase())}</div>` : ''}
           </td>
           <td valign="middle" style="padding:14px 16px;border-left:1px solid ${MAIL_BORDER};">
@@ -1095,7 +1179,7 @@ function buildTrainReportHTML(train, destination) {
         <td width="56%" valign="top" style="padding:12px 14px;border:1px solid ${MAIL_BORDER};border-radius:10px;">
           <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin-bottom:6px;">RÉSUMÉ CIRCULATION</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-            ${summaryRow('🚆', 'Train', escapeHtml(train.number))}
+            ${summaryRow('🚆', 'Train', escapeHtml(trainNo(train)))}
             ${destination ? summaryRow('📍', 'Destination', escapeHtml(destination)) : ''}
             ${summaryRow('🕒', 'Départ prévu', escapeHtml(departPrevu))}
             ${situation.kind === 'departedFA'
@@ -1203,18 +1287,18 @@ function trainMailSubject(train, destination) {
   const delays = computeAllStepDelays(train);
   const situation = trainMailSituation(train, delays);
   const dest = destination ? ` → ${destination}` : '';
-  if (situation.kind === 'cancelled') return `Train ${train.number}${dest} — SUPPRIMÉ (ne roule pas)`;
+  if (situation.kind === 'cancelled') return `Train ${trainNo(train)}${dest} — SUPPRIMÉ (ne roule pas)`;
   if (situation.kind === 'departedFA') {
-    return `Départ train ${train.number}${dest} — ${situation.time} (FA${situation.wagons ? `, ${situation.wagons} wagons` : ''})`;
+    return `Départ train ${trainNo(train)}${dest} — ${situation.time} (FA${situation.wagons ? `, ${situation.wagons} wagons` : ''})`;
   }
   if (situation.kind === 'stalled') {
-    return `Train ${train.number}${dest} — CALÉ${situation.at ? ` (${formatHHMM(situation.at)})` : ''}`;
+    return `Train ${trainNo(train)}${dest} — CALÉ${situation.at ? ` (${formatHHMM(situation.at)})` : ''}`;
   }
   if (situation.kind === 'departed') {
     const e = mailEcart(situation.last.delay);
-    return `Départ train ${train.number}${dest} — ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.kind === 'onTime' ? "à l'heure" : e.label})` : ''}`;
+    return `Départ train ${trainNo(train)}${dest} — ${formatHHMM(situation.last.delay.realDate)}${e.kind !== 'none' ? ` (${e.kind === 'onTime' ? "à l'heure" : e.label})` : ''}`;
   }
-  return `Suivi train ${train.number}${dest} — ${formatDateFR(train.date)}`;
+  return `Suivi train ${trainNo(train)}${dest} — ${formatDateFR(train.date)}`;
 }
 
 // Bouton "Email" : copie le message stylé dans le presse-papiers puis ouvre
@@ -1270,6 +1354,7 @@ function onGridClick(e) {
     case 'copy-html-train': copyTrainDataStyled(train); break;
     case 'email-train': emailTrainData(train); break;
     case 'edit-train': openTrainModal(train); break;
+    case 'edit-run-number': openRunNumberEditor(train); break;
     case 'delete-train': deleteTrain(train); break;
     case 'move-left': moveTrain(train, -1); break;
     case 'move-right': moveTrain(train, 1); break;
@@ -1301,7 +1386,7 @@ function wireSillonInputs(grid) {
     train.machineNumber = input.value.trim();
     train.updatedAt = new Date().toISOString();
     persist();
-    if (train.machineNumber) showToast(`Train ${train.number} : machine ${train.machineNumber} enregistrée`);
+    if (train.machineNumber) showToast(`Train ${trainNo(train)} : machine ${train.machineNumber} enregistrée`);
   });
   grid.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.closest('[data-role="machine-number"]')) { e.preventDefault(); e.target.blur(); }
@@ -1470,7 +1555,7 @@ function addDateRow(container) {
 
 function openTrainModal(train) {
   openModal({
-    title: train ? `Modifier le train ${escapeHtml(train.number)}` : 'Ajouter un train',
+    title: train ? `Modifier le train ${escapeHtml(trainNo(train))}` : 'Ajouter un train',
     wide: true,
     bodyHTML: trainFormBodyHTML(train),
     onMount: (panel) => {
@@ -1848,6 +1933,8 @@ function settingsBodyHTML() {
         </label>
       </div>
 
+      ${weeklyPlanSectionHTML()}
+
       <label>Thème
         <select id="sTheme">
           <option value="auto" ${settings.theme === 'auto' ? 'selected' : ''}>Automatique (système)</option>
@@ -1866,12 +1953,65 @@ function settingsBodyHTML() {
     </form>`;
 }
 
+// Planning de la semaine : une ligne par train / navette / arrivée, une case
+// par jour (L M M J V S D). Toutes cochées = circule tous les jours.
+function weeklyPlanItems() {
+  return [
+    { kind: 'trains', title: 'Trains départs (boutons d\'accès rapide)', items: (settings.quickTrains || []).filter((t) => t.number).map((t) => ({ key: t.number, label: t.number, sub: [t.operator, t.destination].filter(Boolean).join(' · ') })) },
+    { kind: 'shuttles', title: 'Arrivées navettes (1re ligne)', items: getAllShuttleGroups().flatMap((g) => g.codes.map((c) => ({ key: c, label: c, color: g.color }))) },
+    { kind: 'quickboard', title: 'Départs navettes (2e ligne)', items: SHUTTLE_QUICKBOARD_CODES.map((c) => ({ key: c, label: c, color: quickboardGroupOf(c)?.color })) },
+    { kind: 'arrivals', title: 'Arrivées trains', items: getAllArrivalGroups().map((g) => ({ key: g.id, label: g.label, color: g.color })) },
+  ];
+}
+
+function weeklyPlanSectionHTML() {
+  const today = weekdayOfISO(currentDate);
+  return `
+    <details class="weekly-plan">
+      <summary><strong>📅 Planning de la semaine</strong> — jours de circulation des trains et navettes</summary>
+      <p class="help-text">Cochez les jours où chaque train / navette circule, puis « Enregistrer ». Un voyage non coché pour aujourd'hui est grisé (« pas prévu ») ; il reste utilisable au besoin (un clic demande confirmation). La synchronisation des horaires ne recrée plus un train qui n'est pas prévu ce jour-là.</p>
+      ${weeklyPlanItems().map((sec) => `
+        <div class="weekly-plan-block">
+          <h4>${escapeHtml(sec.title)}</h4>
+          ${sec.items.length === 0 ? '<p class="help-text">Aucun.</p>' : `
+          <div class="weekly-plan-wrap"><table class="weekly-plan-table" data-plan-kind="${sec.kind}">
+            <thead><tr><th></th>${WEEK_DAYS.map((w) => `<th class="${w.d === today ? 'is-today' : ''}" title="${w.name}">${w.short}</th>`).join('')}<th></th></tr></thead>
+            <tbody>${sec.items.map((it) => {
+              const days = plannedDays(sec.kind, it.key);
+              return `<tr data-plan-key="${escapeHtml(it.key)}">
+                <th scope="row"><span class="stats-dot" style="background:${escapeHtml(it.color || '#94a3b8')}"></span>${escapeHtml(it.label)}${it.sub ? `<small>${escapeHtml(it.sub)}</small>` : ''}</th>
+                ${WEEK_DAYS.map((w) => `<td class="${w.d === today ? 'is-today' : ''}"><input type="checkbox" class="sPlanDay" data-day="${w.d}" aria-label="${escapeHtml(it.label)} — ${w.name}" ${!days || days.includes(w.d) ? 'checked' : ''}></td>`).join('')}
+                <td><button type="button" class="btn btn-ghost btn-sm" data-plan-all title="Tous les jours">Tous</button></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></div>`}
+        </div>`).join('')}
+    </details>`;
+}
+
+function readWeeklyPlanFrom(panel) {
+  const plan = {};
+  panel.querySelectorAll('.weekly-plan-table').forEach((table) => {
+    const kind = table.dataset.planKind;
+    table.querySelectorAll('tr[data-plan-key]').forEach((row) => {
+      const days = [...row.querySelectorAll('.sPlanDay')].filter((c) => c.checked).map((c) => Number(c.dataset.day)).sort();
+      if (days.length === 7) return;
+      plan[kind] = plan[kind] || {};
+      plan[kind][row.dataset.planKey] = days;
+    });
+  });
+  return plan;
+}
+
 function openSettingsModal() {
   openModal({
     title: 'Réglages',
     wide: true,
     bodyHTML: settingsBodyHTML(),
     onMount: (panel) => {
+      panel.querySelectorAll('[data-plan-all]').forEach((btn) => btn.addEventListener('click', () => {
+        btn.closest('tr').querySelectorAll('.sPlanDay').forEach((c) => { c.checked = true; });
+      }));
       [['#sIntroVolume', 'sIntroVolumeVal'], ['#sOutroVolume', 'sOutroVolumeVal']].forEach(([sel, role]) => {
         const range = panel.querySelector(sel);
         const out = panel.querySelector(`[data-role="${role}"]`);
@@ -2039,6 +2179,7 @@ function openSettingsModal() {
 
         settings.introVolume = Number(panel.querySelector('#sIntroVolume').value);
         settings.outroVolume = Number(panel.querySelector('#sOutroVolume').value);
+        if (panel.querySelector('.weekly-plan')) settings.weeklyPlan = readWeeklyPlanFrom(panel);
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
@@ -2164,8 +2305,11 @@ async function syncWithSheet({ silent = false } = {}) {
     return;
   }
 
-  const { trains: merged, touchedNumbers } = mergeSheetRowsIntoTrains(res.rows, trains, currentDate, settings.defaultStepLabels, new Set(loadRemovedTrains()));
+  const skipNumbers = new Set(loadRemovedTrains());
+  (settings.quickTrains || []).forEach((t) => { if (t.number && !isPlannedOn('trains', t.number)) skipNumbers.add(t.number); });
+  const { trains: merged, touchedNumbers } = mergeSheetRowsIntoTrains(res.rows, trains, currentDate, settings.defaultStepLabels, skipNumbers);
   trains = merged;
+  dropUnplannedSheetTrains();
   persist();
   settings.lastSyncStatus = 'ok';
   settings.lastSyncAt = new Date().toISOString();
@@ -2349,6 +2493,7 @@ function startClock() {
 
       currentDate = iso;
       try { recordDayTheo(); } catch (err) { console.warn(err); }
+      dropUnplannedSheetTrains();
       updateDateLabel();
       renderGrid();
       // Remise à zéro automatique des navettes internes à chaque changement
@@ -2738,11 +2883,11 @@ function shuttleChipInnerHTML(code) {
   }
   return `
     ${chipDeleteHTML(`Supprimer le voyage ${code} (ne roule pas)`)}
-    ${!departure && !rec?.arrivedManually ? chipDepartHTML(`Départ maintenant — ${code}`) : ''}
+    ${!departure && !rec?.arrivedManually && !shuttleIsOffDay(code) ? chipDepartHTML(`Départ maintenant — ${code}`) : ''}
     <span class="shuttle-code">${escapeHtml(code)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || arrival}</span>`
-      : `<span class="shuttle-times shuttle-times-empty">Départ non renseigné</span>`}
+      : `<span class="shuttle-times shuttle-times-empty">${shuttleIsOffDay(code) ? `Pas prévu le ${dayNameOf()}` : 'Départ non renseigné'}</span>`}
     ${progress.label ? `<span class="shuttle-state-label" data-role="shuttle-state-label">${escapeHtml(progress.label)}</span>` : '<span class="shuttle-state-label" data-role="shuttle-state-label" hidden></span>'}
     <span class="shuttle-countdown" data-role="shuttle-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
     <span class="shuttle-overdue-badge" data-role="shuttle-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
@@ -2755,8 +2900,13 @@ function shuttleChipInnerHTML(code) {
 // la saisie du départ, alors que la vignette doit rester colorée pendant
 // toute la progression et ne griser qu'une fois réellement arrivée (voir
 // computeShuttleProgress et .shuttle-chip.state-arrived dans style.css).
+function shuttleIsOffDay(code) {
+  const rec = shuttles[code];
+  return !isPlannedOn('shuttles', code) && !rec?.departure && !rec?.arrivedManually && !rec?.cancelled;
+}
+
 function shuttleChipClass(code) {
-  return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}`;
+  return `shuttle-chip state-${computeShuttleProgress(code).state}${shuttleHasDelayFlag(code) ? ' has-delay' : ''}${shuttleIsOffDay(code) ? ' is-off-day' : ''}`;
 }
 
 // ---------- Masquer/afficher un bandeau (navettes / tableau rapide /
@@ -3267,16 +3417,21 @@ function computeQuickboardDelta(key) {
   return { diffMin, tone: delayTone(diffMin, DELAY_THRESHOLDS) };
 }
 
+function quickboardIsOffDay(code) {
+  return !isPlannedOn('quickboard', code) && !shuttleReserves[code] && !isQuickboardCancelled(code);
+}
+
 function shuttleQuickboardCellHTML(code) {
   const group = quickboardGroupOf(code);
   const time = shuttleReserves[code] || null;
   const cancelled = isQuickboardCancelled(code);
+  const offDay = quickboardIsOffDay(code);
   return `
     <td>
-      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}${offDay ? ' is-off-day' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
         ${cancelled ? `${chipRestoreHTML(`Rétablir le départ ${code}`)}${cancelBannerHTML()}` : chipDeleteHTML(`Supprimer le départ ${code} (ne roule pas)`)}
         <span class="quickboard-code">${escapeHtml(code)}</span>
-        <span class="quickboard-time">${time || '--:--'}</span>
+        <span class="quickboard-time">${time || (offDay ? 'pas prévu' : '--:--')}</span>
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(code))}
       </button>
     </td>`;
@@ -3363,6 +3518,7 @@ function pushQuickboardLog(key, label) {
 
 function quickboardRecordCode(code) {
   if (!shuttleReserves[code] && !isQuickboardCancelled(code)) {
+    if (quickboardIsOffDay(code) && !confirmOffDay(`Le départ ${code}`)) return;
     shuttleReserves[code] = quickboardNowHHMM();
     saveShuttleReserves(shuttleReserves);
     renderShuttleQuickboard();
@@ -3594,7 +3750,7 @@ function arrivalChipInnerHTML(id) {
   }
   return `
     ${chipDeleteHTML(`Supprimer le voyage ${group.label} (ne roule pas)`)}
-    ${!departure && !rec?.arrivedManually ? chipDepartHTML(`Départ maintenant — ${group.label}`) : ''}
+    ${!departure && !rec?.arrivedManually && !arrivalIsOffDay(id) ? chipDepartHTML(`Départ maintenant — ${group.label}`) : ''}
     <span class="arrival-label">${escapeHtml(group.label)}</span>
     ${departure
       ? `<span class="shuttle-times">Dép ${departure} → Arr${realArrival ? ' réelle' : ''} ${realArrival || eta}</span>`
@@ -3608,8 +3764,13 @@ function arrivalChipInnerHTML(id) {
     ${chipFAHTML(Boolean(rec?.faStored), rec?.faStored ? `Train stocké à FA — décocher` : `Cocher si le train est stocké à FA`)}`;
 }
 
+function arrivalIsOffDay(id) {
+  const rec = arrivals[id];
+  return !isPlannedOn('arrivals', id) && !rec?.departure && !rec?.arrivedManually && !rec?.cancelled;
+}
+
 function arrivalChipClass(id) {
-  return `arrival-chip state-${computeArrivalProgress(id).state}${arrivalHasDelayFlag(id) ? ' has-delay' : ''}`;
+  return `arrival-chip state-${computeArrivalProgress(id).state}${arrivalHasDelayFlag(id) ? ' has-delay' : ''}${arrivalIsOffDay(id) ? ' is-off-day' : ''}`;
 }
 
 function renderArrivalsBar() {
@@ -4129,9 +4290,9 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     + shuttleCodes.filter((c) => shuttlesSnapshot[c]?.cancelled).length
     + quickboardKeys.filter((k) => qbCancelledMap[k]).length
     + arrivalGroups.filter((g) => arrivalsSnapshot[g.id]?.cancelled).length;
-  const shuttlesActive = shuttleCodes.filter((c) => !shuttlesSnapshot[c]?.cancelled);
+  const shuttlesActive = shuttleCodes.filter((c) => !shuttlesSnapshot[c]?.cancelled && (isPlannedOn('shuttles', c, dateISO) || shuttlesSnapshot[c]?.departure || shuttlesSnapshot[c]?.arrivedManually));
   const shuttlesArrived = shuttlesActive.filter((c) => shuttlesSnapshot[c]?.arrivedManually).length;
-  const qbActive = SHUTTLE_QUICKBOARD_CODES.filter((k) => !qbCancelledMap[k]);
+  const qbActive = SHUTTLE_QUICKBOARD_CODES.filter((k) => !qbCancelledMap[k] && (isPlannedOn('quickboard', k, dateISO) || shuttleReservesSnapshot[k]));
   const qbDeparted = qbActive.filter((k) => shuttleReservesSnapshot[k]).length;
   const tiles = [
     { label: 'DÉPARTS TRAINS', value: `${departedTrains.length} / ${trainsForDate.filter((t) => !t.cancelled).length}`, color: C.green },
@@ -4255,7 +4416,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       if (rec.cancelled) status = { cancelled: true };
       else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
       else if (rec.departure) status = { status: { text: rec.delayFlag ? 'Partie — retard signalé' : 'Partie, non confirmée', color: rec.delayFlag ? C.red : C.amber } };
-      else status = { status: { text: 'Non partie', color: C.faint } };
+      else status = { status: { text: isPlannedOn('shuttles', code, dateISO) ? 'Non partie' : 'Pas prévue ce jour', color: C.faint } };
       return {
         cancelled: Boolean(rec.cancelled),
         cells: [
@@ -4301,7 +4462,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     let status;
     if (cancelled) status = { cancelled: true };
     else if (real) status = { status: { text: e.kind === 'late' ? 'Parti en retard' : 'Parti', color: e.kind === 'late' ? C.red : C.green } };
-    else status = { status: { text: 'Non parti', color: C.faint } };
+    else status = { status: { text: isReserve || isPlannedOn('quickboard', key, dateISO) ? 'Non parti' : 'Pas prévu ce jour', color: C.faint } };
     qbRows.push({
       cancelled,
       cells: [
@@ -4344,7 +4505,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       else if (rec.arrivedManually) status = { status: { text: e.kind === 'late' ? 'Arrivée en retard' : 'Arrivée', color: e.kind === 'late' ? C.red : C.green } };
       else if (rec.delayFlag) status = { status: { text: 'Retard signalé', color: C.red } };
       else if (rec.departure) status = { status: { text: 'En route', color: C.amber } };
-      else status = { status: { text: 'En attente', color: C.faint } };
+      else status = { status: { text: isPlannedOn('arrivals', group.id, dateISO) ? 'En attente' : 'Pas prévue ce jour', color: C.faint } };
       return {
         cancelled: Boolean(rec.cancelled),
         cells: [
@@ -4415,7 +4576,7 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
       doc.line(c2 - 4, top + 3, c2 - 4, top + HEAD - 3);
       doc.line(c3 - 4, top + 3, c3 - 4, top + HEAD - 3);
     }
-    txt(`TRAIN ${train.number}`, c1, top + 9, { size: 15, style: 'bold', color: cancelled ? C.faint : C.ink, maxW: c2 - c1 - 8 });
+    txt(`TRAIN ${trainNo(train)}`, c1, top + 9, { size: 15, style: 'bold', color: cancelled ? C.faint : C.ink, maxW: c2 - c1 - 8 });
     if (destination) txt(`» ${String(destination).toUpperCase()}`, c1, top + 15, { size: 9, style: 'bold', color: cancelled ? C.faint : C.accent, maxW: c2 - c1 - 8 });
     let label2 = 'DÉPART EFFECTIF';
     let value2 = departReel;
@@ -4837,7 +4998,7 @@ function collectStatsRows(category, range) {
         rows.push({
           date: t.date,
           key: t.number,
-          label: t.number,
+          label: t.runNumber ? `${t.runNumber} (${t.number})` : t.number,
           color: '#1d4ed8',
           theo: t.steps[lastIndex]?.theoretical || '',
           theoKind: 'theo',
@@ -4896,6 +5057,7 @@ function collectStatsRows(category, range) {
         const cancelled = Boolean(cancelledMap[key]);
         const theo = day.theo?.quickboard?.[key] ?? settings.quickboardTimings?.[key] ?? '';
         if (!real && !cancelled && (isReserve || !theo || !day.reserves)) return;
+        if (!real && !cancelled && !isPlannedOn('quickboard', key, day.date)) return;
         let state;
         let diffMin = null;
         if (cancelled) state = 'cancelled';
@@ -6102,6 +6264,7 @@ function init() {
     saveTrains(trains);
   }
 
+  dropUnplannedSheetTrains();
   updateDateLabel();
   renderGrid();
   startClock();
