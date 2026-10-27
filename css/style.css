@@ -1893,3 +1893,73 @@ html.theme-dark .stats-time--ok { background: rgba(21, 128, 61, 0.18); color: #8
 .c-early { color: #15803d; font-weight: 700; }
 html.theme-dark .c-early { color: #4ade80; }
 .stats-detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; }
+
+/* ---------- Planning de la semaine : voyage « pas prévu » aujourd'hui ----------
+   Grisé (pointillés, sans couleur) mais toujours cliquable : un clic demande
+   confirmation au cas où il circule exceptionnellement. */
+.shuttle-chip.is-off-day,
+.arrival-chip.is-off-day,
+.quickboard-cell.is-off-day,
+.quick-train-btn.is-off-day {
+  border-style: dashed;
+  border-color: var(--border);
+  background: var(--surface-2);
+  box-shadow: none;
+  animation: none;
+}
+.shuttle-chip.is-off-day > :not(.chip-delete),
+.arrival-chip.is-off-day > :not(.chip-delete),
+.quickboard-cell.is-off-day > :not(.chip-delete),
+.quick-train-btn.is-off-day > * {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.quick-train-btn.has-operator-color.is-off-day { border-color: var(--border); }
+.quick-train-offday {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+/* Numéro de sillon du jour (ex : 70630 roule en 420944) */
+.run-number-badge {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  vertical-align: middle;
+}
+.run-number-btn {
+  margin-left: 0.4rem;
+  min-height: 26px;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.run-number-btn:hover, .run-number-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+/* Réglages : tableau du planning de la semaine */
+.weekly-plan { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; }
+.weekly-plan > summary { cursor: pointer; padding: 0.3rem 0; }
+.weekly-plan-block { margin-top: 0.8rem; }
+.weekly-plan-block h4 { margin: 0 0 0.35rem; font-size: 0.85rem; }
+.weekly-plan-wrap { overflow-x: auto; }
+.weekly-plan-table { border-collapse: collapse; font-size: 0.82rem; min-width: 100%; }
+.weekly-plan-table th, .weekly-plan-table td { padding: 0.25rem 0.35rem; text-align: center; border-bottom: 1px solid var(--border); }
+.weekly-plan-table tbody th { text-align: left; white-space: nowrap; font-weight: 700; color: var(--text); }
+.weekly-plan-table tbody th small { display: block; font-weight: 500; color: var(--text-faint); font-size: 0.68rem; }
+.weekly-plan-table .is-today { background: var(--early-bg); }
+.weekly-plan-table input[type="checkbox"] { width: 20px; height: 20px; min-height: 0; cursor: pointer; }
+.stacked-form .weekly-plan-table input[type="checkbox"] { min-height: 0; padding: 0; }
