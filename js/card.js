@@ -194,14 +194,14 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
       <span class="cancel-banner card-cancel-banner" aria-hidden="true">Supprimé</span>
       ${readOnly ? '' : `
       <button type="button" class="train-card-collapsed-strip" data-role="collapsed-strip" data-action="expand-card" ${isCollapsed ? '' : 'hidden'}>
-        <span class="train-card-collapsed-number">TRAIN <span data-role="collapsed-number">${escapeHtml(train.number)}</span></span>
+        <span class="train-card-collapsed-number">TRAIN <span data-role="collapsed-number">${escapeHtml(trainNo(train))}</span></span>
         <span class="train-card-collapsed-text" data-role="collapsed-text">${escapeHtml(collapsedStripLabel(train))}</span>
         <span class="train-card-collapsed-hint" aria-hidden="true">▸ tout afficher</span>
       </button>`}
       <div class="train-card-body" data-role="card-body" ${isCollapsed ? 'hidden' : ''}>
         <header class="card-header">
           ${readOnly ? '' : '<button type="button" class="card-handle" draggable="true" data-action="drag-handle" aria-label="Glisser pour réorganiser">⠿</button>'}
-          <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.number)}</span>${destination ? `<span class="card-destination" data-role="train-destination"> — à destination de ${escapeHtml(destination)}</span>` : ''}</h3>
+          <h3 class="card-title">TRAIN <span data-role="train-number">${escapeHtml(train.runNumber || train.number)}</span><span class="run-number-badge" data-role="run-number-badge" ${train.runNumber ? '' : 'hidden'}>prévu ${escapeHtml(train.number)}</span>${readOnly ? '' : `<button type="button" class="run-number-btn" data-action="edit-run-number" title="Changer le numéro de sillon pour aujourd'hui (ex : 70630 roule en 420944)" aria-label="Changer le numéro de sillon du jour">⇄ N°</button>`}${destination ? `<span class="card-destination" data-role="train-destination"> — à destination de ${escapeHtml(destination)}</span>` : ''}</h3>
           <span class="source-badge" data-role="source-badge" title="Synchronisé depuis Google Sheets" ${train.source === 'sheet' ? '' : 'hidden'}>⇄ Sheet</span>
           <span class="status-pill ${statusToneClass(status.tone)}" data-role="status">${status.label}</span>
           ${readOnly ? '' : `<button type="button" class="card-collapse-btn" data-action="collapse-card" data-role="collapse-btn" title="Réduire cette vignette" aria-label="Réduire cette vignette" ${isCollapsible ? '' : 'hidden'}>▾</button>`}
@@ -273,9 +273,18 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
     </article>`;
 }
 
+// Numéro affiché : le numéro de sillon du jour s'il a été changé (ex : 70630
+// qui roule en 420944 → « 420944 (70630) »), sinon le numéro habituel.
+// train.number reste le numéro habituel (bouton d'accès rapide, Sheet…).
+export function trainNo(train) {
+  return train.runNumber ? `${train.runNumber} (${train.number})` : train.number;
+}
+
 export function updateCardDynamicParts(cardEl, train) {
   const numberEl = cardEl.querySelector('[data-role="train-number"]');
-  if (numberEl) numberEl.textContent = train.number;
+  if (numberEl) numberEl.textContent = train.runNumber || train.number;
+  const runBadgeEl = cardEl.querySelector('[data-role="run-number-badge"]');
+  if (runBadgeEl) { runBadgeEl.hidden = !train.runNumber; runBadgeEl.textContent = `prévu ${train.number}`; }
 
   const badgeEl = cardEl.querySelector('[data-role="source-badge"]');
   if (badgeEl) badgeEl.hidden = train.source !== 'sheet';
@@ -359,7 +368,7 @@ export function updateCardDynamicParts(cardEl, train) {
   if (stripEl) {
     stripEl.hidden = !isCollapsed;
     const numberEl = stripEl.querySelector('[data-role="collapsed-number"]');
-    if (numberEl) numberEl.textContent = train.number;
+    if (numberEl) numberEl.textContent = trainNo(train);
     const textEl = stripEl.querySelector('[data-role="collapsed-text"]');
     if (textEl) textEl.textContent = collapsedStripLabel(train);
   }

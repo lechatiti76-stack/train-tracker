@@ -94,6 +94,10 @@ export const DEFAULT_SETTINGS = {
   mailDefaultTo: '',
   mailDefaultBcc: '',
   theme: 'auto', // 'auto' | 'light' | 'dark'
+  // Planning de la semaine (Réglages) : jours de circulation (0 = dimanche …
+  // 6 = samedi) par train / navette / arrivée. Absent = circule tous les jours.
+  // { trains: { '70630': [1,2,3,4,5] }, shuttles: {...}, quickboard: {...}, arrivals: {...} }
+  weeklyPlan: {},
   // Volume (0-100 %) des vidéos d'ouverture et de fermeture — Réglages.
   introVolume: 100,
   outroVolume: 100,
