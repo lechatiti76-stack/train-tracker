@@ -173,8 +173,11 @@ function confirmOffDay(label) {
 // d'accès rapide ne s'affichent pas « ● » tout seuls.
 function dropUnplannedSheetTrains() {
   const before = trains.length;
+  // Aussi : pré-remplissage Horaires désactivé → les trains du jour créés
+  // automatiquement par une ancienne lecture du Sheet, encore vierges, sont
+  // retirés (avec leurs anciennes heures théoriques).
   trains = trains.filter((t) => !(t.date === currentDate && t.source === 'sheet'
-    && !isPlannedOn('trains', t.number) && !t.steps.some((s) => s.real) && !t.stalled && !t.cancelled));
+    && (!settings.sheetPrefillTrains || !isPlannedOn('trains', t.number)) && !t.sillonTime && !t.steps.some((s) => s.real) && !t.stalled && !t.cancelled));
   if (trains.length !== before) persist();
   return before - trains.length;
 }
@@ -1762,6 +1765,8 @@ function settingsBodyHTML() {
       <label>URL du Web App Google Apps Script (horaires théoriques + journal des heures réelles)
         <input type="url" id="sSheetUrl" value="${escapeHtml(settings.sheetsWebAppUrl || '')}" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
       </label>
+      <label class="checkbox-row"><input type="checkbox" id="sSheetPrefill" ${settings.sheetPrefillTrains ? 'checked' : ''}> Pré-remplir les trains depuis l'onglet « Horaires » du Sheet (crée les trains du jour et leurs heures théoriques)</label>
+      <p class="help-text">Décoché (conseillé) : chaque jour les vignettes trains partent vides, et les heures théoriques ne viennent que de « ⚡ Remplir les 7 heures » avec l'heure du sillon. L'envoi des heures réelles vers le Journal continue de fonctionner.</p>
       <p class="help-text">Laissez vide pour saisir les horaires uniquement à la main. Cette même URL sert désormais aussi à envoyer automatiquement vers un onglet "Journal" chaque heure réelle enregistrée (mise à jour de apps-script/Code.gs requise — voir le README).</p>
       <label>Adresse du serveur « Suivi des circulations » (se termine par /exec)
         <input type="url" id="sCirculationsUrl" value="${escapeHtml(settings.circulationsUrl || '')}" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
@@ -2180,6 +2185,7 @@ function openSettingsModal() {
         settings.introVolume = Number(panel.querySelector('#sIntroVolume').value);
         settings.outroVolume = Number(panel.querySelector('#sOutroVolume').value);
         if (panel.querySelector('.weekly-plan')) settings.weeklyPlan = readWeeklyPlanFrom(panel);
+        settings.sheetPrefillTrains = Boolean(panel.querySelector('#sSheetPrefill')?.checked);
         settings.theme = panel.querySelector('#sTheme').value;
         saveSettings(settings);
         applyTheme();
@@ -2305,6 +2311,16 @@ async function syncWithSheet({ silent = false } = {}) {
     return;
   }
 
+  // Pré-remplissage depuis l'onglet Horaires désactivé (Réglages) : la
+  // lecture ne touche à aucun train (heures théoriques vides chaque jour,
+  // remplies seulement par l'heure du sillon) ; l'URL sert toujours au Journal.
+  if (!settings.sheetPrefillTrains) {
+    settings.lastSyncStatus = 'ok';
+    settings.lastSyncAt = new Date().toISOString();
+    saveSettings(settings);
+    setSyncIndicator('ok');
+    return;
+  }
   const skipNumbers = new Set(loadRemovedTrains());
   (settings.quickTrains || []).forEach((t) => { if (t.number && !isPlannedOn('trains', t.number)) skipNumbers.add(t.number); });
   const { trains: merged, touchedNumbers } = mergeSheetRowsIntoTrains(res.rows, trains, currentDate, settings.defaultStepLabels, skipNumbers);

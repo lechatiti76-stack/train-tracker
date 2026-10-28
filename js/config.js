@@ -98,6 +98,11 @@ export const DEFAULT_SETTINGS = {
   // 6 = samedi) par train / navette / arrivée. Absent = circule tous les jours.
   // { trains: { '70630': [1,2,3,4,5] }, shuttles: {...}, quickboard: {...}, arrivals: {...} }
   weeklyPlan: {},
+  // Pré-remplir les trains depuis l'onglet "Horaires" du Google Sheet
+  // (création des trains du jour + heures théoriques). Désactivé par défaut :
+  // chaque jour, les vignettes partent vides et les heures théoriques ne
+  // viennent que de « ⚡ Remplir les 7 heures » (heure du sillon).
+  sheetPrefillTrains: false,
   // Volume (0-100 %) des vidéos d'ouverture et de fermeture — Réglages.
   introVolume: 100,
   outroVolume: 100,
