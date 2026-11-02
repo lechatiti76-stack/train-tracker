@@ -242,4 +242,18 @@ export const STORAGE_KEYS = {
   // Trains retirés à la main pour la journée (« ne circule pas ») : la
   // synchronisation des horaires ne les recrée pas. Remis à zéro chaque jour.
   removedTrains: 'traintrack:removedTrains:v1',
+  // Coupons navettes saisis jour par jour (bouton "🎫 Coupons", voir
+  // js/coupons.js) : { "YYYY-MM-DD": { date, nav: { LF1: [{ n, dc, w }] } } }.
+  // Conservés sans limite de durée (quelques Ko par jour).
+  coupons: 'traintrack:coupons:v1',
 };
+
+// Familles de coupons navettes, dans l'ordre et les couleurs du classeur
+// "Affectation des coupons" : LF = navettes FL (LHTTDF), LN = NL (LHTTMS),
+// LA = AL (LHTATL). `base` = navettes toujours affichées ; d'autres (LF4,
+// LN3, LA2...) s'ajoutent au besoin depuis l'écran de saisie.
+export const COUPON_FAMILIES = [
+  { id: 'LF', code: 'LHTTDF', base: ['LF1', 'LF2', 'LF3'], excelFill: 'FFFFC000' },
+  { id: 'LN', code: 'LHTTMS', base: ['LN1', 'LN2'], excelFill: 'FF0070C0' },
+  { id: 'LA', code: 'LHTATL', base: ['LA1'], excelFill: 'FFFFFF00' },
+];

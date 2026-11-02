@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v55';
+const CACHE_NAME = 'traintrack-cache-v56';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -15,6 +15,7 @@ const APP_SHELL = [
   './',
   './index.html',
   './css/style.css',
+  './css/coupons.css',
   './js/app.js',
   './js/config.js',
   './js/storage.js',
@@ -27,6 +28,7 @@ const APP_SHELL = [
   './js/stopwatch.js',
   './js/archives.js',
   './js/circulations-sync.js',
+  './js/coupons.js',
   './manifest.json',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
@@ -44,6 +46,8 @@ const CDN_ASSETS = [
   // jsPDF : génère le PDF récap du jour (bouton "📄 PDF récap") entièrement
   // côté client, sans backend — voir generateDailyRecapPDF dans js/app.js.
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  // ExcelJS : export/import Excel des coupons navettes (js/coupons.js).
+  'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
 ];
 
 self.addEventListener('install', (event) => {

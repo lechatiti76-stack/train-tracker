@@ -14,6 +14,7 @@ import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, trainNo, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
 import { initStopwatch } from './stopwatch.js';
 import { saveArchivePdf, listArchivePdfs, getArchivePdf, deleteArchivePdf, pruneOldArchives } from './archives.js';
+import { openCoupons } from './coupons.js';
 
 let settings = loadSettings();
 // Applique les seuils de retard personnalisés (settings.delayThresholds,
@@ -6047,6 +6048,10 @@ function wireHeaderButtons() {
   // Bouton "📊 Statistiques" — voir openStatsModal ci-dessus.
   const statsBtn = el('btnStats');
   if (statsBtn) statsBtn.addEventListener('click', openStatsModal);
+  // Bouton "🎫 Coupons" : saisie des coupons navettes du jour, plein écran
+  // — voir js/coupons.js (module autonome, stockage STORAGE_KEYS.coupons).
+  const couponsBtn = el('btnCoupons');
+  if (couponsBtn) couponsBtn.addEventListener('click', openCoupons);
 }
 
 // Une PWA installée peut rester "suspendue" en arrière-plan pendant des

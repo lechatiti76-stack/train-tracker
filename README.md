@@ -29,7 +29,8 @@ graphique d'évolution, et installation en PWA sur mobile.
 ├── manifest.json                Manifeste PWA (installation mobile)
 ├── service-worker.js            Cache hors-ligne (app shell)
 ├── css/
-│   └── style.css                Design system, thèmes clair/sombre, responsive
+│   ├── style.css                Design system, thèmes clair/sombre, responsive
+│   └── coupons.css              Écran de saisie des coupons navettes
 ├── js/
 │   ├── config.js                 Constantes (clés de stockage, seuils, valeurs par défaut)
 │   ├── storage.js                 Persistance localStorage + données de démo
@@ -40,6 +41,7 @@ graphique d'évolution, et installation en PWA sur mobile.
 │   ├── charts.js                  Graphique théorique/réel en heure absolue (Chart.js)
 │   ├── card.js                    Génération/mise à jour du HTML d'une vignette
 │   ├── stopwatch.js               Chronomètre de pause indépendant (feu tricolore)
+│   ├── coupons.js                 Saisie des coupons navettes + export/import Excel
 │   └── app.js                     Orchestrateur : état, événements, modales
 ├── apps-script/
 │   └── Code.gs                   Web App Google Apps Script (lecture seule, sans clé API)
@@ -579,6 +581,37 @@ de la rangée — nom, couleur de cadre et étapes (dont la dernière définit
 l'arrivée), exactement comme une navette "Personnalisée". Ces arrivées
 ajoutées se suppriment depuis **⚙ Réglages** (liste "Arrivées ajoutées
 manuellement").
+
+### 8.9. Coupons navettes
+
+Le bouton **🎫 Coupons** de l'en-tête ouvre, en plein écran, la saisie des
+coupons navettes qui remplace la feuille « semaine » du classeur
+*Affectation des coupons*.
+
+- **Un écran par jour**, une carte par navette : LF1-LF3 (LHTTDF, orange),
+  LN1-LN2 (LHTTMS, bleu), LA1 (LHTATL, jaune). **+ navette** ajoute LF4,
+  LN3, LA2... si besoin.
+- **4 lignes par navette**, comme dans le classeur :
+  `C | N° | code site | date jjmm | Nb wgs` (ex. `02 LHTTMS 2210 18`). Une
+  5e ligne apparaît quand les 4 sont remplies.
+- **Saisie** : N° → `Tab` → date → `Tab` → wagons → `Entrée` (passe à la
+  ligne suivante). Raccourci : `2 18` dans N° puis `Entrée`, ou le N° puis
+  un clic sur un nombre de wagons. Une ligne remplie se corrige directement
+  (enregistrée en quittant la ligne) ; `Échap` annule une ligne en cours.
+- **Date du coupon** : proposée (jour ouvré précédent), jamais imposée — un
+  coupon du vendredi pour la navette du lundi est normal. Seule une date
+  illisible bloque ; un même numéro de coupon (même code et date) déjà
+  saisi est signalé avec le jour et la navette.
+- **Excel** : *Extraire le jour en Excel* (Récap du jour) ou *Exporter la
+  semaine* (onglet Semaine & Excel), au format exact du classeur (blocs par
+  jour, couleurs, lignes TOTAL en formules).
+- **Historique** : onglet Semaine & Excel → *Importer un classeur Excel*
+  (le classeur annuel ou un export de cet écran). Les journées déjà saisies
+  ne sont pas modifiées.
+
+Stockage : `localStorage` de l'appareil (clé `traintrack:coupons:v1`),
+comme le reste de l'app. La bibliothèque ExcelJS est chargée à la demande et
+mise en cache par le Service Worker.
 
 ## 9. Modifier les 7 étapes
 

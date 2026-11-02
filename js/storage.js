@@ -395,6 +395,23 @@ export function pruneDayHistory(maxDays = DAY_HISTORY_RETENTION_DAYS) {
   stale.forEach((key) => localStorage.removeItem(key));
 }
 
+// ---------- Coupons navettes (voir js/coupons.js) ----------
+// Tous les jours dans une seule entrée : { "YYYY-MM-DD": { date, nav, maj } }.
+export function loadCoupons() {
+  const raw = safeParse(localStorage.getItem(STORAGE_KEYS.coupons), {});
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+}
+
+export function saveCoupons(byDate) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.coupons, JSON.stringify(byDate));
+    return true;
+  } catch (err) {
+    console.error('Impossible d\'enregistrer les coupons (quota ?).', err);
+    return false;
+  }
+}
+
 try {
   harvestStaleDayData();
   pruneDayHistory();

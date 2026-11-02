@@ -1,0 +1,153 @@
+/* ---------- Coupons navettes (js/coupons.js) ----------
+   Fenêtre plein écran au-dessus du tableau de bord. Réutilise les tokens de
+   style.css (--surface, --border, --accent...) ; seules les couleurs des
+   familles de navettes sont définies ici (mêmes teintes que FL/NL/AL). */
+.cp-fam-LF { --c: #f59e0b; --cbg: #fff4d6; }
+.cp-fam-LN { --c: #1e3a8a; --cbg: #dfe6f7; }
+.cp-fam-LA { --c: #eab308; --cbg: #fdf6cc; }
+html.theme-dark .cp-fam-LF { --c: #f5b82e; --cbg: rgba(245, 184, 46, 0.13); }
+html.theme-dark .cp-fam-LN { --c: #5b7bff; --cbg: rgba(91, 123, 255, 0.16); }
+html.theme-dark .cp-fam-LA { --c: #e6cf3a; --cbg: rgba(230, 207, 58, 0.12); }
+
+body.coupons-open { overflow: hidden; }
+.cp-root {
+  position: fixed; inset: 0; z-index: 150;
+  background: var(--bg); color: var(--text);
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.cp-root[hidden] { display: none; }
+
+.cp-top {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: env(safe-area-inset-top, 0px) max(1.25rem, env(safe-area-inset-right, 0px)) 0 max(1.25rem, env(safe-area-inset-left, 0px));
+}
+.cp-top-row { display: flex; align-items: center; gap: 1rem; max-width: 1500px; margin: 0 auto; flex-wrap: wrap; padding-top: 0.5rem; }
+.cp-title { font-size: 1.1rem; font-weight: 800; display: flex; align-items: center; gap: 0.4rem; }
+.cp-tabs { display: flex; gap: 0.25rem; flex: 1 1 auto; overflow-x: auto; }
+.cp-tab { background: none; border: 0; border-bottom: 3px solid transparent; padding: 0.7rem 0.9rem; font-weight: 700; color: var(--text-muted); cursor: pointer; min-height: 44px; white-space: nowrap; }
+.cp-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.cp-close { margin-left: auto; }
+
+.cp-body { max-width: 1500px; margin: 0 auto; padding: 1rem max(1.25rem, env(safe-area-inset-right, 0px)) 4rem max(1.25rem, env(safe-area-inset-left, 0px)); }
+
+/* Bandeau du jour */
+.cp-daybar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.cp-daytitle { display: flex; flex-direction: column; min-width: 0; }
+.cp-daytitle strong { font-size: 1.3rem; font-weight: 800; text-transform: capitalize; }
+.cp-daytitle span { font-size: 0.78rem; color: var(--text-muted); }
+.cp-datepick { position: relative; overflow: hidden; }
+.cp-datepick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.cp-week-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.4rem; margin-bottom: 1rem; }
+.cp-wday { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.45rem 0.55rem; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; min-height: 48px; }
+.cp-wday b { font-size: 0.78rem; text-transform: capitalize; }
+.cp-wday span { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-wday.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.cp-wday.today b::after { content: " •"; color: var(--accent); }
+.cp-wday.empty span { color: var(--text-faint); }
+.cp-wday.sat { opacity: 0.75; }
+
+.cp-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+@media (max-width: 1000px) { .cp-layout { grid-template-columns: minmax(0, 1fr); } }
+.cp-hint { font-size: 0.8rem; color: var(--text-muted); background: var(--surface-2); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; margin-bottom: 0.9rem; line-height: 1.55; }
+.cp-hint kbd { font-family: var(--font-mono); font-size: 0.74rem; background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 0.3rem; }
+
+/* Sites et cartes navette */
+.cp-site { margin-bottom: 1.1rem; }
+.cp-site-h { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.cp-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--c); flex: 0 0 auto; }
+.cp-site-h h3 { font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.cp-site-tot { margin-left: auto; font-size: 0.82rem; color: var(--text-muted); }
+.cp-site-tot b { color: var(--text); font-family: var(--font-mono); font-size: 1rem; }
+.cp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 0.75rem; }
+
+.cp-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.cp-card-h { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; background: var(--cbg); border-bottom: 2px solid var(--c); }
+.cp-shuttle { font-weight: 900; font-size: 1.05rem; letter-spacing: 0.03em; }
+.cp-card-code { font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); }
+.cp-tot { margin-left: auto; text-align: right; line-height: 1.05; }
+.cp-tot b { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 800; }
+.cp-tot small { display: block; font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Grille façon classeur : C | N° | code site | date jjmm | Nb wgs */
+.cp-grid { display: flex; flex-direction: column; gap: 5px; padding: 0.6rem 0.6rem 0.35rem; }
+.cp-row { display: grid; grid-template-columns: 14px minmax(0, 0.85fr) auto minmax(0, 1.1fr) minmax(0, 0.85fr) 26px; gap: 5px; align-items: center; }
+.cp-row.cp-head { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); text-align: center; }
+.cp-c { font-family: var(--font-mono); font-weight: 800; color: var(--text-muted); text-align: center; }
+.cp-code { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
+.cp-row input { width: 100%; min-width: 0; min-height: 38px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); padding: 0 4px; font-family: var(--font-mono); font-size: 1rem; font-weight: 700; text-align: center; scroll-margin-top: 140px; scroll-margin-bottom: 90px; }
+.cp-row input::placeholder { color: var(--text-faint); font-weight: 600; }
+.cp-row.filled input { background: var(--cbg); border-color: var(--c); }
+.cp-row input:focus { border-color: var(--accent); background: var(--surface); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.cp-row.pending input { border-style: dashed; border-color: var(--accent); }
+.cp-row input.bad { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger-bg); }
+.cp-del { background: none; border: 0; color: var(--text-faint); width: 26px; height: 26px; border-radius: 50%; cursor: pointer; font-size: 1rem; padding: 0; }
+.cp-del:hover { background: var(--danger-bg); color: var(--danger); }
+.cp-row-issues { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 19px; }
+.cp-issue { font-size: 0.7rem; font-weight: 600; border-radius: 5px; padding: 2px 6px; }
+.cp-issue.warn { background: var(--warning-bg); color: var(--warning); }
+.cp-issue.err { background: var(--danger-bg); color: var(--danger); }
+.cp-issue.info { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+
+.cp-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0.75rem 4px; align-items: center; }
+.cp-card > .cp-chips:last-child { padding-bottom: 0.75rem; }
+.cp-lab { font-size: 0.62rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; min-width: 30px; }
+.cp-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 3px 9px; font-size: 0.76rem; font-weight: 700; cursor: pointer; font-family: var(--font-mono); min-height: 28px; }
+.cp-chip:hover { border-color: var(--accent); }
+.cp-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cp-chip-d { font-size: 0.7rem; padding: 3px 7px; }
+.cp-chip-d small { font-family: var(--font-sans); font-weight: 600; opacity: 0.75; }
+
+.cp-add-shuttle { border: 2px dashed var(--border); border-radius: var(--radius-lg); background: transparent; color: var(--text-muted); font-weight: 700; min-height: 64px; cursor: pointer; }
+.cp-add-shuttle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Récap */
+.cp-aside { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 0.75rem; }
+@media (max-width: 1000px) { .cp-aside { position: static; } }
+.cp-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.cp-panel h3 { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.cp-big { display: flex; align-items: baseline; gap: 0.4rem; }
+.cp-big b { font-family: var(--font-mono); font-size: 2.1rem; font-weight: 800; line-height: 1; }
+.cp-big span { color: var(--text-muted); font-size: 0.85rem; }
+.cp-kv { display: flex; flex-direction: column; gap: 0.35rem; }
+.cp-kv div { display: flex; align-items: center; gap: 0.5rem; font-size: 0.86rem; }
+.cp-kv b { margin-left: auto; font-family: var(--font-mono); }
+.cp-alerts { display: flex; flex-direction: column; gap: 0.35rem; }
+.cp-alerts li { font-size: 0.8rem; line-height: 1.4; padding: 0.4rem 0.5rem; border-radius: var(--radius-sm); }
+.cp-alerts li.warn { background: var(--warning-bg); color: var(--warning); }
+.cp-alerts li.err { background: var(--danger-bg); color: var(--danger); }
+.cp-alerts li.ok { background: var(--success-bg); color: var(--success); }
+.cp-meta { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+
+/* Semaine */
+.cp-week-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.cp-week-head h3 { font-size: 1.2rem; font-weight: 800; }
+.cp-spacer { flex: 1; }
+.cp-table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
+#cp-weekTable { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+#cp-weekTable th, #cp-weekTable td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+#cp-weekTable th:first-child, #cp-weekTable td:first-child { text-align: left; }
+#cp-weekTable thead th { font-size: 0.72rem; text-transform: capitalize; color: var(--text-muted); font-weight: 800; background: var(--surface-2); }
+.cp-clickable { cursor: pointer; text-decoration: underline dotted; }
+.cp-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.cp-n small { color: var(--text-faint); font-size: 0.7rem; margin-left: 4px; }
+.cp-n.zero { color: var(--text-faint); }
+.cp-sub td { background: var(--surface-2); font-weight: 800; }
+.cp-total td { font-weight: 900; border-bottom: 0 !important; }
+.cp-tag { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 800; }
+.cp-note { margin: 0.6rem 0 1rem; }
+.cp-import { max-width: 640px; }
+.cp-file { position: relative; overflow: hidden; align-self: flex-start; }
+.cp-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+/* Toast */
+.cp-toast { position: fixed; left: 50%; bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--text); color: var(--bg); border-radius: var(--radius-sm); padding: 0.7rem 1rem; font-weight: 600; font-size: 0.86rem; display: flex; gap: 0.75rem; align-items: center; box-shadow: var(--shadow-modal); z-index: 10; max-width: calc(100vw - 2rem); }
+.cp-toast[hidden] { display: none; }
+.cp-toast button { background: none; border: 0; color: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }
+
+@media (max-width: 640px) {
+  .cp-week-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cp-daytitle strong { font-size: 1.1rem; }
+  .cp-title { font-size: 1rem; }
+}
