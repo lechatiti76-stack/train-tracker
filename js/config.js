@@ -253,7 +253,7 @@ export const STORAGE_KEYS = {
 // LA = AL (LHTATL). `base` = navettes toujours affichées ; d'autres (LF4,
 // LN3, LA2...) s'ajoutent au besoin depuis l'écran de saisie.
 export const COUPON_FAMILIES = [
-  { id: 'LF', code: 'LHTTDF', base: ['LF1', 'LF2', 'LF3'], excelFill: 'FFFFC000' },
-  { id: 'LN', code: 'LHTTMS', base: ['LN1', 'LN2'], excelFill: 'FF0070C0' },
-  { id: 'LA', code: 'LHTATL', base: ['LA1'], excelFill: 'FFFFFF00' },
+  { id: 'LF', code: 'LHTTDF', base: ['LF1', 'LF2', 'LF3'], excelFill: 'FFFFC000', color: '#f59e0b' },
+  { id: 'LN', code: 'LHTTMS', base: ['LN1', 'LN2'], excelFill: 'FF0070C0', color: '#1e3a8a' },
+  { id: 'LA', code: 'LHTATL', base: ['LA1'], excelFill: 'FFFFFF00', color: '#eab308' },
 ];

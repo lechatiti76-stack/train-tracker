@@ -605,6 +605,9 @@ coupons navettes qui remplace la feuille « semaine » du classeur
 - **Excel** : *Extraire le jour en Excel* (Récap du jour) ou *Exporter la
   semaine* (onglet Semaine & Excel), au format exact du classeur (blocs par
   jour, couleurs, lignes TOTAL en formules).
+- **PDF récap** : les coupons du jour figurent dans le PDF récap (📄 PDF récap
+  et 🌙 Journée finie), section « Coupons navettes » : une ligne par coupon,
+  total de wagons par site et pour la journée.
 - **Historique** : onglet Semaine & Excel → *Importer un classeur Excel*
   (le classeur annuel ou un export de cet écran). Les journées déjà saisies
   ne sont pas modifiées.

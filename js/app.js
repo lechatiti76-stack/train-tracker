@@ -3,8 +3,8 @@
 // DOM (delay-calc, time-utils, storage, sheets-sync) ni à l'état global
 // (card, charts, splitflap), ce qui garde ce fichier comme seul chef
 // d'orchestre.
-import { DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
-import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart, loadCirculationsSeen, saveCirculationsSeen, loadRemovedTrains, saveRemovedTrains } from './storage.js';
+import { COUPON_FAMILIES, DELAY_THRESHOLDS, DELAY_THRESHOLDS_DEFAULTS, SHUTTLE_GROUPS, SHUTTLE_DEFAULT_IMMINENT_MIN, ARRIVAL_GROUPS, ARRIVAL_DEFAULT_IMMINENT_MIN, QUICK_TRAIN_OPERATOR_COLORS, DEFAULT_SETTINGS } from './config.js';
+import { loadTrains, saveTrains, loadSettings, saveSettings, createEmptyTrain, todayISO, seedDemoTrains, loadShuttles, saveShuttles, loadShuttleReserves, saveShuttleReserves, loadArrivals, saveArrivals, loadDayHistory, recordDayPart, loadCirculationsSeen, saveCirculationsSeen, loadRemovedTrains, saveRemovedTrains, loadCoupons } from './storage.js';
 import { fetchCirculationsDiffusion, circulationsValues, planCirculationsUpdates } from './circulations-sync.js';
 import { computeAllStepDelays, computeStepDelay, computeMainCause, computeTrainStatus, applyOffsetSteps, applySillonSequence, suggestCauseForLabel } from './delay-calc.js';
 import { formatHHMM, formatHHMMSS, formatDelayLabel, nowLocalISOWithSeconds, parseHHMM, diffMinutes, delayTone, pad2 } from './time-utils.js';
@@ -4690,6 +4690,60 @@ function buildRecapPdfDoc(dateISO, { trainsForDate, shuttlesSnapshot, shuttleRes
     if (cancelled) diagonalBanner(M + CW * 0.63, top + 11, 86, 5, 15);
     y = top + cardH + 4;
   });
+
+  // ---- 5. Coupons navettes (saisis via "🎫 Coupons", voir js/coupons.js) ----
+  // Une ligne par coupon, dans l'ordre du classeur (LF, LN, LA), avec un
+  // total de wagons par site et pour la journée. Lu directement dans le
+  // stockage des coupons, par date : fonctionne aussi pour l'archivage d'une
+  // journée passée.
+  const couponsDoc = loadCoupons()[dateISO];
+  const couponRows = [];
+  let couponCount = 0;
+  let couponWagons = 0;
+  const pad2c = (v) => (typeof v === 'number' ? String(v).padStart(2, '0') : String(v ?? '—'));
+  const fmtCouponDate = (dc) => (typeof dc === 'number' && dc >= 101 ? String(dc).padStart(4, '0') : String(dc ?? '—'));
+  COUPON_FAMILIES.forEach((fam) => {
+    const navs = Object.keys(couponsDoc?.nav || {})
+      .filter((s) => s.startsWith(fam.id) && couponsDoc.nav[s].length)
+      .sort((a, b) => parseInt(a.slice(2), 10) - parseInt(b.slice(2), 10));
+    if (!navs.length) return;
+    let famWagons = 0;
+    navs.forEach((s) => {
+      couponsDoc.nav[s].forEach((l, i) => {
+        const w = typeof l.w === 'number' ? l.w : null;
+        famWagons += w || 0;
+        couponCount += 1;
+        const dcOk = typeof l.dc === 'number' && l.dc >= 101 && l.dc % 100 >= 1 && l.dc % 100 <= 12;
+        couponRows.push({
+          cells: [
+            i === 0 ? { chip: { color: fam.color, text: s } } : { text: '' },
+            { text: pad2c(l.n), bold: true, color: C.ink },
+            { text: fam.code, color: C.muted },
+            { text: fmtCouponDate(l.dc), bold: true, color: dcOk ? C.ink : C.red },
+            { text: w === null ? '—' : String(w), bold: true, color: w === null ? C.faint : C.ink },
+            { text: l.note ? `Wagons : ${l.note}` : (dcOk ? '' : 'date à vérifier'), color: C.muted },
+          ],
+        });
+      });
+    });
+    couponWagons += famWagons;
+    couponRows.push({
+      bg: C.headBg,
+      cells: [{ text: `Total ${fam.id}`, bold: true, color: C.ink }, { text: '' }, { text: fam.code, bold: true, color: C.ink }, { text: '' }, { text: String(famWagons), bold: true, color: C.ink }, { text: '' }],
+    });
+  });
+  sectionTitle('Coupons navettes', '#f59e0b', couponCount ? `${couponCount} coupon(s) · ${couponWagons} wagons` : '');
+  if (!couponCount) emptyNote('Aucun coupon saisi pour ce jour (bouton « Coupons »).');
+  else {
+    couponRows.push({
+      bg: C.bandBg,
+      cells: [{ text: 'TOTAL JOUR', bold: true, color: C.accent }, { text: '' }, { text: '' }, { text: '' }, { text: String(couponWagons), bold: true, color: C.accent }, { text: `${couponCount} coupon(s)`, color: C.muted }],
+    });
+    table([
+      { title: 'NAVETTE', w: 28 }, { title: 'N° COUPON', w: 26, align: 'center' }, { title: 'CODE SITE', w: 30, align: 'center' },
+      { title: 'DATE COUPON', w: 30, align: 'center' }, { title: 'NB WAGONS', w: 26, align: 'center' }, { title: 'REMARQUE', w: CW - 140 },
+    ], couponRows);
+  }
 
   // ---- Légende ----
   ensure(16);
