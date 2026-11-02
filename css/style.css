@@ -165,6 +165,8 @@ body {
 .btn-danger { background: var(--danger-bg); color: var(--danger); }
 .btn-danger:hover { background: var(--danger); color: #fff; }
 .btn-move { padding: 0.55rem 0.7rem; flex: 0 0 auto; }
+a.btn { text-decoration: none; }
+.btn-coupons { border-color: #f59e0b; }
 
 .icon-btn {
   width: 44px;
