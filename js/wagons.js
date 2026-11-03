@@ -296,6 +296,16 @@ export function openWagons() {
   if (window.matchMedia('(pointer: fine)').matches) q('#wg-len').focus();
 }
 
+// Le module branche lui-même son bouton (chargé par sa propre balise
+// <script type="module"> dans index.html) : il ne dépend pas d'app.js, et
+// continue de marcher même si une ancienne copie d'app.js est en cache.
+function wireButton() {
+  const btn = document.getElementById('btnWagons');
+  if (btn && !btn.dataset.wired) { btn.dataset.wired = '1'; btn.addEventListener('click', openWagons); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireButton);
+else wireButton();
+
 export function closeWagons() {
   if (!st.root || st.root.hidden) return;
   st.root.hidden = true;

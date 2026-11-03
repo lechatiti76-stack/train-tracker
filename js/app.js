@@ -15,7 +15,6 @@ import { trainCardTemplate, updateCardDynamicParts, trainNo, escapeHtml, formatC
 import { initStopwatch } from './stopwatch.js';
 import { saveArchivePdf, listArchivePdfs, getArchivePdf, deleteArchivePdf, pruneOldArchives } from './archives.js';
 import { openCoupons } from './coupons.js';
-import { openWagons } from './wagons.js';
 
 let settings = loadSettings();
 // Applique les seuils de retard personnalisés (settings.delayThresholds,
@@ -6107,10 +6106,8 @@ function wireHeaderButtons() {
   // — voir js/coupons.js (module autonome, stockage STORAGE_KEYS.coupons).
   const couponsBtn = el('btnCoupons');
   if (couponsBtn) couponsBtn.addEventListener('click', openCoupons);
-  // Bouton "🚃 Wagons" : convertisseur longueur ⇄ wagons 60'/80', plein
-  // écran — voir js/wagons.js (module autonome).
-  const wagonsBtn = el('btnWagons');
-  if (wagonsBtn) wagonsBtn.addEventListener('click', openWagons);
+  // Bouton "🚃 Wagons" : branché directement par js/wagons.js (chargé par
+  // sa propre balise <script> dans index.html).
 }
 
 // Une PWA installée peut rester "suspendue" en arrière-plan pendant des

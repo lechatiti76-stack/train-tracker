@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v62';
+const CACHE_NAME = 'traintrack-cache-v63';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -62,7 +62,10 @@ const CDN_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    await cache.addAll(APP_SHELL);
+    // { cache: 'reload' } : ignore le cache HTTP du navigateur (GitHub Pages
+    // le garde 10 min). Sans ça, une nouvelle version pouvait enregistrer
+    // l'ancienne copie d'un fichier et la servir indéfiniment.
+    await cache.addAll(APP_SHELL.map((url) => new Request(url, { cache: 'reload' })));
     await Promise.all(
       CDN_ASSETS.map((url) => cache.add(url).catch(() => {
         /* Pas bloquant : sera mis en cache au premier chargement en ligne. */
