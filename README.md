@@ -39,6 +39,21 @@ plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
   si un jour elle était hébergée ailleurs que sur un dépôt public.
 - Lien direct vers l'onglet : `…/index.html#plans-rfp`.
 
+### Affichage des plans et contacts
+
+- **Plans nets au zoom** : au-delà de la résolution de l'image, la zone
+  visible est redessinée depuis le PDF (vectoriel) à la résolution de
+  l'écran, sur le plan général comme dans la fiche d'un plan. Les plans qui
+  sont des images collées dans le PDF (ex. Port 2000, Zone maritime, ponts)
+  restent limités à la résolution d'origine.
+- **Étiquettes sur les côtés** : sur le plan général, chaque secteur a un
+  point à son emplacement exact et son étiquette rangée dans la marge, reliée
+  par un trait. Le bouton ⇆ repasse aux étiquettes posées sur le plan.
+- **Numéros utiles** (onglet PN, ouvrages & contacts) : chaque contact peut
+  être modifié (nom, fonction, téléphones, e-mail, adresse, note), supprimé
+  (restaurable dans « Supprimés ») ou ajouté à la main. Les contacts sont
+  aussi trouvés par la recherche générale.
+
 ### Coffre chiffré des plans
 
 - À la première ouverture de l'onglet, on choisit un **mot de passe** (8
