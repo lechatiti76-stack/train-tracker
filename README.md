@@ -54,6 +54,25 @@ plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
   (restaurable dans « Supprimés ») ou ajouté à la main. Les contacts sont
   aussi trouvés par la recherche générale.
 
+### Mises à jour d'un plan (ex. plan mural)
+
+- Une nouvelle édition est rattachée automatiquement à l'ancienne quand elle
+  porte la même référence (ex. DAO-EXP-S2A-N°1), ou à défaut un nom de
+  fichier équivalent (« Plan mural RFP.pdf » et « Plan mural RFP - maj
+  2026.pdf »). Elle devient la version en vigueur et ses changements sont
+  listés dans « Mises à jour ».
+- Sinon : Bibliothèque → « Modifier » sur la version → « Rattacher à » le bon
+  document (n° de version proposé automatiquement). On peut aussi y corriger
+  titre, n° et dates.
+- « Ne garder que la version en vigueur » archive d'un clic les anciennes
+  versions d'un document (elles restent consultables et réactivables).
+- **Plan de référence** : sur la fiche d'un plan, « Utiliser comme plan
+  général » ; ou « Changer » en haut du plan général. Le plan général affiche
+  toujours la version en vigueur de ce document : une mise à jour importée
+  le remplace automatiquement.
+- Les plans d'une seule page et les grands formats (A3 et plus) sont
+  reconnus comme plans.
+
 ### Coffre chiffré des plans
 
 - À la première ouverture de l'onglet, on choisit un **mot de passe** (8

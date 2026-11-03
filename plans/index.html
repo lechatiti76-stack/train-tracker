@@ -361,7 +361,7 @@ mark{background:var(--hv-soft);color:inherit;border-bottom:2px solid var(--hv);p
       <div class="planview">
         <div class="mapwrap" id="mapWrap">
           <div class="mapbar">
-            <div class="mapcard" id="mapTitle"><b>Plan général</b><span class="muted" id="mapSrc"></span></div>
+            <div class="mapcard" id="mapTitle"><b>Plan général</b><span class="muted" id="mapSrc"></span><button class="btn sm" type="button" id="btnMainPick" title="Choisir le plan de référence affiché ici">Changer</button></div>
             <div class="mapcard" id="mapHits" hidden></div>
           </div>
           <div class="legend" id="legend">
@@ -653,6 +653,16 @@ function askNewPassword(title,message){
 }
 const pdfDocs=new Map();
 async function getPdfPage(u,n){if(!pdfDocs.has(u))pdfDocs.set(u,(async()=>{const url=await resolveUrl(u);if(!url)throw new Error('PDF introuvable');return pdfjsLib.getDocument({url,isEvalSupported:false}).promise})().catch(e=>{pdfDocs.delete(u);throw e}));const doc=await pdfDocs.get(u);return doc.getPage(n)}
+const liveImgs=new Map();
+/* Image d'une page : celle extraite à l'import, sinon rendue à la volée depuis le PDF (pages reclassées en plan, plans d'une page importés avant). */
+async function pageImage(v,p){
+  if(p.img)return{url:imgUrl(v,p),w:p.iw,h:p.ih};
+  const key=v.id+'#'+p.n;if(liveImgs.has(key))return liveImgs.get(key);
+  const page=await getPdfPage(fileUrl(v,v.pdf),p.n);const vp1=page.getViewport({scale:1});let sc=3200/Math.max(vp1.width,vp1.height);const px=vp1.width*vp1.height*sc*sc;if(px>16e6)sc*=Math.sqrt(16e6/px);
+  const vp=page.getViewport({scale:sc});const c=document.createElement('canvas');c.width=Math.floor(vp.width);c.height=Math.floor(vp.height);
+  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);await page.render({canvasContext:ctx,viewport:vp}).promise;
+  const b=await new Promise(r=>c.toBlob(r,'image/webp',.9));const out={url:URL.createObjectURL(b),w:c.width,h:c.height};c.width=c.height=0;liveImgs.set(key,out);return out;
+}
 const jsonCache=new Map();
 function fetchJSON(u){if(!u)return Promise.resolve(null);if(!jsonCache.has(u))jsonCache.set(u,(async()=>{const url=await resolveUrl(u);const r=await fetch(url);if(!r.ok)throw new Error(r.status);return r.json()})().catch(e=>{jsonCache.delete(u);console.warn('json',u,e);return null}));return jsonCache.get(u)}
 
@@ -697,9 +707,12 @@ function buildLines(items){
 }
 const BOILER=/document propri[ée]t[ée] de haropa|^version \d+ du \d|^page \d+|^dtlh|^dt-lh|^r[ée]f[ée]rence article|^edition ?:/i;
 const SPACED=/^(\S ){4,}\S/;
-function classify(n,w,h,ops,items,chars){
+function classify(n,w,h,ops,items,chars,N=2){
   const land=w>h*1.05;const rotated=items.filter(i=>i.rot).length;
-  if(n===1&&!land)return'texte';
+  /* Grand format (A3 et plus, ex. plan mural) avec du dessin ou une image : c'est un plan. */
+  if(w*h>842*1191*.95&&(ops.paths>12||ops.imgs>0))return'plan';
+  if(n===1&&!land&&N>1)return'texte';
+  if(N===1&&(ops.paths>40||(ops.imgs>0&&ops.maxImg>.3)))return'plan';
   if(land&&(ops.paths>12||ops.imgs>0))return'plan';
   if(ops.imgs===1&&ops.maxImg>.6&&chars<400)return'scan';
   if(ops.imgs===0&&rotated>=3&&ops.paths>60)return'plan';
@@ -757,7 +770,7 @@ async function extractPdf(buf,fileName,onProgress=()=>{},opts={}){
     const items=await pageText(page,vp);const lines=buildLines(items);
     const chars=items.reduce((a,i)=>a+i.s.length,0);
     const ops=await analyseOps(page);
-    const cat=classify(n,vp.width,vp.height,ops,items,chars);
+    const cat=classify(n,vp.width,vp.height,ops,items,chars,N);
     const content=lines.filter(l=>!BOILER.test(l.s)&&!(l.y>.94));
     allTxt.push(lines.map(l=>l.s).join('\n'));
     pagesLines.push({n,lines:content});
@@ -824,10 +837,26 @@ async function extractPdf(buf,fileName,onProgress=()=>{},opts={}){
 /* ================= Data model ================= */
 const S={seed:[],remote:{},meta:{},pins:{},over:{},versions:[],byDoc:new Map(),view:'plan',q:'',filters:{doc:'',cat:'plan',chg:false,anchor:''},folder:'*',mainVer:null};
 const CAT_LBL={plan:'Plan / schéma',illustration:'Photo / figure',tableau:'Tableau',texte:'Texte',scan:'Page scannée'};
+/* Clé de nom de fichier, sans dates, années, numéros de version ni mots comme « maj » :
+   « Plan mural RFP v2 – mise à jour 2026.pdf » et « Plan mural RFP.pdf » donnent la même clé. */
+function fileKey(name){let s=norm(String(name||'').replace(/\.pdf$/i,'')).replace(/[_\-.]+/g,' ');
+  s=s.replace(/\(\d+\)/g,' ').replace(/\b\d{1,4}[ /]\d{1,2}[ /]\d{1,4}\b/g,' ').replace(/\b(19|20)\d{2}\b/g,' ')
+   .replace(/\b(version|ver|v|indice|ind|revision|rev|edition|ed)\s*[a-z0-9]{1,3}\b/g,' ')
+   .replace(/\b(maj|mise a jour|mis a jour|update|nouveau|nouvelle|new|copie|copy|final|definitif|actualise|recent|ancien|old|du|le|la)\b/g,' ')
+   .replace(/[^a-z0-9]+/g,' ').trim();return s.length>=4?s:''}
 function rebuild(){
   const all=[...S.seed,...Object.values(S.remote)].filter(v=>v&&v.id&&v.pages);
+  // valeurs d'origine, puis corrections faites dans la Bibliothèque (« Modifier »)
+  for(const v of all)if(!v._o)v._o={docId:v.docId,ref:v.ref,title:v.title,version:v.version,versionDate:v.versionDate,applicable:v.applicable,changes:v.changes};
+  const byKey=new Map();
+  for(const v of [...all].sort((a,b)=>(a.importedAt||'').localeCompare(b.importedAt||''))){Object.assign(v,v._o);
+    if(!v._o.ref){const k=fileKey(v.fileName);if(k){if(byKey.has(k))v.docId=byKey.get(k);else byKey.set(k,v.docId)}}}
+  for(const v of all){const o=(S.vedit||{})[v.id];if(!o)continue;
+    for(const k of['docId','title','versionDate','applicable'])if(o[k])v[k]=o[k];if(o.version!==undefined&&o.version!=='')v.version=o.version===null?null:+o.version}
+  for(const v of all){if(v.docId!==v._o.docId){const t=all.find(x=>x._o.docId===v.docId&&x._o.ref);v.ref=t?t._o.ref:v._o.ref}const ch=(S.vchanges||{})[v.id];if(ch)v.changes=ch.c}
   const byDoc=new Map();for(const v of all){if(!byDoc.has(v.docId))byDoc.set(v.docId,[]);byDoc.get(v.docId).push(v)}
-  for(const arr of byDoc.values()){arr.sort((a,b)=>(a.version??-1)-(b.version??-1)||(frDate(a.applicable)||0)-(frDate(b.applicable)||0)||(a.importedAt||'').localeCompare(b.importedAt||''))}
+  /* Ordre des versions : n° de version quand les deux en ont un, sinon date d'application, puis date d'import. */
+  for(const arr of byDoc.values()){arr.sort((a,b)=>(a.version!=null&&b.version!=null&&a.version!==b.version)?a.version-b.version:((frDate(a.applicable)||0)-(frDate(b.applicable)||0))||(a.importedAt||'').localeCompare(b.importedAt||''))}
   S.byDoc=byDoc;S.versions=all;
   for(const v of all){const cnt={};for(const p of v.pages)if(p.cat==='plan')cnt[p.section]=(cnt[p.section]||0)+1;for(const p of v.pages)p._multi=p.cat==='plan'&&cnt[p.section]>1&&!p.label}
   for(const v of all){const arr=byDoc.get(v.docId);const meta=S.meta[v.docId]||{};const arch=new Set(meta.archived||[]);
@@ -835,15 +864,25 @@ function rebuild(){
     const applicableNow=live.filter(x=>!x.applicable||frDate(x.applicable)<=TODAY);
     const cur=applicableNow[applicableNow.length-1]||live[0];
     v.isLatest=live[live.length-1]===v;v.isCurrent=cur===v;
-    v.status=v.archived?'Archivée':(v.applicable&&frDate(v.applicable)>TODAY&&v.isLatest)?'À venir':v.isCurrent?'En vigueur':(cur&&(cur.version??0)>(v.version??0))?'Remplacée':'Ancienne';
+    v.status=v.archived?'Archivée':v.isCurrent?'En vigueur':(v.applicable&&frDate(v.applicable)>TODAY)?'À venir':(cur&&arr.indexOf(v)<arr.indexOf(cur))?'Remplacée':'À venir';
     v.prev=arr[arr.indexOf(v)-1]||null;
   }
-  // main plan: latest live version having a main page
-  const mains=all.filter(v=>v.isLatest&&!v.archived&&v.pages.some(p=>p.main));
-  S.mainVer=mains[0]||all.find(v=>v.pages.some(p=>p.main))||null;
+  // Plan général : celui choisi par l'utilisateur (toujours dans sa version en vigueur), sinon le plan « étendue géographique »
+  const mp=(S.settings||{}).mainPlan;let mv=null,mpg=null;
+  if(mp&&byDoc.has(mp.docId)){const arr=byDoc.get(mp.docId);mv=arr.find(x=>x.isCurrent)||arr.filter(x=>!x.archived).slice(-1)[0]||arr[arr.length-1];
+    if(mv)mpg=mv.pages.find(q=>q.n===mp.n&&q.cat!=='texte'&&q.cat!=='tableau')||mv.pages.find(q=>pageCat(mv,q)==='plan')||mv.pages.find(q=>q.n===mp.n)||mv.pages[0]}
+  if(!mv){const mains=all.filter(v=>(v.isCurrent||v.isLatest)&&!v.archived&&v.pages.some(q=>q.main));mv=mains.find(v=>v.isCurrent)||mains[0]||all.find(v=>v.pages.some(q=>q.main))||null;mpg=mv?mv.pages.find(q=>q.main):null}
+  S.mainVer=mv;S.mainPage=mpg;
+  queueChangeChecks();
 }
+/* Recalcule la comparaison avec la version précédente quand des versions ont été rattachées après coup. */
+const changeTried=new Set();let changeTimer=null;
+function queueChangeChecks(){clearTimeout(changeTimer);changeTimer=setTimeout(async()=>{if(!Store.canWrite||!S.versions)return;
+  for(const v of S.versions){if(!v.prev||v.source==='seed')continue;const key=v.id+'>'+v.prev.id;if(changeTried.has(key))continue;if(v.changes&&v.changes.prevId===v.prev.id){changeTried.add(key);continue}
+    changeTried.add(key);try{const [words,thumbs]=await Promise.all([wordsOf(v),fetchJSON(fileUrl(v,v.thumbsUrl))]);if(!words||!thumbs)continue;
+      const c=await computeChanges(v,{words,thumbs,sectionsNotes:v.sectionsNotes||{}},v.prev);await Store.put('vchanges',v.id,{c})}catch(e){console.warn('comparaison',v.id,e)}}},600)}
 function latestVersions(){return S.versions.filter(v=>v.isLatest&&!v.archived)}
-function pageCat(v,p){const o=S.over[v.id+'_'+p.n];return(o&&o.cat)||p.cat}
+function pageCat(v,p){const o=S.over[v.id+'_'+p.n];if(o&&o.cat)return o.cat;if(v.numPages===1&&p.cat==='texte'&&p.ops&&(p.ops.p>40||p.ops.i>0))return'plan';return p.cat}
 function planKey(v,p){return v.docId+'|'+norm(p.section||'')+'|'+norm(p.label||'')}
 const KEEP=new Set(['PCD','FA','RFN','RFP','PN','OA','CCI','ITE','TVP','ZD','DT','RFP','4R','ISPS','EF','CCL']);
 const cap=s=>{const t=s.split(/(\s+|\/|\(|\))/).map(w=>{const b=w.replace(/[()]/g,'');return KEEP.has(b)?w:w.toLowerCase()}).join('');return t.charAt(0).toUpperCase()+t.slice(1)};
@@ -967,14 +1006,15 @@ class PanZoom{
 let MAP=null;const PINS=[];let editPins=false;let mainWords=null;let mapHits=[],hitIdx=0;
 function anchorPositions(){
   const pos={};if(!mainWords)return pos;
-  for(const a of ANCHORS){const man=S.pins['anchor:'+a.id];if(man&&man.x!=null){pos[a.id]={x:man.x,y:man.y,manual:true};continue}
+  const md=S.mainVer?S.mainVer.docId:'';const isDefault=!!(S.mainPage&&S.mainPage.main);
+  for(const a of ANCHORS){const man=S.pins['anchor@'+md+':'+a.id]||(isDefault?S.pins['anchor:'+a.id]:null);if(man&&man.x!=null){pos[a.id]={x:man.x,y:man.y,manual:true};continue}
     for(const ph of a.find){const hits=findPhrase(mainWords,ph);if(hits.length){const b=hits[0];pos[a.id]={x:b[1]+b[3]/2,y:b[2]+b[4]/2};break}}}
-  for(const[k,p]of Object.entries(S.pins)){if(k.startsWith('custom:')&&p.x!=null)pos[k]={x:p.x,y:p.y,manual:true,custom:true,label:p.label}}
+  for(const[k,p]of Object.entries(S.pins)){if(k.startsWith('custom:')&&p.x!=null&&(p.main?p.main===md:isDefault))pos[k]={x:p.x,y:p.y,manual:true,custom:true,label:p.label}}
   return pos;
 }
 function groupPlans(){
   const groups={};const unplaced=[];
-  for(const v of latestVersions())for(const p of v.pages){const c=pageCat(v,p);if(c!=='plan'&&c!=='illustration')continue;if(p.main&&v===S.mainVer)continue;
+  for(const v of latestVersions())for(const p of v.pages){const c=pageCat(v,p);if(c!=='plan'&&c!=='illustration')continue;if(v===S.mainVer&&p===S.mainPage)continue;
     const ids=anchorsForPage(v,p);const cp=S.pins['plan:'+slug(planKey(v,p))];
     if(cp&&cp.custom){(groups['custom:'+slug(planKey(v,p))]||(groups['custom:'+slug(planKey(v,p))]=[])).push({v,p});continue}
     if(!ids.length){unplaced.push({v,p});continue}
@@ -996,9 +1036,9 @@ async function renderPlanView(){
   const v=S.mainVer;
   $('#mapEmpty').hidden=!!v;
   if(!v){$('#mapSrc').textContent='Aucun plan général : importez le document des particularités locales.';renderAnchorList();return}
-  const p=v.pages.find(x=>x.main);
-  $('#mapSrc').textContent=`${shortRef(v)} · p.${p.n} · ${v.status}`;
-  if(MAP.cur!==v.id+p.n){MAP.cur=v.id+p.n;const w=await wordsOf(v);mainWords=w?w[p.n]:null;await MAP.load(imgUrl(v,p),p.iw,p.ih);MAP.setSource(v.pdf?{url:fileUrl(v,v.pdf),n:p.n}:null)}
+  const p=S.mainPage||v.pages[0];
+  $('#mapSrc').textContent=`${(S.settings||{}).mainPlan?planTitle(p)+' · ':''}${shortRef(v)} · p.${p.n} · ${v.status}`;
+  if(MAP.cur!==v.id+p.n){MAP.cur=v.id+p.n;const w=await wordsOf(v);mainWords=w?w[p.n]:null;const im=await pageImage(v,p);await MAP.load(im.url,im.w,im.h);MAP.setSource(v.pdf?{url:fileUrl(v,v.pdf),n:p.n}:null)}
   renderPins();renderAnchorList();
   if(S.q)highlightOnMap(S.q);
 }
@@ -1014,7 +1054,7 @@ function renderPins(){
     el.addEventListener('click',e=>{e.stopPropagation();if(editPins)return;openPop(id,lbl,g)});
     if(editPins){el.addEventListener('pointerdown',e=>{e.stopPropagation();el.setPointerCapture(e.pointerId);const r=MAP.el.getBoundingClientRect();
       const mv=ev=>{const[nx,ny]=MAP.toNorm(ev.clientX-r.left,ev.clientY-r.top);P.x=nx;P.y=ny;positionPins()};
-      const end=async()=>{el.removeEventListener('pointermove',mv);el.removeEventListener('pointerup',end);const key=id.startsWith('custom:')?id:'anchor:'+id;const prev=S.pins[key]||{};try{await Store.put('pins',key,{...prev,x:+P.x.toFixed(5),y:+P.y.toFixed(5)})}catch(err){toast('Enregistrement impossible : '+(err.message||err.code))}};
+      const end=async()=>{el.removeEventListener('pointermove',mv);el.removeEventListener('pointerup',end);const key=id.startsWith('custom:')?id:'anchor@'+(S.mainVer?S.mainVer.docId:'')+':'+id;const prev=S.pins[key]||{};try{await Store.put('pins',key,{...prev,x:+P.x.toFixed(5),y:+P.y.toFixed(5)})}catch(err){toast('Enregistrement impossible : '+(err.message||err.code))}};
       el.addEventListener('pointermove',mv);el.addEventListener('pointerup',end)})}
     const dot=h('button',{type:'button',class:'pin-dot '+(a?a.kind:'custom'),'aria-label':lbl,title:lbl,hidden:true});
     dot.addEventListener('mouseenter',()=>{hoverAnchor=id;drawConnector()});dot.addEventListener('mouseleave',()=>{hoverAnchor=null;drawConnector()});
@@ -1095,8 +1135,48 @@ function highlightOnMap(q){if(!MAP||!mainWords){return}
 }
 let placingPlan=null;
 async function placePlanAt(nx,ny){const{v,p}=placingPlan;placingPlan=null;$('#mapWrap').style.cursor='';const key='plan:'+slug(planKey(v,p));const ck='custom:'+slug(planKey(v,p));
-  try{await Store.put('pins',key,{custom:true});await Store.put('pins',ck,{x:+nx.toFixed(5),y:+ny.toFixed(5),label:planTitle(p).slice(0,60)});toast('Plan placé sur le plan général.')}catch(e){toast('Placement impossible : '+(e.message||e.code))}}
+  try{await Store.put('pins',key,{custom:true});await Store.put('pins',ck,{x:+nx.toFixed(5),y:+ny.toFixed(5),label:planTitle(p).slice(0,60),main:S.mainVer?S.mainVer.docId:''});toast('Plan placé sur le plan général.')}catch(e){toast('Placement impossible : '+(e.message||e.code))}}
 
+
+/* ---------- Plan de référence (plan général) ---------- */
+async function setMainPlan(v,p){try{await Store.put('settings','mainPlan',{docId:v.docId,n:p.n});toast('Plan de référence changé. La version en vigueur de ce document sera toujours utilisée.');MAP&&(MAP.cur=null);go('plan')}catch(e){toast('Impossible : '+(e.message||e.code))}}
+function pickMainPlan(){
+  const root=$('#dlgRoot');const close=()=>{root.innerHTML='';document.removeEventListener('keydown',escK,true)};const escK=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();close()}};
+  const grid=h('div',{class:'vstrip',style:{flexWrap:'wrap',maxHeight:'52vh',overflow:'auto'}});
+  for(const v of latestVersions())for(const p of v.pages){const c=pageCat(v,p);if(c!=='plan'&&c!=='illustration')continue;const img=h('img',{alt:'',loading:'lazy'});thumbOf(v,p.n).then(u=>img.src=u||'');
+    grid.append(h('button',{type:'button',class:'vig',style:{width:'150px',outline:(v===S.mainVer&&p===S.mainPage)?'3px solid var(--accent)':''},title:planTitle(p)+' — '+planSub(v,p),onclick:()=>{close();setMainPlan(v,p)}},img,h('span',{},planTitle(p)+' · '+shortRef(v))))}
+  const card=h('div',{class:'lock-card wide',style:{width:'min(820px,100%)'}},h('h2',{},'Plan de référence'),
+    h('p',{},'Choisissez le plan affiché dans « Plan général ». Quand une mise à jour de ce document est importée, sa nouvelle version prend la place automatiquement.'),grid,
+    h('div',{class:'row'},(S.settings||{}).mainPlan?h('button',{class:'btn',type:'button',onclick:async()=>{close();try{await Store.remove('settings','mainPlan');MAP&&(MAP.cur=null);toast('Plan général par défaut rétabli.')}catch(e){toast('Impossible : '+(e.message||e.code))}}},'Revenir au plan par défaut'):null,h('button',{class:'btn',type:'button',onclick:close},'Fermer')));
+  root.innerHTML='';root.append(h('div',{class:'dlg',role:'dialog','aria-modal':'true'},card));document.addEventListener('keydown',escK,true);
+}
+/* ---------- Corriger les informations d'une version / la rattacher à un autre document ---------- */
+const toISO=fr=>{const d=frDate(fr);return d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:''};
+const toFR=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||'');return m?`${m[3]}/${m[2]}/${m[1]}`:''};
+function editVersion(v){
+  const root=$('#dlgRoot');const err=h('p',{class:'lock-err',role:'alert'});const close=()=>{root.innerHTML='';document.removeEventListener('keydown',escK,true)};const escK=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();close()}};
+  const docs=[...S.byDoc.entries()].filter(([d])=>d!==v._o.docId).map(([d,arr])=>{const l=arr[arr.length-1];return[d,`${l.ref||d} — ${l.title||''}`.slice(0,90)]});
+  const sel=h('select',{id:'veDoc',class:'inline-input',style:{height:'40px'}},h('option',{value:v._o.docId,selected:v.docId===v._o.docId},'Document séparé (comme à l’import)'),docs.map(([d,l])=>h('option',{value:d,selected:v.docId===d},'Nouvelle version de : '+l)));
+  const ti=h('input',{id:'veTitle',type:'text',value:v.title||''}),vn=h('input',{id:'veNum',type:'number',min:0,step:1,value:v.version??''}),vd=h('input',{id:'veDate',type:'date',value:toISO(v.versionDate)}),ap=h('input',{id:'veApp',type:'date',value:toISO(v.applicable)});
+  const form=h('form',{class:'lock-card wide'},h('h2',{},'Modifier la version'),h('p',{},(v.fileName||'')+' · importé le '+fmtDate(new Date(v.importedAt||Date.now()))),
+    h('label',{for:'veDoc'},'Rattacher à',sel),h('label',{for:'veTitle'},'Titre',ti),
+    h('div',{class:'form2'},h('label',{for:'veNum'},'N° de version',vn),h('label',{for:'veDate'},'Date de version',vd)),h('label',{for:'veApp'},'Applicable à partir du',ap),
+    h('p',{class:'lock-note'},'La version en vigueur est la plus récente déjà applicable (n° de version, puis date d’application, puis date d’import). Une version applicable plus tard reste « À venir » jusqu’à sa date.'),err,
+    h('div',{class:'row'},h('button',{class:'btn',type:'button',onclick:close},'Annuler'),h('button',{class:'btn primary',type:'submit'},'Enregistrer')));
+  const hint=h('p',{class:'lock-note'});
+  sel.onchange=()=>{hint.textContent='';if(sel.value===v._o.docId)return;const arr=(S.byDoc.get(sel.value)||[]).filter(x=>x!==v);const nums=arr.map(x=>x.version).filter(x=>x!=null);
+    const later=arr.every(x=>(x.importedAt||'')<=(v.importedAt||''));
+    if(later&&nums.length&&vn.value===''){vn.value=Math.max(...nums)+1;hint.textContent=`N° de version proposé : ${vn.value} (après la v${Math.max(...nums)} déjà présente). Modifiez-le si besoin.`}
+    else if(later)hint.textContent='Importée après les autres versions : elle deviendra la version en vigueur.';
+    else hint.textContent='Importée avant certaines versions : indiquez son n° de version ou sa date d’application pour la placer au bon endroit.'};
+  form.insertBefore(hint,err);
+  form.onsubmit=async e=>{e.preventDefault();const o={docId:sel.value,title:ti.value.trim(),version:vn.value===''?null:Math.round(+vn.value),versionDate:toFR(vd.value),applicable:toFR(ap.value)};
+    close();try{await Store.put('vedit',v.id,o);toast(o.docId!==v._o.docId?'Version rattachée : la plus récente devient la version en vigueur.':'Version modifiée.')}catch(x){toast('Impossible : '+(x.message||x.code))}};
+  root.innerHTML='';root.append(h('div',{class:'dlg',role:'dialog','aria-modal':'true'},form));document.addEventListener('keydown',escK,true);sel.focus();
+}
+async function keepCurrentOnly(docId){const vers=S.byDoc.get(docId)||[];const meta=S.meta[docId]||{};const arch=new Set(meta.archived||[]);let n=0;
+  for(const v of vers){if(v.isCurrent||v.status==='À venir'||arch.has(v.id))continue;arch.add(v.id);n++}
+  if(!n){toast('Rien à archiver.');return}try{await Store.put('meta',docId,{...meta,archived:[...arch]});toast(`${n} ancienne(s) version(s) archivée(s). Elles restent consultables ici.`)}catch(e){toast('Impossible : '+(e.message||e.code))}}
 /* ================= Plan detail modal ================= */
 let MV=null;
 async function openPlan(v,p,opts={}){
@@ -1107,7 +1187,7 @@ async function openPlan(v,p,opts={}){
     h('button',{class:'btn sm',type:'button',onclick:()=>openReader(v,p.n)},'Voir dans le PDF'),
     h('button',{class:'btn sm',type:'button','aria-label':'Fermer',onclick:closeModal},'Fermer ✕'));
   const m=h('div',{class:'modal',role:'dialog','aria-modal':'true',onclick:e=>{if(e.target===m)closeModal()}},h('div',{class:'modal-box'},hd,body));root.append(m);
-  MV=new PanZoom(mw);await MV.load(imgUrl(v,p),p.iw,p.ih);if(v.pdf)MV.setSource({url:fileUrl(v,v.pdf),n:p.n});
+  MV=new PanZoom(mw);const pim=await pageImage(v,p);await MV.load(pim.url,pim.w,pim.h);if(v.pdf)MV.setSource({url:fileUrl(v,v.pdf),n:p.n});
   const words=await wordsOf(v);const items=words?words[p.n]:null;
   const q=opts.q||S.q;let hits=[];if(q&&items){hits=findPhrase(items,q);MV.setBoxes(hits,0);if(hits.length&&opts.focus!==false)setTimeout(()=>MV.focusBox(hits[0]),60)}
   // detail panel
@@ -1134,6 +1214,7 @@ async function openPlan(v,p,opts={}){
   det.append(vs);
   // actions
   const acts=h('section',{},h('h3',{},'Classement'),h('div',{class:'row'},
+    (v===S.mainVer&&p===S.mainPage)?h('span',{class:'tag ok'},'Plan de référence'):h('button',{class:'btn sm primary',type:'button',onclick:()=>{closeModal();setMainPlan(v,p)}},'Utiliser comme plan général'),
     h('button',{class:'btn sm',type:'button',onclick:()=>{if(!S.mainVer){toast('Pas de plan général chargé.');return}placingPlan={v,p};closeModal();go('plan');$('#mapWrap').style.cursor='crosshair';toast('Touchez le plan général à l’endroit voulu.',5000)}},'Placer sur le plan'),
     h('select',{class:'inline-input',id:'catSel',onchange:async e=>{try{await Store.put('over',v.id+'_'+p.n,{cat:e.target.value});toast('Classement mis à jour.')}catch(err){toast('Impossible : '+(err.message||err.code))}}},Object.entries(CAT_LBL).map(([k,l])=>h('option',{value:k,selected:k===cat},l)))));
   det.append(acts);
@@ -1147,7 +1228,7 @@ async function matchPage(v,p,o){
   return bs>.3?best:null;
 }
 async function compareMode(v,p,o,op){
-  const mw=MV.host;$$('.cmpbar',mw).forEach(e=>e.remove());const over=h('img',{class:'over',alt:''});over.src=await resolveUrl(imgUrl(o,op));
+  const mw=MV.host;$$('.cmpbar',mw).forEach(e=>e.remove());const over=h('img',{class:'over',alt:''});over.src=await resolveUrl((await pageImage(o,op)).url);
   $$('img.over',MV.stage).forEach(e=>e.remove());MV.stage.append(over);over.style.opacity=.5;
   const rng=h('input',{type:'range',min:0,max:100,value:50,id:'cmpRange','aria-label':'Opacité de l’ancienne version'});
   MV.sharpOff=true;MV.clearSharp();
@@ -1188,14 +1269,14 @@ function renderPlans(){
   const docs=[...S.byDoc.keys()];
   const tb=h('div',{class:'toolbar'},
     h('select',{id:'fDoc',onchange:e=>{F.doc=e.target.value;renderPlans()}},h('option',{value:''},'Tous les documents'),docs.map(d=>h('option',{value:d,selected:F.doc===d},d))),
-    h('div',{class:'seg',role:'group','aria-label':'Type'},[['plan','Plans & schémas'],['illustration','Photos & figures'],['all','Tout']].map(([k,l])=>h('button',{type:'button','aria-pressed':String(F.cat===k),onclick:()=>{F.cat=k;renderPlans()}},l))),
+    h('div',{class:'seg',role:'group','aria-label':'Type'},[['plan','Plans & schémas'],['illustration','Photos & figures'],['all','Tout'],['pages','Toutes les pages']].map(([k,l])=>h('button',{type:'button','aria-pressed':String(F.cat===k),onclick:()=>{F.cat=k;renderPlans()}},l))),
     h('select',{id:'fAnchor',onchange:e=>{F.anchor=e.target.value;renderPlans()}},h('option',{value:''},'Tous les secteurs'),ANCHORS.map(a=>h('option',{value:a.id,selected:F.anchor===a.id},a.label))),
     h('label',{class:'row small'},h('input',{type:'checkbox',id:'fChg',checked:F.chg,onchange:e=>{F.chg=e.target.checked;renderPlans()}}),'Modifiés seulement'),
     h('input',{type:'search',id:'fTxt',placeholder:'Filtrer (titre, texte)',value:F.txt||'',oninput:e=>{F.txt=e.target.value;clearTimeout(renderPlans.t);renderPlans.t=setTimeout(()=>{renderPlans();const i=$('#fTxt');i.focus();i.setSelectionRange(i.value.length,i.value.length)},250)}}));
   box.append(tb);
   let total=0;const ft=norm(F.txt||'');
   for(const v of latestVersions()){if(F.doc&&v.docId!==F.doc)continue;
-    const list=v.pages.filter(p=>{const c=pageCat(v,p);if(F.cat==='all'?!(c==='plan'||c==='illustration'):c!==F.cat)return false;if(F.anchor&&!anchorsForPage(v,p).includes(F.anchor))return false;if(F.chg){const ch=changeFor(v,p.n);if(!ch||ch.status==='inchangé')return false}if(ft&&!norm(planTitle(p)+' '+p.section+' '+p.snippet).includes(ft))return false;return true});
+    const list=v.pages.filter(p=>{const c=pageCat(v,p);if(F.cat==='pages'?false:F.cat==='all'?!(c==='plan'||c==='illustration'):c!==F.cat)return false;if(F.anchor&&!anchorsForPage(v,p).includes(F.anchor))return false;if(F.chg){const ch=changeFor(v,p.n);if(!ch||ch.status==='inchangé')return false}if(ft&&!norm(planTitle(p)+' '+p.section+' '+p.snippet).includes(ft))return false;return true});
     if(!list.length)continue;total+=list.length;
     box.append(h('div',{class:'gal-sec'},h('h2',{},v.ref||v.docId),h('span',{},`${v.title} · ${v.version!=null?'v'+v.version:''} · ${v.status} · ${list.length} élément(s)`)));
     const g=h('div',{class:'grid'});box.append(g);
@@ -1242,9 +1323,11 @@ function renderBiblio(){
       table.append(h('tr',{},h('td',{class:'num'},v.version!=null?'v'+v.version:'—'),h('td',{class:'num'},v.versionDate||'—'),h('td',{class:'num'},v.applicable||'—'),h('td',{},stTag(v.status)),h('td',{class:'num'},v.numPages),h('td',{class:'num'},v.pages.filter(p=>pageCat(v,p)==='plan').length),
         h('td',{},c==null?h('span',{class:'muted small'},v.prev?'—':'première version'):h('button',{class:'btn sm',type:'button',onclick:()=>{go('maj');setTimeout(()=>document.getElementById('tl-'+v.id)?.scrollIntoView({block:'start'}),50)}},c+' plan(s)')),
         h('td',{class:'small'},v.source==='seed'?'Base initiale':(v.fileName||'Import')+(v.importedAt?' · '+fmtDate(new Date(v.importedAt)):'')),
-        h('td',{},h('div',{class:'row'},h('button',{class:'btn sm',type:'button',onclick:()=>openReader(v,1)},'Lire'),Store.canWrite&&v.source!=='seed'||Store.canWrite?h('button',{class:'btn sm ghost',type:'button',onclick:async()=>{const arch=new Set(meta.archived||[]);arch.has(v.id)?arch.delete(v.id):arch.add(v.id);try{await Store.put('meta',docId,{...meta,archived:[...arch]});toast(arch.has(v.id)?'Version archivée : elle ne sert plus de référence.':'Version réactivée.')}catch(e){toast('Impossible : '+(e.message||e.code))}}},v.archived?'Réactiver':'Archiver'):null))))}
+        h('td',{},h('div',{class:'row'},h('button',{class:'btn sm',type:'button',onclick:()=>openReader(v,1)},'Lire'),Store.canWrite?h('button',{class:'btn sm',type:'button',onclick:()=>editVersion(v)},'Modifier'):null,Store.canWrite&&v.source!=='seed'||Store.canWrite?h('button',{class:'btn sm ghost',type:'button',onclick:async()=>{const arch=new Set(meta.archived||[]);arch.has(v.id)?arch.delete(v.id):arch.add(v.id);try{await Store.put('meta',docId,{...meta,archived:[...arch]});toast(arch.has(v.id)?'Version archivée : elle ne sert plus de référence.':'Version réactivée.')}catch(e){toast('Impossible : '+(e.message||e.code))}}},v.archived?'Réactiver':'Archiver'):null))))}
     right.append(h('article',{class:'doc'},h('div',{class:'doc-h'},cover,h('div',{class:'info'},h('div',{class:'ref'},last.ref||docId),h('h3',{},last.title),h('div',{class:'kv'},h('span',{},last.kind),h('span',{},`${vers.length} version(s)`),h('span',{},`${nPlans} plans/schémas`),last.issuer?h('span',{},last.issuer):null)),
-      h('div',{class:'acts'},h('label',{class:'small muted',for:'fold-'+docId},'Classer dans'),fIn,h('label',{class:'small muted',for:'tags-'+docId},'Mots-clés'),tagIn)),h('div',{class:'versions'},table)));
+      h('div',{class:'acts'},h('label',{class:'small muted',for:'fold-'+docId},'Classer dans'),fIn,h('label',{class:'small muted',for:'tags-'+docId},'Mots-clés'),tagIn,
+        (Store.canWrite&&vers.filter(x=>!x.archived&&!x.isCurrent&&x.status!=='À venir').length)?h('button',{class:'btn sm primary',type:'button',onclick:()=>keepCurrentOnly(docId)},'Ne garder que la version en vigueur'):null,
+        (S.mainVer&&S.mainVer.docId===docId)?h('span',{class:'tag ok'},'Plan de référence'):null)),h('div',{class:'versions'},table)));
   }
   right.append(h('datalist',{id:'folderList'},Object.keys(folders).map(f=>h('option',{value:f}))));
   box.append(h('div',{class:'lib'},fl,right));
@@ -1271,6 +1354,7 @@ async function importFile(file,prog){
   const dup=S.versions.find(v=>v.hash===hash);if(dup){prog(1,'Déjà présent ('+shortRef(dup)+')');return}
   prog(.02,'Lecture du PDF');
   const x=await extractPdf(buf,file.name,(p,m)=>prog(.02+p*.6,m));
+  if(!x.meta.ref){const k=fileKey(file.name);const same=k&&S.versions.filter(o=>!o._o.ref&&fileKey(o.fileName)===k).sort((a,b)=>(a.importedAt||'').localeCompare(b.importedAt||''))[0];if(same)x.meta.docId=same.docId}
   const id=(x.meta.docId+'-v'+(x.meta.version??'x')+'-'+hash.slice(0,8)).replace(/[^A-Za-z0-9-]/g,'');
   const v={id,docId:x.meta.docId,ref:x.meta.ref,title:x.meta.title,kind:x.meta.kind,issuer:x.meta.issuer,version:x.meta.version,versionDate:x.meta.versionDate,applicable:x.meta.applicable,edition:x.meta.edition,
     fileName:file.name,size:file.size,hash,importedAt:new Date().toISOString(),numPages:x.numPages,pages:x.pages,structured:x.structured,sectionsNotes:x.sectionsNotes,source:Store.mode==='cloud'?'db':'local'};
@@ -1456,6 +1540,7 @@ $('#tabs').addEventListener('click',e=>{const t=e.target.closest('.tab');if(t)go
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
 $('#btnImport').onclick=()=>$('#fileIn').click();
 $('#btnImportEmpty').onclick=()=>$('#fileIn').click();
+$('#btnMainPick').onclick=()=>pickMainPlan();
 $('#fileIn').onchange=e=>{enqueue(e.target.files);e.target.value=''};
 $('#dirIn').onchange=e=>{enqueue(e.target.files);e.target.value=''};
 let refreshT=null;function refresh(){clearTimeout(refreshT);refreshT=setTimeout(()=>{rebuild();updateCounts();VIEWS[S.view]()},80)}
@@ -1477,6 +1562,9 @@ async function boot(){
   Store.watch('pins',o=>{S.pins=o;refresh()});
   Store.watch('over',o=>{S.over=o;refresh()});
   Store.watch('contacts',o=>{S.contacts=o;refresh()});
+  Store.watch('vedit',o=>{S.vedit=o;refresh()});
+  Store.watch('vchanges',o=>{S.vchanges=o;refresh()});
+  Store.watch('settings',o=>{S.settings=o;refresh()});
 }
 window.RFP={extractPdf,S,ANCHORS,findPhrase,rebuild,go};
 boot();
