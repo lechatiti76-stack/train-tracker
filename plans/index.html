@@ -112,6 +112,29 @@ main{flex:1;min-height:0;position:relative}
 .zoomctl button{width:38px;height:38px;border:0;border-bottom:1px solid var(--line);background:var(--surface);font-size:18px;display:grid;place-items:center}
 .zoomctl button:last-child{border-bottom:0}
 .zoomctl button:hover{color:var(--accent)}
+/* Coffre chiffré : écran de verrouillage, dialogues, panneau de la bibliothèque */
+.lock{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:auto;padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.dlg{position:fixed;inset:0;z-index:110;background:rgba(10,16,24,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.lock-card{width:min(460px,100%);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:22px;display:flex;flex-direction:column;gap:12px}
+.lock-card .lock-icon{width:44px;height:44px;border-radius:10px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center}
+.lock-card .lock-icon svg{width:24px;height:24px}
+.lock-card h2{font-family:var(--f-display);font-size:24px;text-transform:uppercase;letter-spacing:.04em;margin:0;line-height:1.1;text-wrap:balance}
+.lock-card p{margin:0;color:var(--fg-2)}
+.lock-card label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--fg-2);text-transform:uppercase;letter-spacing:.06em}
+.lock-card input{height:42px;border:1px solid var(--line-strong);border-radius:var(--r);padding:0 10px;background:var(--surface-2);font-size:15px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg)}
+.lock-card input:focus{border-color:var(--accent);background:var(--surface)}
+.lock-card .row{justify-content:flex-end}
+.lock-card .lock-err{color:var(--stop);font-size:13px;min-height:1.2em;margin:0}
+.lock-card .lock-note{font-size:12.5px;color:var(--fg-3)}
+.lock-link{border:0;background:none;color:var(--accent);padding:0;font-size:13px;text-decoration:underline;align-self:flex-start;cursor:pointer}
+.btn.danger{background:var(--stop);border-color:var(--stop);color:#fff}
+.vault-panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:16px;display:flex;flex-direction:column;gap:10px}
+.vault-panel header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.vault-panel h3{margin:0;font-size:15px;flex:1;min-width:200px}
+.vault-panel .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.vault-panel select{height:28px;border:1px solid var(--line-strong);border-radius:var(--r);background:var(--surface);padding:0 6px}
+.chip.vault .dot{background:var(--ok)}
+.base-bar{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:60;background:var(--surface);border:1px solid var(--accent);border-radius:var(--r);box-shadow:var(--shadow);padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:calc(100% - 32px);font-size:13px}
 .map-empty{position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;background:var(--surface-2)}
 .map-empty h2{margin:0;font-family:var(--f-display);font-size:24px;text-transform:uppercase;letter-spacing:.04em}
 .map-empty p{margin:0;max-width:52ch;color:var(--fg-2)}
@@ -297,6 +320,7 @@ mark{background:var(--hv-soft);color:inherit;border-bottom:2px solid var(--hv);p
     </div>
     <div class="top-actions">
       <span class="chip" id="storeChip"><span class="dot"></span><span id="storeLbl">Connexion au stockage…</span></span>
+      <button class="btn" id="btnLock" type="button" title="Verrouiller les plans maintenant" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke-linecap="round"/></svg><span class="lbl">Verrouiller</span></button>
       <button class="btn primary" id="btnImport" type="button"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 11V2M4.5 5.5 8 2l3.5 3.5M2.5 11v2.5h11V11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">Importer des PDF</span></button>
       <input type="file" id="fileIn" accept="application/pdf,.pdf" multiple hidden>
       <input type="file" id="dirIn" webkitdirectory multiple hidden>
@@ -326,7 +350,7 @@ mark{background:var(--hv-soft);color:inherit;border-bottom:2px solid var(--hv);p
           <div class="map-empty" id="mapEmpty" hidden>
             <h2>Aucun plan pour l'instant</h2>
             <p>Importez vos PDF (particularités locales, restrictions temporaires, directives…). Les plans et schémas sont extraits automatiquement et le plan général s'affiche ici, avec les annexes placées dessus.</p>
-            <p class="small muted">Les documents restent dans ce navigateur : rien n'est envoyé sur Internet.</p>
+            <p class="small muted">Les documents sont chiffrés et restent dans ce navigateur : rien n'est envoyé sur Internet.</p>
             <button class="btn primary" type="button" id="btnImportEmpty">Importer des PDF</button>
           </div>
           <div class="zoomctl">
@@ -350,6 +374,9 @@ mark{background:var(--hv-soft);color:inherit;border-bottom:2px solid var(--hv);p
 </div>
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
+<div id="lockRoot" class="lock" hidden></div>
+<div id="dlgRoot"></div>
+<input type="file" id="vaultIn" accept=".rfpvault" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
@@ -379,6 +406,8 @@ const IDB={db:null,
   put(store,k,v){return this.tx(store,'readwrite',s=>s.put(v,k))},
   get(store,k){return new Promise((res)=>{try{const r=this.db.transaction(store).objectStore(store).get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>res(undefined)}catch{res(undefined)}})},
   del(store,k){return this.tx(store,'readwrite',s=>s.delete(k))},
+  putMany(entries){return new Promise((res,rej)=>{try{const t=this.db.transaction(['kv','blobs'],'readwrite');for(const[st,k,v]of entries)t.objectStore(st).put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error||new Error('Écriture annulée (espace disque ?)'))}catch(e){rej(e)}})},
+  clearAll(){return new Promise(res=>{try{const t=this.db.transaction(['kv','blobs'],'readwrite');t.objectStore('kv').clear();t.objectStore('blobs').clear();t.oncomplete=()=>res();t.onerror=()=>res()}catch{res()}})},
   all(store){return new Promise((res)=>{try{const out={};const r=this.db.transaction(store).objectStore(store).openCursor();r.onsuccess=()=>{const c=r.result;if(c){out[c.key]=c.value;c.continue()}else res(out)};r.onerror=()=>res(out)}catch{res({})}})}
 };
 const Store={mode:'none',db:null,assets:null,canWrite:false,listeners:[],
@@ -396,13 +425,13 @@ const Store={mode:'none',db:null,assets:null,canWrite:false,listeners:[],
   async putBlob(blob){
     if(this.mode==='cloud'){for(let i=0;i<5;i++){try{const r=await this.assets.upload(blob);return r.url}catch(e){if(e&&e.code==='rate_limited'){await sleep(1500*(i+1));continue}throw e}}throw new Error('Envoi refusé (trop de requêtes)')}
     const key='b'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-    if(this.mode==='local'){await IDB.put('blobs',key,blob);return 'idb:'+key}
+    if(this.mode==='local'){await IDB.put('blobs',key,await Vault.sealBlob(blob));return 'idb:'+key}
     BlobCache.set('idb:'+key,URL.createObjectURL(blob));return 'idb:'+key;
   },
   clean(o){return JSON.parse(JSON.stringify(o))},
   async put(coll,id,data){data=this.clean(data);
     if(this.mode==='cloud'){await this.db.doc(coll+'/'+id).set(data);return}
-    if(this.mode==='local'){await IDB.put('kv',coll+'/'+id,data)}
+    if(this.mode==='local'){await IDB.put('kv',coll+'/'+id,await Vault.sealJSON(data))}
     (this.mem[coll]||(this.mem[coll]={}))[id]=data;this.emit(coll);
   },
   async remove(coll,id){
@@ -418,12 +447,186 @@ const Store={mode:'none',db:null,assets:null,canWrite:false,listeners:[],
       return;
     }
     this.listeners.push({coll,fn});
-    if(this.mode==='local'){IDB.all('kv').then(all=>{const o={};for(const[k,v]of Object.entries(all)){if(k.startsWith(coll+'/'))o[k.slice(coll.length+1)]=v}this.mem[coll]=o;fn(o)})}
+    if(this.mode==='local')this.readLocal(coll).then(fn);
     else fn(this.mem[coll]||{});
-  }
+  },
+  async readLocal(coll){const all=await IDB.all('kv');const o={};for(const[k,v]of Object.entries(all)){if(!k.startsWith(coll+'/'))continue;try{const d=await Vault.openJSON(v);if(d!=null)o[k.slice(coll.length+1)]=d}catch(e){console.warn('lecture',k,e)}}this.mem[coll]=o;return o},
+  async reloadLocal(){jsonCache.clear();for(const l of this.listeners)l.fn(await this.readLocal(l.coll))}
 };
 const BlobCache=new Map();
-async function resolveUrl(u){if(!u)return'';if(!u.startsWith('idb:'))return u;if(BlobCache.has(u))return BlobCache.get(u);const b=await IDB.get('blobs',u.slice(4));if(!b)return'';const url=URL.createObjectURL(b);BlobCache.set(u,url);return url}
+async function resolveUrl(u){if(!u)return'';if(!u.startsWith('idb:'))return u;if(BlobCache.has(u))return BlobCache.get(u);let b=null;try{b=await Vault.openBlob(await IDB.get('blobs',u.slice(4)))}catch(e){console.warn('déchiffrement',e)}if(!b)return'';const url=URL.createObjectURL(b);BlobCache.set(u,url);return url}
+
+/* ================= Coffre chiffré (stockage local) =================
+   Tout ce que l'onglet enregistre dans le navigateur (PDF, images des plans,
+   vignettes, index de recherche, fiches, repères) est chiffré en AES-GCM 256
+   avec une clé dérivée du mot de passe (PBKDF2-SHA-256, 600 000 itérations).
+   La clé ne quitte jamais la mémoire de la page et n'est jamais enregistrée :
+   verrouiller recharge la page, ce qui l'efface. Mot de passe oublié = données
+   irrécupérables (seule issue : effacer le coffre).
+   Base partagée : un fichier .rfpvault (même chiffrement, son propre sel)
+   s'exporte depuis la Bibliothèque ; déposé sur le site sous
+   plans/base.rfpvault, il est chargé automatiquement par les postes qui
+   déverrouillent avec le même mot de passe. */
+const VAULT_ITER=600000, VAULT_MIN_LEN=8, BASE_URL='base.rfpvault';
+const LOCK_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>';
+const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:v}catch{return d}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const b64=u8=>{let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
+const unb64=t=>Uint8Array.from(atob(t),c=>c.charCodeAt(0));
+const Vault={key:null,header:null,active:false,lastAct:Date.now(),fails:0,pendingPw:null,
+  te:new TextEncoder(),td:new TextDecoder(),
+  get lockMin(){return Math.max(1,+lsGet('atlas-rfp:lockMin','10')||10)},
+  set lockMin(v){lsSet('atlas-rfp:lockMin',String(v))},
+  async derive(pw,salt,iter=VAULT_ITER){const base=await crypto.subtle.importKey('raw',this.te.encode(pw),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:iter,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])},
+  async encWith(key,bytes){const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,bytes);return{iv,ct}},
+  decWith(key,iv,ct){return crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct)},
+  async sealBlob(blob,key=this.key){if(!key)return blob;const{iv,ct}=await this.encWith(key,await blob.arrayBuffer());return{__enc:1,iv,ct,type:blob.type}},
+  async openBlob(rec,key=this.key){if(!rec)return null;if(rec instanceof Blob)return rec;if(rec.__enc){if(!key)return null;return new Blob([await this.decWith(key,rec.iv,rec.ct)],{type:rec.type})}return null},
+  async sealJSON(o,key=this.key){if(!key)return o;const{iv,ct}=await this.encWith(key,this.te.encode(JSON.stringify(o)));return{__enc:1,iv,ct}},
+  async openJSON(rec,key=this.key){if(rec&&rec.__enc){if(!key)return null;return JSON.parse(this.td.decode(await this.decWith(key,rec.iv,rec.ct)))}return rec},
+  async makeHeader(key,salt){const{iv,ct}=await this.encWith(key,this.te.encode('atlas-rfp-ok'));return{v:1,salt,iter:VAULT_ITER,check:{iv,ct},created:new Date().toISOString()}},
+  async tryKey(pw,header){const key=await this.derive(pw,header.salt,header.iter||VAULT_ITER);try{const pt=await this.decWith(key,header.check.iv,header.check.ct);return this.td.decode(pt)==='atlas-rfp-ok'?key:null}catch{return null}},
+  /* Réécrit tout le contenu avec la clé `to` (déchiffré avec `from`, ou en clair si `from` est nul), en une seule transaction. */
+  async rewriteAll(from,to,header){
+    const kv=await IDB.all('kv'),blobs=await IDB.all('blobs');const out=[];
+    for(const[k,v]of Object.entries(kv)){if(k==='__vault__')continue;const o=await this.openJSON(v,from);if(o!=null)out.push(['kv',k,await this.sealJSON(o,to)])}
+    for(const[k,v]of Object.entries(blobs)){const b=await this.openBlob(v,from);if(b)out.push(['blobs',k,await this.sealBlob(b,to)])}
+    out.push(['kv','__vault__',header]);
+    await IDB.putMany(out);return out.length-1;
+  },
+  /* Bloque la page jusqu'au déverrouillage (ou la création du coffre). */
+  async gate(){
+    if(Store.mode!=='local')return;
+    if(!(window.crypto&&crypto.subtle)){this.showLock('nocrypto');return new Promise(()=>{})}
+    this.header=await IDB.get('kv','__vault__');
+    if(this.header&&this.header.salt&&!(this.header.salt instanceof Uint8Array))this.header.salt=new Uint8Array(this.header.salt);
+    await new Promise(res=>{this.onOpen=res;this.showLock(this.header?'unlock':'create')});
+    this.active=true;this.startIdle();
+    $('#btnLock').hidden=false;$('#btnLock').onclick=()=>this.lock();
+  },
+  showLock(mode){
+    const root=$('#lockRoot');root.hidden=false;root.innerHTML='';
+    const err=h('p',{class:'lock-err',role:'alert'});
+    const card=h('form',{class:'lock-card',autocomplete:'off'},h('div',{class:'lock-icon',html:LOCK_ICON}));
+    root.append(card);
+    if(mode==='nocrypto'){card.append(h('h2',{},'Chiffrement indisponible'),h('p',{},'Ce navigateur ne permet pas le chiffrement (page ouverte hors HTTPS ?). Ouvrez l’application depuis son adresse https.'));return}
+    if(mode==='create'){
+      const pw1=h('input',{type:'password',id:'vPw1',autocomplete:'new-password'});
+      const pw2=h('input',{type:'password',id:'vPw2',autocomplete:'new-password'});
+      card.append(h('h2',{},'Protéger les plans par un mot de passe'),
+        h('p',{},'Les PDF et les plans de cet onglet seront chiffrés dans ce navigateur. Il faudra ce mot de passe pour les ouvrir, et l’onglet se reverrouillera après '+this.lockMin+' min sans activité.'),
+        h('label',{for:'vPw1'},'Mot de passe (8 caractères minimum)',pw1),h('label',{for:'vPw2'},'Confirmer le mot de passe',pw2),err,
+        h('p',{class:'lock-note'},'Aucune récupération possible : notez-le dans un endroit sûr. Utilisez le même mot de passe sur tous les postes pour partager une base chiffrée.'),
+        h('div',{class:'row'},h('button',{class:'btn primary',type:'submit',id:'vCreate'},'Créer le coffre')));
+      card.onsubmit=async e=>{e.preventDefault();err.textContent='';
+        if(pw1.value.length<VAULT_MIN_LEN){err.textContent=`Le mot de passe doit faire au moins ${VAULT_MIN_LEN} caractères.`;pw1.focus();return}
+        if(pw1.value!==pw2.value){err.textContent='Les deux mots de passe ne sont pas identiques.';pw2.focus();return}
+        const btn=$('#vCreate');btn.disabled=true;btn.textContent='Chiffrement…';
+        try{const salt=crypto.getRandomValues(new Uint8Array(16));const key=await this.derive(pw1.value,salt);const header=await this.makeHeader(key,salt);
+          const n=await this.rewriteAll(null,key,header);this.header=header;this.key=key;this.pendingPw=pw1.value;
+          root.hidden=true;root.innerHTML='';if(n)toast(`${n} élément(s) déjà importé(s) chiffré(s).`);this.onOpen();this.checkBase();}
+        catch(x){console.error(x);err.textContent='Création impossible : '+(x.message||x);btn.disabled=false;btn.textContent='Créer le coffre'}};
+      pw1.focus();return;
+    }
+    const pw=h('input',{type:'password',id:'vPw',autocomplete:'current-password'});
+    card.append(h('h2',{},'Plans RFP verrouillés'),h('p',{},'Saisissez le mot de passe du coffre pour afficher les plans et documents.'),
+      h('label',{for:'vPw'},'Mot de passe',pw),err,
+      h('div',{class:'row'},h('button',{class:'btn primary',type:'submit',id:'vOpen'},'Déverrouiller')),
+      h('button',{class:'lock-link',type:'button',onclick:()=>this.forgot()},'Mot de passe oublié ?'));
+    card.onsubmit=async e=>{e.preventDefault();err.textContent='';if(!pw.value){err.textContent='Saisissez le mot de passe.';pw.focus();return}const btn=$('#vOpen');btn.disabled=true;btn.textContent='Vérification…';
+      const key=await this.tryKey(pw.value,this.header).catch(()=>null);
+      if(key){this.key=key;this.fails=0;this.pendingPw=pw.value;root.hidden=true;root.innerHTML='';this.onOpen();this.checkBase();return}
+      this.fails++;const wait=Math.min(30,2**this.fails);err.textContent=`Mot de passe incorrect. Nouvel essai possible dans ${wait} s.`;pw.select();
+      setTimeout(()=>{btn.disabled=false;btn.textContent='Déverrouiller'},wait*1000)};
+    pw.focus();
+  },
+  async forgot(){
+    const ok=await askText({title:'Mot de passe oublié',message:'Sans le mot de passe, les plans chiffrés de ce navigateur sont illisibles, y compris pour nous. La seule solution est d’effacer le coffre, puis de réimporter les PDF ou une base chiffrée. Pour confirmer, tapez EFFACER.',label:'Confirmation',expect:'EFFACER',okLabel:'Effacer le coffre',danger:true});
+    if(!ok)return;await IDB.clearAll();location.reload();
+  },
+  lock(){this.key=null;location.reload()},
+  startIdle(){
+    const bump=()=>{this.lastAct=Date.now()};
+    ['pointerdown','keydown','wheel','touchstart'].forEach(t=>document.addEventListener(t,bump,{passive:true,capture:true}));
+    const check=()=>{if(this.key&&Date.now()-this.lastAct>this.lockMin*60000)this.lock()};
+    setInterval(check,15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)check()});
+  },
+  async changePassword(){
+    const cur=await askText({title:'Changer le mot de passe',message:'Saisissez le mot de passe actuel.',label:'Mot de passe actuel',password:true,okLabel:'Continuer'});if(cur==null)return;
+    const key=await this.tryKey(cur,this.header);if(!key){toast('Mot de passe actuel incorrect.');return}
+    const nw=await askNewPassword('Nouveau mot de passe','Tout le contenu sera rechiffré avec ce nouveau mot de passe. Pensez à le communiquer aux autres postes si vous partagez une base.');if(nw==null)return;
+    toast('Rechiffrement en cours…',2500);
+    const salt=crypto.getRandomValues(new Uint8Array(16));const nk=await this.derive(nw,salt);const header=await this.makeHeader(nk,salt);
+    await this.rewriteAll(this.key,nk,header);this.key=nk;this.header=header;toast('Mot de passe changé.');
+  },
+  /* ---------- Base chiffrée (.rfpvault) ---------- */
+  async buildBundle(pw){
+    const kv=await IDB.all('kv'),blobs=await IDB.all('blobs');const entries=[],index=[],parts=[];let off=0,docs=0;
+    for(const[k,v]of Object.entries(kv)){if(k==='__vault__')continue;const o=await this.openJSON(v);if(o==null)continue;entries.push([k,o]);if(k.startsWith('versions/'))docs++}
+    for(const[k,v]of Object.entries(blobs)){const b=await this.openBlob(v);if(!b)continue;const u=new Uint8Array(await b.arrayBuffer());index.push({k,type:b.type,off,len:u.length});parts.push(u);off+=u.length}
+    const man=this.te.encode(JSON.stringify({kv:entries,blobs:index}));
+    const payload=new Uint8Array(4+man.length+off);new DataView(payload.buffer).setUint32(0,man.length);payload.set(man,4);let p=4+man.length;for(const u of parts){payload.set(u,p);p+=u.length}
+    const salt=crypto.getRandomValues(new Uint8Array(16));const key=await this.derive(pw,salt);const{iv,ct}=await this.encWith(key,payload);
+    const id=(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2));
+    const head=this.te.encode(JSON.stringify({fmt:'atlas-rfp-vault',v:1,id,created:new Date().toISOString(),docs,salt:b64(salt),iv:b64(new Uint8Array(iv)),iter:VAULT_ITER}));
+    const magic=this.te.encode('RFPVAULT');const hl=new Uint8Array(4);new DataView(hl.buffer).setUint32(0,head.length);
+    return{blob:new Blob([magic,hl,head,new Uint8Array(ct)],{type:'application/octet-stream'}),docs};
+  },
+  parseBundle(buf){const u=new Uint8Array(buf);if(this.td.decode(u.subarray(0,8))!=='RFPVAULT')throw new Error('Ce fichier n’est pas une base chiffrée Atlas RFP.');
+    const hl=new DataView(u.buffer,u.byteOffset+8,4).getUint32(0);const head=JSON.parse(this.td.decode(u.subarray(12,12+hl)));return{head,ct:u.subarray(12+hl)}},
+  async openBundle(parsed,pw){const key=await this.derive(pw,unb64(parsed.head.salt),parsed.head.iter||VAULT_ITER);try{return new Uint8Array(await this.decWith(key,unb64(parsed.head.iv),parsed.ct))}catch{return null}},
+  async importPayload(payload){
+    const ml=new DataView(payload.buffer,payload.byteOffset,4).getUint32(0);const man=JSON.parse(this.td.decode(payload.subarray(4,4+ml)));const base=4+ml;
+    const kvNow=await IDB.all('kv'),blobsNow=await IDB.all('blobs');const out=[];let added=0;
+    for(const b of man.blobs){if(blobsNow[b.k])continue;out.push(['blobs',b.k,await this.sealBlob(new Blob([payload.subarray(base+b.off,base+b.off+b.len)],{type:b.type}))])}
+    for(const[k,o]of man.kv){if(kvNow[k]||k==='__vault__')continue;out.push(['kv',k,await this.sealJSON(o)]);if(k.startsWith('versions/'))added++}
+    if(out.length)await IDB.putMany(out);await Store.reloadLocal();return added;
+  },
+  async checkBase(){
+    const pw=this.pendingPw;this.pendingPw=null;
+    let parsed;try{const r=await fetch(BASE_URL,{cache:'no-store'});if(!r.ok)return;parsed=this.parseBundle(await r.arrayBuffer())}catch{return}
+    const seen=lsGet('atlas-rfp:bases','').split(',');if(seen.includes(parsed.head.id))return;
+    const load=async(p)=>{const pl=await this.openBundle(parsed,p);if(!pl)return false;const n=await this.importPayload(pl);lsSet('atlas-rfp:bases',[...seen,parsed.head.id].filter(Boolean).slice(-20).join(','));toast(n?`Base partagée chargée : ${n} document(s) ajouté(s).`:'Base partagée à jour : rien de nouveau.');return true};
+    if(pw&&await load(pw))return;
+    const bar=h('div',{class:'base-bar',role:'status'},h('span',{},`Une base partagée chiffrée est disponible sur le site (${parsed.head.docs||'?'} document(s), ${fmtDate(new Date(parsed.head.created))}).`),
+      h('button',{class:'btn sm primary',type:'button',onclick:async()=>{const p=await askText({title:'Charger la base partagée',message:'Elle a été chiffrée avec un autre mot de passe que celui de ce poste. Saisissez le mot de passe de la base.',label:'Mot de passe de la base',password:true,okLabel:'Charger'});if(p==null)return;if(await load(p))bar.remove();else toast('Mot de passe de la base incorrect.')}},'Charger'),
+      h('button',{class:'btn sm ghost',type:'button',onclick:()=>{lsSet('atlas-rfp:bases',[...seen,parsed.head.id].filter(Boolean).join(','));bar.remove()}},'Ignorer'));
+    document.body.append(bar);
+  },
+  async exportBundle(){
+    const pw=await askNewPassword('Exporter la base chiffrée','Choisissez le mot de passe du fichier. Prenez celui du coffre pour que les autres postes chargent la base automatiquement.');if(pw==null)return;
+    toast('Préparation du fichier chiffré…',2500);const{blob,docs}=await this.buildBundle(pw);
+    const a=h('a',{href:URL.createObjectURL(blob),download:`atlas-rfp-${new Date().toISOString().slice(0,10)}.rfpvault`});document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000);
+    toast(`Base chiffrée exportée (${docs} document(s)).`);
+  },
+  async importBundleFile(file){
+    let parsed;try{parsed=this.parseBundle(await file.arrayBuffer())}catch(x){toast(x.message);return}
+    const pw=await askText({title:'Importer une base chiffrée',message:`${file.name} — ${parsed.head.docs||'?'} document(s), exporté le ${fmtDate(new Date(parsed.head.created))}.`,label:'Mot de passe de la base',password:true,okLabel:'Importer'});if(pw==null)return;
+    const pl=await this.openBundle(parsed,pw);if(!pl){toast('Mot de passe de la base incorrect.');return}
+    const n=await this.importPayload(pl);toast(n?`${n} document(s) ajouté(s) depuis la base.`:'Rien de nouveau dans cette base.');
+  }
+};
+/* Petits dialogues intégrés (texte, mot de passe, confirmation). */
+function askText({title,message,label,password=false,expect=null,okLabel='Valider',danger=false}){
+  return new Promise(res=>{const root=$('#dlgRoot');const err=h('p',{class:'lock-err',role:'alert'});
+    const inp=h('input',{type:password?'password':'text',id:'dlgIn',autocomplete:password?'current-password':'off'});
+    const close=v=>{root.innerHTML='';document.removeEventListener('keydown',esc,true);res(v)};
+    const esc=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();close(null)}};
+    const form=h('form',{class:'lock-card'},h('h2',{},title),message?h('p',{},message):null,h('label',{for:'dlgIn'},label,inp),err,
+      h('div',{class:'row'},h('button',{class:'btn',type:'button',onclick:()=>close(null)},'Annuler'),h('button',{class:'btn '+(danger?'danger':'primary'),type:'submit'},okLabel)));
+    form.onsubmit=e=>{e.preventDefault();if(expect!=null&&inp.value.trim()!==expect){err.textContent=`Tapez ${expect} pour confirmer.`;return}if(!inp.value){err.textContent='Champ obligatoire.';return}close(expect!=null?true:inp.value)};
+    root.innerHTML='';root.append(h('div',{class:'dlg',role:'dialog','aria-modal':'true'},form));document.addEventListener('keydown',esc,true);inp.focus()})
+}
+function askNewPassword(title,message){
+  return new Promise(res=>{const root=$('#dlgRoot');const err=h('p',{class:'lock-err',role:'alert'});
+    const a=h('input',{type:'password',id:'dlgPw1',autocomplete:'new-password'}),b=h('input',{type:'password',id:'dlgPw2',autocomplete:'new-password'});
+    const close=v=>{root.innerHTML='';document.removeEventListener('keydown',esc,true);res(v)};
+    const esc=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();close(null)}};
+    const form=h('form',{class:'lock-card'},h('h2',{},title),h('p',{},message),h('label',{for:'dlgPw1'},'Mot de passe (8 caractères minimum)',a),h('label',{for:'dlgPw2'},'Confirmer',b),err,
+      h('div',{class:'row'},h('button',{class:'btn',type:'button',onclick:()=>close(null)},'Annuler'),h('button',{class:'btn primary',type:'submit'},'Valider')));
+    form.onsubmit=e=>{e.preventDefault();if(a.value.length<VAULT_MIN_LEN){err.textContent=`Au moins ${VAULT_MIN_LEN} caractères.`;return}if(a.value!==b.value){err.textContent='Les deux mots de passe ne sont pas identiques.';return}close(a.value)};
+    root.innerHTML='';root.append(h('div',{class:'dlg',role:'dialog','aria-modal':'true'},form));document.addEventListener('keydown',esc,true);a.focus()})
+}
 const jsonCache=new Map();
 function fetchJSON(u){if(!u)return Promise.resolve(null);if(!jsonCache.has(u))jsonCache.set(u,(async()=>{const url=await resolveUrl(u);const r=await fetch(url);if(!r.ok)throw new Error(r.status);return r.json()})().catch(e=>{jsonCache.delete(u);console.warn('json',u,e);return null}));return jsonCache.get(u)}
 
@@ -921,6 +1124,13 @@ function renderBiblio(){
   const drop=h('div',{class:'drop',id:'drop'},h('p',{},h('b',{},'Déposez ici un ou plusieurs PDF'),' — ou un dossier entier.'),h('p',{class:'small muted'},'Chaque fichier est lu, ses plans et schémas extraits, puis rattaché à son document (référence DAO/DIR…) ; une nouvelle édition devient une nouvelle version et les plans modifiés sont signalés.'),
     h('div',{class:'row',style:{justifyContent:'center',marginTop:'8px'}},h('button',{class:'btn primary',type:'button',onclick:()=>$('#fileIn').click()},'Choisir des fichiers'),h('button',{class:'btn',type:'button',onclick:()=>$('#dirIn').click()},'Choisir un dossier')),
     Store.canWrite?null:h('p',{class:'small',style:{color:'var(--stop)'}},'Vous avez un accès en lecture : seul un éditeur de cette page peut ajouter des documents.'));
+  if(Vault.active){
+    const sel=h('select',{id:'vLockMin','aria-label':'Délai de verrouillage automatique',onchange:e=>{Vault.lockMin=+e.target.value;toast(`Verrouillage automatique après ${e.target.value} min sans activité.`)}},[5,10,15,30,60].map(m=>h('option',{value:m,selected:m===Vault.lockMin},m+' min')));
+    right.append(h('section',{class:'vault-panel','aria-label':'Coffre chiffré'},
+      h('header',{},h('h3',{},'🔒 Coffre chiffré'),h('div',{class:'acts'},h('label',{class:'small muted',for:'vLockMin'},'Verrouillage auto'),sel,h('button',{class:'btn sm',type:'button',onclick:()=>Vault.lock()},'Verrouiller'),h('button',{class:'btn sm',type:'button',onclick:()=>Vault.changePassword()},'Changer le mot de passe'))),
+      h('p',{class:'small muted',style:{margin:0}},'Pour les autres postes : exportez la base chiffrée et importez-la sur chaque poste, ou déposez-la sur le site sous plans/base.rfpvault. Les postes qui déverrouillent avec le même mot de passe la chargent alors tout seuls.'),
+      h('div',{class:'acts'},h('button',{class:'btn sm primary',type:'button',onclick:()=>Vault.exportBundle()},'Exporter la base chiffrée'),h('button',{class:'btn sm',type:'button',onclick:()=>$('#vaultIn').click()},'Importer une base chiffrée'))));
+  }
   bindDrop(drop);right.append(drop,h('div',{class:'queue',id:'queue'}));renderQueue();
   const docs=[...S.byDoc.entries()].filter(([d])=>S.folder==='*'||folderOf(d)===S.folder).sort((a,b)=>a[0].localeCompare(b[0]));
   if(!docs.length)right.append(h('div',{class:'empty'},'Aucun document dans ce classement.'));
@@ -1089,11 +1299,14 @@ async function boot(){
   try{const r=await fetch('seed/catalog.json');if(r.ok){const c=await r.json();S.seed=c.versions.map(v=>({...v,source:'seed',base:'seed/'+v.id+'/'}))}}catch(e){console.warn('seed',e)}
   rebuild();updateCounts();go(location.hash.slice(1)||'plan');
   await Store.init();
+  await Vault.gate();
   const chip=$('#storeChip'),lbl=$('#storeLbl');
   chip.className='chip '+(Store.mode==='cloud'||Store.mode==='cloud-ro'?'cloud':'local');
   lbl.textContent={cloud:'Bibliothèque partagée',['cloud-ro']:'Bibliothèque partagée · lecture',local:'Stockage de ce navigateur',memory:'Stockage temporaire'}[Store.mode];
   chip.title={cloud:'Les PDF importés et leurs plans sont enregistrés avec cette page et visibles par les personnes qui y ont accès.',['cloud-ro']:'Vous consultez la bibliothèque partagée ; l’import est réservé aux éditeurs.',local:'Le stockage partagé n’est pas disponible ici : les imports restent dans ce navigateur.',memory:'Aucun stockage disponible : les imports seront perdus à la fermeture.'}[Store.mode];
+  if(Vault.active){chip.className='chip vault';lbl.textContent='Coffre chiffré · ce navigateur';chip.title=`Les PDF et les plans sont chiffrés dans ce navigateur. Verrouillage automatique après ${Vault.lockMin} min sans activité.`}
   $('#btnImport').disabled=!Store.canWrite;
+  $('#vaultIn').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)Vault.importBundleFile(f)};
   Store.watch('versions',o=>{S.remote=o;refresh()});
   Store.watch('meta',o=>{S.meta=o;refresh()});
   Store.watch('pins',o=>{S.pins=o;refresh()});

@@ -39,6 +39,29 @@ plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
   si un jour elle était hébergée ailleurs que sur un dépôt public.
 - Lien direct vers l'onglet : `…/index.html#plans-rfp`.
 
+### Coffre chiffré des plans
+
+- À la première ouverture de l'onglet, on choisit un **mot de passe** (8
+  caractères minimum). Tout ce que l'onglet enregistre dans le navigateur
+  (PDF, images des plans, vignettes, index de recherche, fiches) est chiffré
+  en AES-GCM 256, avec une clé dérivée du mot de passe (PBKDF2-SHA-256,
+  600 000 itérations). La clé reste en mémoire et n'est jamais enregistrée.
+- L'onglet se **verrouille** tout seul après 10 min sans activité (réglable
+  dans Bibliothèque → Coffre chiffré : 5 à 60 min), ou avec le bouton
+  « Verrouiller ».
+- **Mot de passe oublié** : aucune récupération possible. La seule issue est
+  d'effacer le coffre puis de réimporter les PDF ou une base chiffrée.
+- **Partager les plans entre postes** : Bibliothèque → « Exporter la base
+  chiffrée » produit un fichier `.rfpvault` illisible sans mot de passe.
+  - soit on l'importe sur chaque poste (« Importer une base chiffrée ») ;
+  - soit on le dépose dans ce dépôt sous `plans/base.rfpvault` : chaque poste
+    qui déverrouille avec le même mot de passe le charge automatiquement, et
+    une nouvelle base publiée ajoute les nouvelles éditions. Avec un autre
+    mot de passe, un bandeau propose de la charger en saisissant le sien.
+- Le fichier `.rfpvault` peut être public : sans le mot de passe il est
+  inexploitable. Choisissez un mot de passe long et ne le mettez jamais dans
+  le dépôt.
+
 ---
 
 ## 1. Arborescence du projet

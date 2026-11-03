@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v58';
+const CACHE_NAME = 'traintrack-cache-v59';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -86,6 +86,14 @@ self.addEventListener('fetch', (event) => {
   // Script : les horaires doivent toujours venir du réseau si disponible.
   if (req.url.includes('script.google.com') || req.url.includes('script.googleusercontent.com')) {
     event.respondWith(fetch(req));
+    return;
+  }
+
+  // Base chiffrée des plans (plans/base.rfpvault) : toujours la version du
+  // réseau, pour que les postes reçoivent la dernière base publiée. Fichier
+  // chiffré : rien de lisible sans le mot de passe.
+  if (new URL(req.url).pathname.endsWith('.rfpvault')) {
+    event.respondWith(fetch(req, { cache: 'no-store' }).catch(() => Response.error()));
     return;
   }
 
