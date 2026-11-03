@@ -3,3 +3,6 @@ Thumbs.db
 node_modules/
 *.log
 /demo.html
+
+# Documents HAROPA extraits : jamais dans le dépôt public
+plans/seed/

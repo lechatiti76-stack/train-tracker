@@ -19,6 +19,26 @@ graphique d'évolution, et installation en PWA sur mobile.
 10. [Cas particuliers gérés](#10-cas-particuliers-gérés)
 11. [Limites connues](#11-limites-connues)
 
+
+## Onglet « Plans RFP Le Havre »
+
+Sous l'en-tête, deux onglets : **🚄 Suivi des trains** (le tableau de bord) et
+**🗺️ Plans RFP Le Havre**. Le second charge `plans/index.html`, l'Atlas des
+plans du Réseau Ferré Portuaire : plan général interactif avec les annexes
+placées dessus, recherche (PN, ADV, signaux, km…), vignettes de tous les
+plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
+
+- Aucun document HAROPA n'est publié dans ce dépôt (il est public). Les PDF
+  sont importés depuis l'onglet (bouton « Importer des PDF ») : ils sont lus et
+  rangés uniquement dans le navigateur (IndexedDB), rien n'est envoyé sur
+  Internet. Une nouvelle édition d'un document est rattachée à la précédente
+  et ses plans modifiés sont signalés.
+- Chaque poste garde sa propre bibliothèque : importez les PDF sur chaque
+  appareil qui doit afficher les plans.
+- `plans/seed/` est ignoré par git : c'est là qu'irait une base pré-extraite
+  si un jour elle était hébergée ailleurs que sur un dépôt public.
+- Lien direct vers l'onglet : `…/index.html#plans-rfp`.
+
 ---
 
 ## 1. Arborescence du projet

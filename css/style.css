@@ -1970,3 +1970,14 @@ html.theme-dark .c-early { color: #4ade80; }
 .weekly-plan-table input[type="checkbox"] { width: 20px; height: 20px; min-height: 0; cursor: pointer; }
 .stacked-form .weekly-plan-table input[type="checkbox"] { min-height: 0; padding: 0; }
 
+
+
+/* ---------- Onglets principaux : Suivi des trains / Plans RFP ---------- */
+.view-tabs { display: flex; gap: 4px; padding: 0 1.25rem; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.view-tabs::-webkit-scrollbar { display: none; }
+.view-tab { border: 0; background: none; padding: 0.7rem 1rem 0.6rem; font-weight: 700; font-size: 0.92rem; color: var(--text-muted); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; min-height: 44px; }
+.view-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.view-tab:hover { color: var(--text); }
+.plans-view { height: calc(100dvh - var(--plans-top, 140px)); min-height: 420px; }
+.plans-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+@media (max-width: 640px) { .view-tabs { padding: 0 0.8rem; } }

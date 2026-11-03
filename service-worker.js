@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v57';
+const CACHE_NAME = 'traintrack-cache-v58';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -29,6 +29,10 @@ const APP_SHELL = [
   './js/archives.js',
   './js/circulations-sync.js',
   './js/coupons.js',
+  // Onglet "Plans RFP Le Havre" (Atlas). Les PDF importés et leurs plans
+  // sont rangés dans le navigateur (IndexedDB), pas dans ce cache.
+  './js/plans-tab.js',
+  './plans/index.html',
   './manifest.json',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
@@ -48,6 +52,9 @@ const CDN_ASSETS = [
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
   // ExcelJS : export/import Excel des coupons navettes (js/coupons.js).
   'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
+  // pdf.js : lecture et extraction des PDF dans l'onglet Plans RFP.
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
 ];
 
 self.addEventListener('install', (event) => {
