@@ -7,7 +7,7 @@
 // appareils ayant déjà installé la PWA à abandonner l'ancien cache et à
 // retélécharger les fichiers à jour — sans ça, le Service Worker sert
 // indéfiniment l'ancienne version même après un nouveau déploiement.
-const CACHE_NAME = 'traintrack-cache-v61';
+const CACHE_NAME = 'traintrack-cache-v62';
 
 const INTRO_VIDEO_PATH = './assets/lhte-intro-v2.mp4';
 
@@ -16,6 +16,7 @@ const APP_SHELL = [
   './index.html',
   './css/style.css',
   './css/coupons.css',
+  './css/wagons.css',
   './js/app.js',
   './js/config.js',
   './js/storage.js',
@@ -29,6 +30,7 @@ const APP_SHELL = [
   './js/archives.js',
   './js/circulations-sync.js',
   './js/coupons.js',
+  './js/wagons.js',
   // Onglet "Plans RFP Le Havre" (Atlas). Les PDF importés et leurs plans
   // sont rangés dans le navigateur (IndexedDB), pas dans ce cache.
   './js/plans-tab.js',

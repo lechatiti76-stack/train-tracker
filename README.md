@@ -107,7 +107,8 @@ plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
 ├── service-worker.js            Cache hors-ligne (app shell)
 ├── css/
 │   ├── style.css                Design system, thèmes clair/sombre, responsive
-│   └── coupons.css              Écran de saisie des coupons navettes
+│   ├── coupons.css              Écran de saisie des coupons navettes
+│   └── wagons.css               Convertisseur longueur ⇄ wagons 60'/80'
 ├── js/
 │   ├── config.js                 Constantes (clés de stockage, seuils, valeurs par défaut)
 │   ├── storage.js                 Persistance localStorage + données de démo
@@ -119,6 +120,7 @@ plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
 │   ├── card.js                    Génération/mise à jour du HTML d'une vignette
 │   ├── stopwatch.js               Chronomètre de pause indépendant (feu tricolore)
 │   ├── coupons.js                 Saisie des coupons navettes + export/import Excel
+│   ├── wagons.js                  Convertisseur longueur ⇄ wagons 60'/80' (types, longueurs, tonnages)
 │   └── app.js                     Orchestrateur : état, événements, modales
 ├── apps-script/
 │   └── Code.gs                   Web App Google Apps Script (lecture seule, sans clé API)
@@ -692,6 +694,31 @@ coupons navettes qui remplace la feuille « semaine » du classeur
 Stockage : `localStorage` de l'appareil (clé `traintrack:coupons:v1`),
 comme le reste de l'app. La bibliothèque ExcelJS est chargée à la demande et
 mise en cache par le Service Worker.
+
+### 8.10. Convertisseur wagons 60' / 80'
+
+Le bouton **🚃 Wagons** de l'en-tête (à côté de 🎫 Coupons) ouvre, en plein
+écran, un convertisseur pour les wagons plats porte-conteneurs.
+
+- **Longueur → wagons** : on tape la longueur de voie, l'écran donne le
+  nombre de wagons 60' et 80' (entier = arrondi inférieur, et la valeur
+  décimale). Les longueurs des voies du plan Poste 50/54 sont en raccourcis.
+- **Wagons → longueur** (opération inverse) : on tape un nombre de wagons
+  (champ à côté de la longueur, bouton ⇄), l'écran donne la longueur
+  nécessaire en 60' et en 80'.
+- **Type de wagon** : menu déroulant par famille — Sgnss 60' (Touax,
+  Ermewa, Wascosa), Sggrss 80' articulé 6 essieux (Ermewa, Wascosa, VTG,
+  Eurowagon), Sggnss 80' 4 essieux (Ermewa, Đuro Đaković), Sggrrss 80'
+  8 essieux (Tatravagónka). La fiche affiche longueur hors tampons, tare,
+  charge utile et masse brute maxi (22,5 t/essieu).
+- **Rame** : charge utile, masse brute, tare, longueur hors tampons et nombre
+  de conteneurs 40' (60' = 1 × 40' + 1 × 20' ; 80' = 2 × 40').
+- **Longueur par wagon** : « Règle du plan » (28 m en 80', 21,4 m en 60',
+  marge comprise, modifiables) ou « Hors tampons » (longueur réelle du type).
+  Champ « À déduire » pour la locomotive ou une marge.
+
+Les fiches et leurs sources sont dans `js/wagons.js`. Seuls le type choisi et
+les règles sont mémorisés (`localStorage`, clé `traintrack:wagons:v1`).
 
 ## 9. Modifier les 7 étapes
 
