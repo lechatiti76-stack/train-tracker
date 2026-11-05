@@ -1981,3 +1981,67 @@ html.theme-dark .c-early { color: #4ade80; }
 .plans-view { height: calc(100dvh - var(--plans-top, 140px)); min-height: 420px; }
 .plans-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 @media (max-width: 640px) { .view-tabs { padding: 0 0.8rem; } }
+
+/* ---------- Bandeau du haut : « ⋯ Plus » ---------- */
+.more-menu-wrap { position: relative; }
+.btn-more { font-weight: 800; }
+.btn-more[aria-expanded="true"] { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+.more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
+}
+.more-menu[hidden], .more-menu .btn[hidden] { display: none; }
+.more-menu .btn { width: 100%; justify-content: flex-start; }
+
+/* ---------- Coupons : bouton en forme de ticket, orange ---------- */
+.btn.btn-coupons {
+  --ticket-cut: 7px;
+  position: relative;
+  background: linear-gradient(135deg, #f59e0b, #ea580c);
+  color: #fff;
+  border: none;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding-left: 1.05rem;
+  padding-right: 1.05rem;
+  /* encoches rondes à gauche et à droite, comme un ticket */
+  -webkit-mask: radial-gradient(circle var(--ticket-cut) at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+                radial-gradient(circle var(--ticket-cut) at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+          mask: radial-gradient(circle var(--ticket-cut) at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+                radial-gradient(circle var(--ticket-cut) at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+  box-shadow: none;
+}
+.btn.btn-coupons::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 2.35rem;
+  border-left: 2px dashed rgba(255, 255, 255, 0.7);
+}
+.btn-coupons-ico { margin-right: 0.8rem; }
+.btn.btn-coupons:hover { filter: brightness(1.08); }
+
+/* ---------- Titres des lignes navettes : étiquette pleine aux couleurs FL/NL/AL ---------- */
+.bar-title.bar-title--shuttles {
+  padding: 0.35rem 1.1rem 0.35rem 0.75rem;
+  border-radius: 999px 6px 6px 999px;
+  background: linear-gradient(90deg, #f59e0b 0 34%, #1e3a8a 34% 67%, #eab308 67% 100%);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.35);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%);
+  padding-right: 1.6rem;
+}
+.bar-title.bar-title--shuttles::after { display: none; }

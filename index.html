@@ -57,19 +57,26 @@
         </button>
         <span id="syncLabel" class="sync-label">Google Sheets non configuré</span>
       </div>
-      <button type="button" id="btnInstall" class="btn btn-outline" hidden>Installer l'app</button>
-      <button type="button" id="btnPushTodayHeader" class="btn btn-outline" title="Renvoyer toutes les heures enregistrées aujourd'hui vers Google Sheets">📤 Export Sheet</button>
       <button type="button" id="btnDailyRecapPdf" class="btn btn-outline" title="Générer un PDF récapitulatif de la journée (trains, navettes, arrivées)">📄 PDF récap</button>
-      <button type="button" id="btnArchives" class="btn btn-outline" title="Voir les PDF récap archivés automatiquement">🗄 Archives</button>
       <button type="button" id="btnStats" class="btn btn-outline" title="Statistiques par semaine / mois / année, par type de voyage ou par train — export PDF et impression">📊 Statistiques</button>
       <!-- Saisie des coupons navettes (LF/LN/LA) : voir js/coupons.js. -->
-      <button type="button" id="btnCoupons" class="btn btn-outline btn-coupons" title="Saisir les coupons navettes du jour (N°, code site, date, wagons) et extraire l'Excel">🎫 Coupons</button>
+      <button type="button" id="btnCoupons" class="btn btn-coupons" title="Saisir les coupons navettes du jour (N°, code site, date, wagons) et extraire l'Excel"><span class="btn-coupons-ico" aria-hidden="true">🎫</span>Coupons</button>
       <!-- Convertisseur longueur ⇄ wagons 60'/80' : voir js/wagons.js. -->
       <button type="button" id="btnWagons" class="btn btn-outline" title="Convertir une longueur de voie en nombre de wagons 60' et 80' (et l'inverse), avec longueurs et tonnages par type de wagon">🚃 Wagons</button>
-      <button type="button" id="btnHistory" class="btn btn-ghost">📅 Calendrier</button>
-      <button type="button" id="btnSettings" class="icon-btn" aria-label="Réglages">⚙</button>
-      <button type="button" id="btnAddTrain" class="btn btn-primary">+ Ajouter un train</button>
-      <button type="button" id="btnEndDay" class="btn btn-endday" title="Clôturer la journée : sauvegarde, PDF récap, puis fermeture de l'application">🌙 Journée finie</button>
+      <button type="button" id="btnHistory" class="btn btn-outline">📅 Calendrier</button>
+      <!-- Tout le reste du bandeau est rangé dans « ⋯ Plus » (fenêtre qui
+           s'ouvre sous le bouton) : mêmes boutons, mêmes fonctions. -->
+      <div class="more-menu-wrap">
+        <button type="button" id="btnMoreMenu" class="btn btn-outline btn-more" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenu">⋯ Plus</button>
+        <div class="more-menu" id="moreMenu" role="menu" hidden>
+          <button type="button" id="btnAddTrain" class="btn btn-primary">+ Ajouter un train</button>
+          <button type="button" id="btnSettings" class="btn btn-outline" aria-label="Réglages">⚙ Réglages</button>
+          <button type="button" id="btnArchives" class="btn btn-outline" title="Voir les PDF récap archivés automatiquement">🗄 Archives</button>
+          <button type="button" id="btnPushTodayHeader" class="btn btn-outline" title="Renvoyer toutes les heures enregistrées aujourd'hui vers Google Sheets">📤 Export Sheet</button>
+          <button type="button" id="btnInstall" class="btn btn-outline" hidden>⬇ Installer l'app</button>
+          <button type="button" id="btnEndDay" class="btn btn-endday" title="Clôturer la journée : sauvegarde, PDF récap, puis fermeture de l'application">🌙 Journée finie</button>
+        </div>
+      </div>
     </div>
   </header>
 

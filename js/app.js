@@ -6077,7 +6077,28 @@ function showEndScreen(overlay, results) {
   target.querySelector('[data-action="reopen-app"]').addEventListener('click', () => window.location.reload());
 }
 
+// « ⋯ Plus » : petite fenêtre sous le bouton qui regroupe les boutons
+// moins utilisés du bandeau (Ajouter un train, Réglages, Archives, Export
+// Sheet, Installer, Journée finie). Se ferme après un choix, au clic à
+// côté ou avec Échap.
+function wireMoreMenu() {
+  const btn = el('btnMoreMenu');
+  const menu = el('moreMenu');
+  if (!btn || !menu) return;
+  const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  });
+  menu.addEventListener('click', (e) => { if (e.target.closest('button')) close(); });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('.more-menu-wrap')) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) close(); });
+}
+
 function wireHeaderButtons() {
+  wireMoreMenu();
   el('btnAddTrain').addEventListener('click', () => openTrainModal(null));
   el('btnSettings').addEventListener('click', openSettingsModal);
   el('btnHistory').addEventListener('click', openHistoryModal);

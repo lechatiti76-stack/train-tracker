@@ -83,6 +83,10 @@ function doPost(e) {
       upsertJournalRow_(payload);
       return jsonResponse_({ ok: true });
     }
+    if (payload.action === 'logCoupons') {
+      replaceCouponsForDate_(payload);
+      return jsonResponse_({ ok: true });
+    }
     if (payload.action === 'logShuttle') {
       upsertShuttleJournalRow_(payload);
       return jsonResponse_({ ok: true });
@@ -171,6 +175,35 @@ function getOrCreateShuttleJournalSheet_() {
     sheet.getRange('A2:C').setNumberFormat('@');
   }
   return sheet;
+}
+
+// Onglet "Coupons" : coupons navettes saisis dans l'app (bouton 🎫 Coupons),
+// relus par la saisie du Suivi des circulations. À chaque envoi, toutes les
+// lignes de la date sont remplacées par celles reçues (la journée entière).
+const COUPONS_SHEET_NAME = 'Coupons';
+const COUPONS_HEADERS = ['Date', 'Navette', 'Ligne', 'N° coupon', 'Code site', 'Date coupon', 'Wagons', 'Note', 'Mis à jour le'];
+
+function replaceCouponsForDate_(payload) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(COUPONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(COUPONS_SHEET_NAME);
+    sheet.appendRow(COUPONS_HEADERS);
+    sheet.setFrozenRows(1);
+    sheet.getRange('A2:F').setNumberFormat('@');
+  }
+  const date = String(payload.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('date invalide');
+  const values = sheet.getDataRange().getValues();
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (cellToKey_(values[i][0]) === date) sheet.deleteRow(i + 1);
+  }
+  const rows = (payload.coupons || []).map((c) => [
+    date, String(c.navette || ''), Number(c.ligne) || '', String(c.numero == null ? '' : c.numero), String(c.site || ''),
+    String(c.dateCoupon == null ? '' : c.dateCoupon), c.wagons === '' || c.wagons == null ? '' : Number(c.wagons), String(c.note || ''),
+    payload.misAJour || new Date().toISOString(),
+  ]);
+  if (rows.length) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, COUPONS_HEADERS.length).setValues(rows);
 }
 
 function cellToKey_(value) {

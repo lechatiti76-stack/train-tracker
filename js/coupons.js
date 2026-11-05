@@ -18,7 +18,7 @@
 // (#couponsRoot) et n'utilise rien d'app.js. Point d'entrée : openCoupons().
 
 import { COUPON_FAMILIES as FAMS } from './config.js';
-import { loadCoupons, saveCoupons } from './storage.js';
+import { loadCoupons, saveCoupons, loadSettings } from './storage.js';
 
 const EXCELJS_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
@@ -115,6 +115,40 @@ function lineIssues(day, s, i, l) {
 function persist() {
   if (!saveCoupons(state.docs)) toast('Enregistrement impossible : stockage de l’appareil plein.');
 }
+// Envoi des coupons d'une journée vers l'onglet "Coupons" du Google Sheet
+// (même adresse que le Journal, Réglages) : la saisie du Suivi des
+// circulations les relit et les affiche (bouton 🎫 Coupons de la saisie).
+// Toute la journée est renvoyée à chaque changement, 2 s après la dernière
+// frappe ; sans adresse configurée, rien ne part.
+const pushTimers = {};
+function couponRows(day) {
+  const doc = getDoc(day); const rows = [];
+  Object.keys(doc.nav || {}).sort().forEach((s) => {
+    const f = famOf(s);
+    (doc.nav[s] || []).forEach((l, i) => rows.push({
+      navette: s, ligne: i + 1, numero: fmtN(l.n), site: f ? f.code : '', dateCoupon: fmtDC(l.dc),
+      wagons: typeof l.w === 'number' ? l.w : '', note: l.note || '',
+    }));
+  });
+  return rows;
+}
+function schedulePushCoupons(day) {
+  clearTimeout(pushTimers[day]);
+  pushTimers[day] = setTimeout(() => pushCoupons(day), 2000);
+}
+async function pushCoupons(day) {
+  let url = '';
+  try { url = (loadSettings() || {}).sheetsWebAppUrl || ''; } catch (e) { url = ''; }
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'logCoupons', date: day, coupons: couponRows(day), misAJour: new Date().toISOString() }),
+    });
+  } catch (e) { /* hors ligne : renvoyé au prochain changement de la journée */ }
+}
+
 function mutate(day, fn) {
   const doc = JSON.parse(JSON.stringify(getDoc(day)));
   doc.nav = doc.nav || {};
@@ -124,6 +158,7 @@ function mutate(day, fn) {
   const empty = !Object.values(doc.nav).some((a) => a.length) && !(doc.keep || []).length;
   if (empty) delete state.docs[day]; else state.docs[day] = doc;
   rebuildIndex(); persist(); render();
+  schedulePushCoupons(day);
 }
 
 function shuttlesFor(day, f) {
@@ -493,6 +528,7 @@ async function importFile(file, btn) {
       if (dayCount(state.docs[date])) { skipped++; continue; }
       state.docs[date] = { ...doc, source: 'import', maj: new Date().toISOString() };
       added++; coupons += dayCount(doc);
+      if (date >= addDays(todayISO(), -1)) schedulePushCoupons(date);
     }
     rebuildIndex(); persist(); render();
     if (!added && !skipped) toast('Aucun coupon reconnu dans ce fichier.');

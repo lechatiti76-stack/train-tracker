@@ -691,6 +691,12 @@ coupons navettes qui remplace la feuille « semaine » du classeur
   (le classeur annuel ou un export de cet écran). Les journées déjà saisies
   ne sont pas modifiées.
 
+- **Suivi des circulations** : si l'adresse du Web App est réglée (Réglages),
+  chaque journée de coupons est envoyée (2 s après la dernière saisie) dans
+  l'onglet **Coupons** du classeur ; la saisie du Suivi des circulations les
+  affiche (bouton 🎫 Coupons). Mettre à jour `apps-script/Code.gs` puis
+  redéployer (nouvelle version) pour activer cet envoi.
+
 Stockage : `localStorage` de l'appareil (clé `traintrack:coupons:v1`),
 comme le reste de l'app. La bibliothèque ExcelJS est chargée à la demande et
 mise en cache par le Service Worker.
