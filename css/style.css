@@ -2064,3 +2064,13 @@ html.theme-dark .c-early { color: #4ade80; }
 .quickboard-cell.is-annonce .quickboard-time { color: #ea580c; font-weight: 900; }
 @keyframes annoncePulse { 50% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); } }
 @media (prefers-reduced-motion: reduce) { .quickboard-cell.is-annonce { animation: none; } }
+
+/* Voie / wagons directement sur la vignette d'un train au départ */
+.composition-row { flex-wrap: wrap; }
+.train-vw-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted, #64748b); }
+.train-vw-input { width: 78px; padding: 5px 8px; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; font: 700 .95rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; background: var(--surface, #fff); color: inherit; }
+.train-vw-input[data-role="train-wagons"] { width: 64px; }
+.train-vw-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.18); }
+.train-vw-input:not(:placeholder-shown) { border-color: #f59e0b; background: #fffbeb; }
+.quick-train-vw { display: block; margin-top: 3px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; padding: 1px 6px; border-radius: 6px; background: rgba(245,158,11,.18); color: #92400e; }
+.quick-train-btn.btn-primary .quick-train-vw { background: rgba(255,255,255,.22); color: #fff; }

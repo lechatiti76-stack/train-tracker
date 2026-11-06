@@ -242,6 +242,7 @@ function renderQuickTrainsBar() {
         ${meta ? `<span class="quick-train-meta">${escapeHtml(meta)}</span>` : ''}
         <span class="quick-train-number">${exists ? '● ' : '○ '}${escapeHtml(number)}${todayTrain?.runNumber ? ` » ${escapeHtml(todayTrain.runNumber)}` : ''}</span>
         ${offDay ? '<span class="quick-train-offday">pas prévu</span>' : ''}
+        ${todayTrain && (todayTrain.composition?.voie || todayTrain.composition?.wagons) ? `<span class="quick-train-vw">${[todayTrain.composition.voie ? `Voie ${escapeHtml(todayTrain.composition.voie)}` : '', todayTrain.composition.wagons ? `${todayTrain.composition.wagons} wg` : ''].filter(Boolean).join(' · ')}</span>` : ''}
       </button>`;
   }).join('');
 }
@@ -603,6 +604,7 @@ function openCompositionModal(train) {
         persist();
         closeModal();
         refreshTrainCard(train);
+        renderQuickTrainsBar();
         showToast('Composition enregistrée');
       });
       panel.querySelector('#btnClearComposition').addEventListener('click', () => {
@@ -1390,7 +1392,36 @@ function onGridClick(e) {
   }
 }
 
+// Voie / wagons saisis directement sur la vignette d'un train au départ
+// (même donnée que la fenêtre Composition) → Sheet (InfoTrain) → saisie.
+function setTrainVoieWagons(train, voie, wagons) {
+  const before = train.composition || {};
+  voie = (voie || '').trim().toUpperCase();
+  wagons = String(wagons ?? '').trim();
+  if ((before.voie || '') === voie && String(before.wagons ?? '') === wagons) return;
+  const comp = { ...before, voie: voie || null, wagons: wagons ? Number(wagons) : null };
+  const hasAny = comp.voie || comp.wagons || comp.weightTons || comp.lengthM || comp.traction;
+  train.composition = hasAny ? comp : null;
+  train.updatedAt = new Date().toISOString();
+  persist();
+  pushInfoIfConfigured('InfoTrain', train.number, train.runNumber || train.number, voie, wagons === '' ? '' : Number(wagons));
+  refreshTrainCard(train);
+  renderQuickTrainsBar();
+}
+
 function wireSillonInputs(grid) {
+  grid.addEventListener('change', (e) => {
+    const input = e.target.closest('[data-role="train-voie"], [data-role="train-wagons"]');
+    if (!input) return;
+    const cardEl = input.closest('.train-card');
+    const train = findTrain(cardEl?.dataset.trainId);
+    if (!train) return;
+    setTrainVoieWagons(train, cardEl.querySelector('[data-role="train-voie"]')?.value, cardEl.querySelector('[data-role="train-wagons"]')?.value);
+    showToast(`Train ${trainNo(train)} : ${formatCompositionSummary(train.composition) || 'voie / wagons effacés'}`);
+  });
+  grid.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.closest('[data-role="train-voie"], [data-role="train-wagons"]')) { e.preventDefault(); e.target.blur(); }
+  });
   grid.addEventListener('change', (e) => {
     const input = e.target.closest('[data-role="machine-number"]');
     if (!input) return;

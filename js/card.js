@@ -220,6 +220,12 @@ export function trainCardTemplate(train, { readOnly = false, destination = null 
             <p class="sillon-lookup-status" data-role="sillon-status"></p>
                   </div>
           <div class="composition-row">
+            <label class="train-vw-field">Voie
+              <input type="text" class="train-vw-input" data-role="train-voie" value="${escapeHtml(train.composition?.voie || '')}" placeholder="VR5" autocomplete="off" maxlength="8">
+            </label>
+            <label class="train-vw-field">Wagons
+              <input type="number" class="train-vw-input" data-role="train-wagons" min="0" step="1" inputmode="numeric" value="${train.composition?.wagons ?? ''}" placeholder="18">
+            </label>
             <button type="button" class="btn btn-outline btn-sm" data-action="open-composition">🚃 Composition</button>
             <span class="composition-summary" data-role="composition-summary">${escapeHtml(formatCompositionSummary(train.composition))}</span>
           </div>
@@ -299,6 +305,10 @@ export function updateCardDynamicParts(cardEl, train) {
 
   const compositionSummaryEl = cardEl.querySelector('[data-role="composition-summary"]');
   if (compositionSummaryEl) compositionSummaryEl.textContent = formatCompositionSummary(train.composition);
+  const voieEl = cardEl.querySelector('[data-role="train-voie"]');
+  if (voieEl && document.activeElement !== voieEl) voieEl.value = train.composition?.voie || '';
+  const wagonsEl = cardEl.querySelector('[data-role="train-wagons"]');
+  if (wagonsEl && document.activeElement !== wagonsEl) wagonsEl.value = train.composition?.wagons ?? '';
 
   const typeToggleEl = cardEl.querySelector('[data-role="train-type-toggle"]');
   if (typeToggleEl) {
