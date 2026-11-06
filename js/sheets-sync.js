@@ -280,8 +280,10 @@ export async function pushStepToSheet(webAppUrl, train, stepIndex, computeAllSte
 // le même élément utilisent deux codes distincts (voir pushShuttleLogIfConfigured
 // dans app.js, par ex. "FL1" pour le départ et "FL1-arr" pour l'arrivée) afin
 // de ne jamais s'écraser l'un l'autre.
-function shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin) {
+function shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin, voie = '', wagons = '') {
   return {
+    voie: voie || '',
+    wagons: wagons === null || wagons === undefined ? '' : wagons,
     action: 'logShuttle',
     date: dateISO,
     type,
@@ -294,8 +296,8 @@ function shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM
   };
 }
 
-export async function pushShuttleLogToSheet(webAppUrl, dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin) {
-  return postToSheet(webAppUrl, shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin));
+export async function pushShuttleLogToSheet(webAppUrl, dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin, voie, wagons) {
+  return postToSheet(webAppUrl, shuttleLogPayload(dateISO, type, code, label, theoreticalHHMM, realHHMM, diffMin, voie, wagons));
 }
 
 export async function pushAllStepsToSheet(webAppUrl, train, computeAllStepDelaysFn) {

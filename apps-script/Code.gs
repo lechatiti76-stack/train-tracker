@@ -59,7 +59,7 @@ const SHEET_NAME = 'Horaires';
 const JOURNAL_SHEET_NAME = 'Journal';
 const JOURNAL_HEADERS = ['Date', 'Train', 'Étape', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Cause', 'Wagons', 'Poids (t)', 'Longueur (m)', 'Traction', 'Mis à jour le'];
 const SHUTTLE_JOURNAL_SHEET_NAME = 'Navettes';
-const SHUTTLE_JOURNAL_HEADERS = ['Date', 'Type', 'Code', 'Libellé', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Mis à jour le'];
+const SHUTTLE_JOURNAL_HEADERS = ['Date', 'Type', 'Code', 'Libellé', 'Heure théorique', 'Heure réelle', 'Écart (min)', 'Mis à jour le', 'Voie', 'Wagons'];
 
 function doGet(e) {
   try {
@@ -154,7 +154,14 @@ function upsertShuttleJournalRow_(payload) {
     payload.heureReelle || '',
     payload.ecartMin === '' || payload.ecartMin === undefined || payload.ecartMin === null ? '' : Number(payload.ecartMin),
     payload.misAJour || new Date().toISOString(),
+    // voie et nombre de wagons (lignes « Info… » : saisis dans les fenêtres navettes / arrivées / composition)
+    payload.voie || '',
+    payload.wagons === '' || payload.wagons === undefined || payload.wagons === null ? '' : Number(payload.wagons),
   ];
+  // onglet créé avant l'ajout des colonnes Voie / Wagons : en-têtes complétés
+  if (sheet.getLastColumn() < SHUTTLE_JOURNAL_HEADERS.length) {
+    sheet.getRange(1, 1, 1, SHUTTLE_JOURNAL_HEADERS.length).setValues([SHUTTLE_JOURNAL_HEADERS]);
+  }
 
   if (targetRow > -1) {
     sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);

@@ -555,6 +555,9 @@ function openCompositionModal(train) {
     title: `Composition — Train ${escapeHtml(trainNo(train))}`,
     bodyHTML: `
       <form id="compositionForm" class="stacked-form">
+        <label>Voie de départ
+          <input type="text" id="fCompVoie" value="${escapeHtml(comp.voie || '')}" placeholder="ex : VR5" autocomplete="off" style="text-transform:uppercase">
+        </label>
         <label>Nombre de wagons
           <input type="number" id="fCompWagons" min="0" step="1" value="${comp.wagons ?? ''}" placeholder="ex : 18">
         </label>
@@ -583,8 +586,14 @@ function openCompositionModal(train) {
         const weightTons = panel.querySelector('#fCompWeight').value.trim();
         const lengthM = panel.querySelector('#fCompLength').value.trim();
         const traction = panel.querySelector('#fCompTraction').value;
-        const hasAny = wagons || weightTons || lengthM || traction;
+        const voie = panel.querySelector('#fCompVoie').value.trim().toUpperCase();
+        const hasAny = wagons || weightTons || lengthM || traction || voie;
+        const before = train.composition || {};
+        if ((before.voie || '') !== voie || String(before.wagons ?? '') !== String(wagons)) {
+          pushInfoIfConfigured('InfoTrain', train.number, train.runNumber || train.number, voie, wagons === '' ? '' : Number(wagons));
+        }
         train.composition = hasAny ? {
+          voie: voie || null,
           wagons: wagons ? Number(wagons) : null,
           weightTons: weightTons ? Number(weightTons) : null,
           lengthM: lengthM ? Number(lengthM) : null,
@@ -2358,6 +2367,45 @@ function pushShuttleLogIfConfigured(type, code, label, theoreticalHHMM, realHHMM
   pushShuttleLogToSheet(settings.sheetsWebAppUrl, todayISO(), type, code, label, theoreticalHHMM, realHHMM, diffMin).catch(() => {});
 }
 
+// Voie + nombre de wagons d'une navette, d'un départ navette, d'une arrivée
+// ou d'un départ train : ligne « Info… » de l'onglet Navettes, que la saisie
+// du Suivi des circulations reporte dans son tableau de droite (et donc sur
+// les écrans TV). kind : 'InfoNavette' | 'InfoQuickboard' | 'InfoArrivee' | 'InfoTrain'.
+function pushInfoIfConfigured(kind, code, label, voie, wagons) {
+  if (!settings.sheetsWebAppUrl) return;
+  pushShuttleLogToSheet(settings.sheetsWebAppUrl, todayISO(), kind, code, label, null, null, null, voie || '', wagons ?? '').catch(() => {});
+}
+
+// Champs « Voie » et « Wagons » communs aux fenêtres navettes / arrivées / départs navettes.
+function voieWagonsFieldsHTML(info) {
+  return `
+        <div class="form-row voie-wagons-row">
+          <label>Voie
+            <input type="text" id="fInfoVoie" value="${escapeHtml(info?.voie || '')}" placeholder="ex : VF3" autocomplete="off" style="text-transform:uppercase">
+          </label>
+          <label>Nombre de wagons
+            <input type="number" id="fInfoWagons" min="0" max="60" step="1" value="${info?.wagons ?? ''}" placeholder="ex : 18">
+          </label>
+        </div>`;
+}
+function readVoieWagons(panel) {
+  const voie = (panel.querySelector('#fInfoVoie')?.value || '').trim().toUpperCase();
+  const w = (panel.querySelector('#fInfoWagons')?.value || '').trim();
+  return { voie: voie || null, wagons: w === '' ? null : Number(w) };
+}
+function voieWagonsText(info) {
+  if (!info) return '';
+  return [info.voie ? `Voie ${info.voie}` : '', info.wagons != null ? `${info.wagons} wg` : ''].filter(Boolean).join(' · ');
+}
+// Enregistre voie/wagons dans `rec` et les envoie au Sheet s'ils ont changé.
+function applyVoieWagons(rec, values, kind, code, label) {
+  const changed = (rec.voie || null) !== values.voie || (rec.wagons ?? null) !== values.wagons;
+  rec.voie = values.voie;
+  rec.wagons = values.wagons;
+  if (changed) pushInfoIfConfigured(kind, code, label, values.voie, values.wagons);
+  return changed;
+}
+
 // ---------- Lien avec le suivi des circulations (saisie + écrans TV) ----------
 // Toutes les 20 s, relit ce que reçoivent les écrans du suivi des circulations
 // (voir circulations-sync.js) et reporte ici les navettes validées dans sa
@@ -2909,7 +2957,8 @@ function shuttleChipInnerHTML(code) {
     <span class="shuttle-countdown" data-role="shuttle-countdown" ${remainingMin === null ? 'hidden' : ''}>${remainingMin === null ? '' : `⏳ ${remainingMin} min`}</span>
     <span class="shuttle-overdue-badge" data-role="shuttle-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
     ${shuttleDeltaBadgeHTML(delta)}
-    <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>`;
+    <span class="shuttle-delay-flag" data-role="shuttle-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>
+    ${voieWagonsText(rec) ? `<span class="chip-voie-wagons">${escapeHtml(voieWagonsText(rec))}</span>` : ''}`;
 }
 
 // Le grisage immédiat "dès que l'heure est renseignée" a été retiré : il
@@ -3098,6 +3147,7 @@ function openShuttleModal(code) {
         </div>
         <p class="help-text" data-role="shuttle-quick-status">${shuttleQuickStatusText(arrivedManually, delayFlag)}</p>
 
+        ${voieWagonsFieldsHTML(rec)}
         <div class="form-actions">
           <button type="button" class="btn btn-outline" id="btnClearShuttle">Effacer</button>
           <button type="button" class="btn btn-outline btn-cancel-trip" id="btnCancelShuttle">${rec.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
@@ -3178,6 +3228,7 @@ function openShuttleModal(code) {
         e.preventDefault();
         const current = shuttles[code] || {};
         current.departure = input.value || null;
+        applyVoieWagons(current, readVoieWagons(panel), 'InfoNavette', code, code);
         shuttles[code] = current;
         saveShuttles(shuttles);
         renderShuttlesBar();
@@ -3443,12 +3494,17 @@ function shuttleQuickboardCellHTML(code) {
   const time = shuttleReserves[code] || null;
   const cancelled = isQuickboardCancelled(code);
   const offDay = quickboardIsOffDay(code);
+  const annonce = !time && !cancelled ? (shuttleReserves._annonce?.[code] || null) : null;
+  const info = shuttleReserves._info?.[code];
   return `
     <td>
-      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}${offDay ? ' is-off-day' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
+      <button type="button" class="quickboard-cell${time ? ' is-set' : ''}${cancelled ? ' is-cancelled' : ''}${offDay ? ' is-off-day' : ''}${annonce ? ' is-annonce' : ''}" style="--shuttle-color:${escapeHtml(group?.color || '#94a3b8')}" data-quickboard-code="${escapeHtml(code)}" title="${cancelled ? 'Voyage supprimé — cliquer pour gérer' : time ? 'Cliquer pour corriger' : "Cliquer pour enregistrer l'heure actuelle"}">
         ${cancelled ? `${chipRestoreHTML(`Rétablir le départ ${code}`)}${cancelBannerHTML()}` : chipDeleteHTML(`Supprimer le départ ${code} (ne roule pas)`)}
+        ${!time && !cancelled ? `<span class="chip-annonce${annonce ? ' is-on' : ''}" data-chip-annonce role="button" tabindex="0" title="${annonce ? `Départ annoncé à ${annonce} — cliquer pour retirer l'annonce` : 'Annoncer le départ (prévenir les équipes, « Départ imminent » sur les écrans)'}" aria-label="Annoncer le départ ${escapeHtml(code)}">▲</span>` : ''}
+        ${!cancelled ? `<span class="chip-edit" data-chip-edit role="button" tabindex="0" title="Voie, wagons, heure" aria-label="Voie et wagons ${escapeHtml(code)}">✎</span>` : ''}
         <span class="quickboard-code">${escapeHtml(code)}</span>
-        <span class="quickboard-time">${time || (offDay ? 'pas prévu' : '--:--')}</span>
+        <span class="quickboard-time">${time || (annonce ? `📣 ${annonce}` : (offDay ? 'pas prévu' : '--:--'))}</span>
+        ${voieWagonsText(info) ? `<span class="quickboard-info">${escapeHtml(voieWagonsText(info))}</span>` : ''}
         ${shuttleDeltaBadgeHTML(computeQuickboardDelta(code))}
       </button>
     </td>`;
@@ -3489,6 +3545,7 @@ function openQuickboardTimeEditor(key, label) {
         <label>Heure de départ
           <input type="time" id="fQuickboardTime" value="${escapeHtml(current)}">
         </label>
+        ${voieWagonsFieldsHTML(shuttleReserves._info?.[key])}
         <div class="form-actions">
           <button type="button" class="btn btn-outline" id="btnQuickboardClear">Effacer</button>
           <button type="button" class="btn btn-outline btn-cancel-trip" id="btnQuickboardCancel">${isQuickboardCancelled(key) ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
@@ -3511,6 +3568,9 @@ function openQuickboardTimeEditor(key, label) {
         e.preventDefault();
         const value = panel.querySelector('#fQuickboardTime').value;
         shuttleReserves[key] = value || null;
+        const info = { ...(shuttleReserves._info?.[key] || {}) };
+        applyVoieWagons(info, readVoieWagons(panel), 'InfoQuickboard', key, label);
+        shuttleReserves._info = { ...(shuttleReserves._info || {}), [key]: info };
         saveShuttleReserves(shuttleReserves);
         renderShuttleQuickboard();
         closeModal();
@@ -3531,6 +3591,21 @@ function pushQuickboardLog(key, label) {
   const theoretical = settings.quickboardTimings?.[key];
   const delta = computeQuickboardDelta(key);
   pushShuttleLogIfConfigured('Quickboard', key, label, theoretical || null, shuttleReserves[key] || null, delta?.diffMin ?? null);
+}
+
+// ▲ sur une case de départ navette : annonce le départ avant de le valider
+// (prévenir les équipes). Envoyé au Sheet (ligne « Annonce ») : la saisie du
+// Suivi des circulations affiche alors « Départ imminent » en grand sur les
+// écrans. Un second clic retire l'annonce ; valider le départ la remplace.
+function toggleQuickboardAnnonce(code) {
+  const map = { ...(shuttleReserves._annonce || {}) };
+  const on = !map[code];
+  if (on) map[code] = quickboardNowHHMM(); else delete map[code];
+  shuttleReserves._annonce = map;
+  saveShuttleReserves(shuttleReserves);
+  renderShuttleQuickboard();
+  pushShuttleLogIfConfigured('Annonce', code, `${code} (annonce départ)`, null, on ? map[code] : null, null);
+  showToast(on ? `${code} : départ annoncé à ${map[code]}` : `${code} : annonce retirée`);
 }
 
 function quickboardRecordCode(code) {
@@ -3572,6 +3647,8 @@ function wireShuttleQuickboard() {
       setQuickboardCancelled(key, codeBtn ? key : `Réserve ${key}`, isDelete);
       return;
     }
+    if (codeBtn && e.target.closest('[data-chip-annonce]')) { e.preventDefault(); toggleQuickboardAnnonce(codeBtn.dataset.quickboardCode); return; }
+    if (codeBtn && e.target.closest('[data-chip-edit]')) { e.preventDefault(); openQuickboardTimeEditor(codeBtn.dataset.quickboardCode, codeBtn.dataset.quickboardCode); return; }
     if (codeBtn) { quickboardRecordCode(codeBtn.dataset.quickboardCode); return; }
     const resBtn = e.target.closest('[data-quickboard-reserve]');
     if (resBtn) { quickboardRecordReserve(resBtn.dataset.quickboardReserve); return; }
@@ -3778,6 +3855,7 @@ function arrivalChipInnerHTML(id) {
     <span class="shuttle-overdue-badge" data-role="arrival-overdue" ${overdueMin === null ? 'hidden' : ''}>${overdueMin === null ? '' : `⏱ +${overdueMin} min`}</span>
     ${arrivalDeltaBadgeHTML(delta)}
     <span class="shuttle-delay-flag" data-role="arrival-delay-flag" ${delayFlag ? '' : 'hidden'}>⚠ Retard signalé</span>
+    ${voieWagonsText(rec) ? `<span class="chip-voie-wagons">${escapeHtml(voieWagonsText(rec))}</span>` : ''}
     ${chipFAHTML(Boolean(rec?.faStored), rec?.faStored ? `Train stocké à FA — décocher` : `Cocher si le train est stocké à FA`)}`;
 }
 
@@ -3920,6 +3998,7 @@ function openArrivalModal(id) {
         </div>
         <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
 
+        ${voieWagonsFieldsHTML(rec)}
         <div class="form-actions">
           <button type="button" class="btn btn-outline" id="btnClearArrival">Effacer</button>
           <button type="button" class="btn btn-outline btn-cancel-trip" id="btnCancelArrival">${arrivals[id]?.cancelled ? '↺ Rétablir le voyage' : '🚫 Supprimer le voyage'}</button>
@@ -4019,6 +4098,7 @@ function openArrivalModal(id) {
         const current = arrivals[id] || {};
         current.departure = input.value || null;
         current.stops = readFormStops();
+        applyVoieWagons(current, readVoieWagons(panel), 'InfoArrivee', id, group.label);
         arrivals[id] = current;
         saveArrivals(arrivals);
         renderArrivalsBar();

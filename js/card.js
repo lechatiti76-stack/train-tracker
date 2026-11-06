@@ -34,6 +34,7 @@ function ecartLabel(delay) {
 export function formatCompositionSummary(composition) {
   if (!composition) return '';
   const parts = [];
+  if (composition.voie) parts.push(`Voie ${composition.voie}`);
   if (composition.wagons) parts.push(`${composition.wagons} wagons`);
   if (composition.weightTons) parts.push(`${composition.weightTons} t`);
   if (composition.lengthM) parts.push(`${composition.lengthM} m`);

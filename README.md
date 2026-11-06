@@ -786,6 +786,13 @@ sert de référence), un champ **"Décalage / Départ (min)"** est disponible :
 - Dernière étape qui n'est pas une arrivée (ex : "Départ pour la ligne")
   → le statut global reprend automatiquement le libellé réel de cette
   dernière étape plutôt qu'un mot "ARRIVÉ" figé.
+- Voie et nombre de wagons → champs **Voie** / **Wagons** dans la fenêtre
+  d'une navette (arrivée), d'une case « Départs navettes » (✎) et dans la
+  Composition d'un train (Voie de départ). Envoyés à l'onglet **Navettes**
+  du Sheet (lignes Info…) et repris par la saisie des circulations.
+- Annonce d'un départ navette → **▲** sur la case « Départs navettes »
+  (📣 + heure, la case clignote) ; second clic = retrait. Repris par la
+  saisie et les écrans (« Départ imminent »).
 
 ## 11. Limites connues
 
