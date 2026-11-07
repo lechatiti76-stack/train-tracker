@@ -1,0 +1,355 @@
+/* Suivi des circulations - mode VISUEL (écrans TV, toujours sombre).
+   Toutes les tailles sont en rem : visuel.js ajuste la taille de base pour que tout tienne à l'écran.
+   Chaque groupe de navettes a sa couleur (--c), fournie par les données diffusées. */
+:root {
+  --fond: #08121B; --panneau: #0D1A26; --ligne: #11212F; --ligne-2: #0F1D2A; --trait: #1F354A;
+  --encre: #F2F5F8; --dim: #8D9EAF; --ambre: #FFC23D; --vert: #45D68B; --rouge: #FF6B5E; --cyan: #66CCFF; --jaune: #F2C230; --violet: #B79CFF;
+  --f: "Bahnschrift", "Segoe UI", "Arial Narrow", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--fond); color: var(--encre); font-family: var(--f); overflow: hidden; cursor: none; }
+[hidden] { display: none !important; }
+
+/* Colonne flexible : un bandeau masqué ne décale plus les autres zones. */
+.ecran { height: 100vh; display: flex; flex-direction: column; }
+.ecran > * { flex: none; }
+.ecran > .grille { flex: 1 1 auto; min-height: 0; }
+
+.tete { display: grid; grid-template-columns: auto 1fr auto auto; gap: 2rem; align-items: center; padding: .6rem 1.4rem .5rem; border-bottom: .12rem solid var(--trait); }
+.titre { font-weight: 700; font-size: 2rem; letter-spacing: .06em; text-transform: uppercase; }
+.date { font-size: 1.35rem; color: var(--dim); }
+.direct { display: flex; align-items: center; gap: .6rem; font-size: 1.05rem; color: var(--dim); white-space: nowrap; }
+.direct i { width: .85rem; height: .85rem; border-radius: 50%; background: var(--vert); }
+.direct.attente i { background: var(--cyan); }
+.direct.coupe i { background: var(--ambre); }
+.heure { font-weight: 700; font-size: 2.8rem; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.alerte { background: var(--ambre); color: #1a1200; font-weight: 700; font-size: 1.25rem; padding: .4rem 1.4rem; }
+
+.grille { display: flex; flex-direction: column; gap: .8rem; padding: .8rem 1rem; overflow: hidden; }
+.grille > section { flex: none; }
+/* trains de ligne posés en bas, juste au-dessus du flash info : la place libre va aux navettes */
+.grille > .trains { margin-top: auto; }
+.attente-donnees { display: none; margin: auto; font-size: 1.6rem; color: var(--dim); text-align: center; max-width: 60rem; }
+.ecran.sans-donnees .attente-donnees { display: block; }
+.ecran.sans-donnees .grille { display: none; }
+.ecran.fige .grille { opacity: .8; }
+.grille.trains-seuls .navettes, .grille.navettes-seules .trains { display: none; }
+
+/* ------------------------------------------------------------ navettes */
+.navettes { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: .8rem; align-items: start; }
+.nav { --c: #F28C28; --ce: #1a0f00; border-radius: .6rem; overflow: hidden; background: var(--panneau); border: .2rem solid var(--c); min-width: 0; }
+.nav-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: .45rem .9rem .35rem; background: var(--c); color: var(--ce); }
+.nav-tete h2 { margin: 0; font-weight: 700; font-size: 1.55rem; letter-spacing: .08em; text-transform: uppercase; }
+.nav-tete span { font-size: .9rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+/* code (sens dessous) · heure (prévu/réel dessous) · écart · wagons · voie · état (sur 2 lignes si besoin) */
+.cols, .r { display: grid; grid-template-columns: 3.3rem 4.1rem 3.9rem 3rem 4.4rem minmax(8.8rem, 1fr); gap: .45rem; align-items: center; padding: 0 .8rem; overflow: hidden; }
+.cols { font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding-top: .3rem; padding-bottom: .25rem; }
+/* Lignes pleinement colorées : départs dans la couleur du groupe, arrivées un ton plus sombre ; --el = encre lisible sur ce fond. */
+.r { min-height: 2.9rem; padding-top: .15rem; padding-bottom: .15rem; border-top: .08rem solid rgba(0, 0, 0, .3); color: var(--el, var(--encre)); }
+.r .code { display: flex; flex-direction: column; line-height: 1; }
+.r .code small { font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .78; }
+.r .h { flex-direction: column; align-items: flex-start; gap: .05rem; line-height: 1; }
+.r .wg { display: flex; flex-direction: column; line-height: 1; font-weight: 700; font-size: 1.3rem; }
+.r .wg small { font-size: .6rem; font-weight: 400; }
+.r .st { white-space: normal; line-height: 1.1; font-size: 1.25rem; }
+.r.dep { background: var(--fd, var(--panneau)); }
+.r.arr { background: var(--fa, var(--panneau)); }
+.r .sens, .r .h small, .r .ec.hlr, .r .wg { color: inherit; opacity: .78; }
+.r .barre { color: inherit; opacity: .55; }
+.r .ec.tard, .r .ec.tres-tard, .r .ec.tot { background: #0B141D; padding: .04rem .35rem; border-radius: .3rem; justify-self: start; }
+.r .st { background-color: #0B141D; outline: .1rem solid rgba(8, 18, 27, .55); }
+.r .vo { font-size: 1.6rem; }
+.r .vo.long { font-size: 1.25rem; }
+/* texte plus large que sa case (étapes, voie très longue) : resserré ou défile d'un bout à l'autre (defiler dans visuel.js) */
+.dfl { display: inline-block; white-space: nowrap; transform-origin: 0 50%; }
+/* voies multiples (VR5+VF3) : sur deux lignes */
+.vo.duo { display: flex; flex-direction: column; justify-content: center; line-height: 1.02; font-size: 1.05rem; }
+.vo.duo > span { overflow: hidden; white-space: nowrap; }
+.r .vo.duo { font-size: 1.2rem; }
+/* navette supprimée : fond rouge, écriture blanche, barré foncé et épais */
+.r.supprimee { background: #C62828; color: #FFFFFF; }
+.r.supprimee .barre, .r.supprimee .h small { color: #FFFFFF; opacity: 1; text-decoration-color: #2B0000; text-decoration-thickness: .2rem; }
+.r.supprimee .st.supprime { background: #FFFFFF; color: #B71C1C; box-shadow: none; outline: none; }
+.code { font-weight: 700; font-size: 1.4rem; letter-spacing: .02em; white-space: nowrap; }
+.sens { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: color-mix(in srgb, var(--c) 55%, var(--encre)); }
+.h { font-weight: 700; font-size: 1.4rem; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: .3rem; white-space: nowrap; }
+.h small { font-weight: 400; font-size: .72rem; color: var(--dim); }
+.ec { font-size: 1.12rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ec.tard { color: var(--ambre); } .ec.tres-tard { color: var(--rouge); } .ec.tot { color: var(--vert); }
+.ec.hlr { color: var(--dim); font-size: .95rem; display: flex; flex-direction: column; line-height: 1; }
+.ec.hlr small { font-size: .6rem; letter-spacing: .08em; }
+.wg { font-size: 1.1rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vo { font-weight: 700; font-size: 1.25rem; white-space: nowrap; overflow: hidden; }
+.barre { text-decoration: line-through; text-decoration-thickness: .1rem; color: var(--dim); }
+.vide { padding: .7rem .9rem .8rem; color: var(--dim); font-size: 1.05rem; }
+
+/* Prochaines navettes (demain, ou le jour suivant qui en a) : une carte par départ, quatre par rangée, puis le texte libre */
+.demain { border-top: .12rem dashed color-mix(in srgb, var(--c) 45%, var(--trait)); padding: .45rem .8rem .6rem; display: grid; gap: .4rem; }
+.demain-tete { font-size: .95rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--c); }
+.rots { display: grid; grid-template-columns: repeat(var(--r, 4), minmax(0, 1fr)); gap: .4rem; }
+.rot { display: grid; gap: .15rem; padding: .3rem .5rem .35rem; border-radius: .4rem; min-width: 0;
+  background: color-mix(in srgb, var(--c) 16%, var(--panneau)); border: .08rem solid color-mix(in srgb, var(--c) 50%, transparent); border-left: .35rem solid var(--c); }
+.rl { display: flex; align-items: baseline; column-gap: .5rem; white-space: nowrap; overflow: hidden; }
+.rl b { font-size: 1.3rem; }
+.rl span { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rot i { font-style: normal; font-size: .95rem; color: #c3cfdb; white-space: nowrap; overflow: hidden; }
+.rot.supprimee { opacity: .55; text-decoration: line-through; }
+.demain-tete.petit { font-size: .82rem; }
+.rots.petit .rot { padding: .18rem .45rem .22rem; border-left-width: .25rem; }
+.rots.petit .rl b, .rots.petit .rl span { font-size: 1.05rem; }
+.rots.petit .rot i { font-size: .8rem; }
+.demain-note { font-size: 1.15rem; font-weight: 700; color: var(--encre); padding: .1rem .15rem 0; }
+.ensuite { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .9rem; font-size: 1.1rem; font-weight: 700; padding: .1rem .15rem 0; }
+.ensuite b { color: var(--c); text-transform: uppercase; letter-spacing: .08em; font-size: .95rem; }
+.ensuite em { font-style: normal; font-variant-numeric: tabular-nums; color: #c3cfdb; }
+.ensuite .supprimee { text-decoration: line-through; opacity: .55; }
+
+/* ------------------------------------------------------------- états */
+.st { position: relative; display: inline-flex; justify-content: center; align-items: center; width: 100%; font-weight: 700; font-size: 1.08rem; letter-spacing: .03em; text-transform: uppercase; padding: .3rem .45rem; border-radius: .35rem; white-space: nowrap; overflow: hidden; }
+.st.fait { background: var(--vert); color: #06210f; }
+.st.imminent { background: var(--ambre); color: #1a1200; animation: pouls 1.8s ease-in-out infinite; }
+/* « Prévu dans 12 min » : simple horaire prévu, d'un autre aspect que « Arrive dans » (navette réellement partie) */
+.st.bientot { color: #E6EDF3; box-shadow: inset 0 0 0 .16rem #7E93A8; }
+.st.route { color: var(--cyan); box-shadow: inset 0 0 0 .2rem var(--cyan); }
+.st .avance { position: absolute; left: 0; bottom: 0; height: .22rem; background: var(--cyan); }
+.st.prepa { background: var(--cyan); color: #04202e; }
+.etat { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.sous { font-size: .95rem; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; }
+/* train calé : rouge vif qui pulse, bien visible de loin */
+.st.cale { background: #E5251B; color: #FFFFFF; font-weight: 800; animation: poulsRouge 1.4s ease-in-out infinite; }
+.st.fa { background: #B45309; color: #FFFFFF; }
+.st.attendu { color: var(--ambre); box-shadow: inset 0 0 0 .2rem var(--ambre); }
+.st.retard { background: var(--rouge); color: #2a0602; }
+.st.supprime { color: var(--rouge); box-shadow: inset 0 0 0 .2rem var(--rouge); }
+.st.deja { color: var(--violet); box-shadow: inset 0 0 0 .2rem var(--violet); }
+.st.prevu { color: #b9c7d5; box-shadow: inset 0 0 0 .16rem #557089; }
+/* 5 minutes ou moins : clignote en rouge */
+.st.urgent { animation: clignRouge 1.1s steps(1, end) infinite; }
+@keyframes clignRouge { 0% { background: #E5251B; color: #FFFFFF; box-shadow: none; } 50% { background: #3B0B08; color: #FF8A80; box-shadow: inset 0 0 0 .2rem #E5251B; } }
+@keyframes pouls { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 194, 61, .75); } 50% { box-shadow: 0 0 0 .45rem rgba(255, 194, 61, 0); } }
+@keyframes poulsRouge { 0%, 100% { box-shadow: 0 0 0 0 rgba(229, 37, 27, .9); } 50% { box-shadow: 0 0 0 .5rem rgba(229, 37, 27, 0); } }
+
+/* ------------------------------------------------------- trains de ligne */
+.panneau { background: var(--panneau); border: .08rem solid var(--trait); border-radius: .6rem; overflow: hidden; min-width: 0; }
+.p-tete { display: flex; justify-content: space-between; align-items: baseline; padding: .45rem .9rem .3rem; }
+.p-tete h2 { margin: 0; font-weight: 700; font-size: 1.55rem; letter-spacing: .08em; text-transform: uppercase; }
+.p-tete span { font-size: .9rem; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+/* N° · état en volets · heure prévue · voie | provenance · entreprise · destination | N° · heure prévue · HLR · voie · état en volets */
+.tcols, .t { display: grid; grid-template-columns: 6.2rem 14.4rem 4.4rem 3.8rem minmax(13.4rem, 1fr) 6.2rem 4.4rem 4.2rem 3.8rem 14.4rem; gap: .5rem; align-items: center; padding: 0 .9rem; overflow: hidden; }
+.tcols { font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding-bottom: .25rem; }
+.tcols .c, .t .c { text-align: center; }
+.t { min-height: 2.9rem; border-top: .08rem solid var(--trait); background: var(--ligne); }
+.t .st { white-space: normal; line-height: 1.1; font-size: 1.2rem; }
+.t:nth-of-type(even) { background: var(--ligne-2); }
+.tcentre { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: .6rem; min-width: 0; padding: 0 .8rem 0 .4rem; }
+.tville { display: flex; flex-direction: column; font-weight: 700; font-size: 1.25rem; line-height: 1.05; min-width: 0; overflow-wrap: anywhere; }
+.tville small { font-weight: 400; font-size: .74rem; letter-spacing: .03em; color: var(--dim); }
+.tville.dest { align-items: flex-end; text-align: right; }
+.tef { font-weight: 700; font-size: 1.6rem; letter-spacing: .07em; text-transform: uppercase; text-align: center; white-space: nowrap; color: var(--c, var(--encre)); }
+.num { font-weight: 700; font-size: 1.4rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Départs des trains : état en lettres à volets sur fond noir, comme un tableau d'aéroport ; la couleur dit l'état */
+.etat.volets { align-items: center; }
+.sf { --sf: #F2F5F8; display: inline-flex; justify-content: center; gap: .1rem; max-width: 100%; padding: .2rem .25rem; border-radius: .3rem; overflow: hidden;
+  background: #000000; box-shadow: inset 0 0 0 .08rem #2A2A2A; color: var(--sf); font-size: 1.2rem; perspective: 12em; }
+.sf b { position: relative; flex: none; display: inline-flex; justify-content: center; align-items: center; width: .8em; height: 1.3em; border-radius: .12em;
+  background: linear-gradient(#2A2A2A 0 50%, #1E1E1E 50% 100%); font-weight: 700; line-height: 1; }
+/* la fente au milieu de chaque volet */
+.sf b::after { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - .03em); height: .06em; background: rgba(0, 0, 0, .9); }
+/* une lettre qui change tourne, de gauche à droite */
+.sf b.f { animation: volet .6s cubic-bezier(.2, .8, .3, 1.15) both; animation-delay: calc(var(--i) * 55ms); }
+@keyframes volet { 0% { transform: rotateX(-90deg); opacity: .25; } 55% { opacity: 1; } 100% { transform: none; } }
+.sf.bientot { --sf: #FFD54A; }
+.sf.attendu, .sf.imminent { --sf: var(--ambre); }
+.sf.retard { --sf: var(--rouge); }
+.sf.fait { --sf: var(--vert); }
+.sf.supprime { --sf: #FF4D4D; }
+.sf.prepa, .sf.route { --sf: var(--cyan); }
+.sf.fa { --sf: #F59E0B; }
+.sf.deja { --sf: var(--violet); }
+.sf.cale { --sf: #FFFFFF; }
+.sf.cale b { background: linear-gradient(#C81E14 0 50%, #A3170F 50% 100%); }
+/* 5 minutes ou moins : les volets clignotent en rouge (après avoir tourné) */
+.sf.urgent b { animation: clignVolet 1.1s steps(1, end) infinite; }
+.sf.urgent b.f { animation: volet .6s cubic-bezier(.2, .8, .3, 1.15) both, clignVolet 1.1s steps(1, end) .8s infinite; animation-delay: calc(var(--i) * 55ms), .8s; }
+@keyframes clignVolet { 0% { background: #D7261B; color: #FFFFFF; } 50% { background: #1A0402; color: #FF6B5E; } }
+/* arrivées : les lettres tournent plus lentement */
+.sf.lent b.f { animation-duration: 1s; animation-delay: calc(var(--i) * 95ms); }
+.sf.lent.urgent b.f { animation: volet 1s cubic-bezier(.2, .8, .3, 1.15) both, clignVolet 1.1s steps(1, end) 1.4s infinite; animation-delay: calc(var(--i) * 95ms), 1.4s; }
+
+/* -------------------------------------------------------------- flash */
+.flash { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: stretch; background: var(--jaune); color: #1a1200; }
+.flash-lib { display: flex; align-items: center; font-weight: 700; font-size: 1.15rem; letter-spacing: .12em; text-transform: uppercase; padding: 0 1.1rem; background: #C42B1C; color: #FFFFFF; }
+.flash-fen { overflow: hidden; white-space: nowrap; display: flex; align-items: center; min-height: 2.5rem; }
+.flash-txt { display: inline-block; font-weight: 700; font-size: 1.5rem; padding: .4rem 0; white-space: nowrap; will-change: transform; animation: defile var(--duree, 20s) linear infinite; }
+@keyframes defile { from { transform: translateX(var(--depart, 100%)); } to { transform: translateX(var(--fin, -100%)); } }
+@media (prefers-reduced-motion: reduce) {
+  .flash-txt { animation: none; padding-left: 1rem; white-space: normal; } .flash-fen { white-space: normal; }
+  .st.imminent, .st.cale, .sf b.f { animation: none; }
+  .st.urgent, .sf.urgent b, .sf.urgent b.f { animation: none; background: #E5251B; color: #FFFFFF; }
+}
+
+/* Proposition d'installer l'application « Écrans » (adresse ?installer=1) */
+.installer { position: fixed; right: 1.4rem; top: 5.5rem; z-index: 50; display: grid; gap: .45rem; max-width: 26rem; padding: .9rem 1.1rem;
+  border-radius: .6rem; background: #0F2235; border: .12rem solid var(--cyan); box-shadow: 0 .6rem 2rem rgba(0, 0, 0, .55); font-size: 1rem; }
+.installer b { font-size: 1.15rem; }
+.installer span { color: var(--dim); }
+.installer button { justify-self: start; padding: .5rem 1rem; border-radius: .4rem; border: 0; background: var(--cyan); color: #04202e; font: 700 1rem var(--f); cursor: pointer; }
+
+/* ============================================================ VEDETTES
+   Navette ou train qui part / arrive dans les prochaines minutes : calque posé sur la zone (visuel.js, majVedettes).
+   Navettes : carrés géants à la couleur du groupe sur toute la partie haute. Trains : bandes animées en bas. */
+.grille { position: relative; }
+.ved-calque { position: absolute; z-index: 20; display: flex; flex-direction: column; gap: .6rem; animation: vedEntre .45s cubic-bezier(.2, .8, .3, 1) both; }
+@keyframes vedEntre { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+/* sous le calque, la zone d'origine s'efface doucement */
+.grille.ved-nav-on .navettes { opacity: .08; transition: opacity .4s; }
+.grille.ved-trains-on .trains { opacity: .08; transition: opacity .4s; }
+
+/* ---- navettes : carrés géants ---- */
+.ved-tuiles { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); gap: .8rem; }
+.ved-tuile { position: relative; overflow: hidden; border-radius: 1rem; padding: 1.2rem 1.6rem 1rem; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: .2rem;
+  background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--c) 100%, #fff 12%), var(--c) 55%, color-mix(in srgb, var(--c) 70%, #000));
+  color: var(--ce, #fff); box-shadow: 0 0 0 .35rem color-mix(in srgb, var(--c) 45%, transparent), 0 1.2rem 3rem rgba(0, 0, 0, .55);
+  animation: vedPouls 2.2s ease-in-out infinite; }
+@keyframes vedPouls { 0%, 100% { box-shadow: 0 0 0 .35rem color-mix(in srgb, var(--c) 45%, transparent), 0 1.2rem 3rem rgba(0, 0, 0, .55); }
+  50% { box-shadow: 0 0 0 1rem color-mix(in srgb, var(--c) 10%, transparent), 0 1.2rem 3rem rgba(0, 0, 0, .55); } }
+.ved-groupe { position: absolute; top: .8rem; left: 1.1rem; font-size: 1.4rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.ved-code { font-size: clamp(4rem, 13vh, 11rem); font-weight: 800; line-height: .9; letter-spacing: .02em; }
+.ved-sens { font-size: 1.7rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; opacity: .9; }
+.ved-gros { margin-top: .4rem; font-size: clamp(2.2rem, 6vh, 4.6rem); font-weight: 800; letter-spacing: .05em; text-transform: uppercase; line-height: 1;
+  background: rgba(0, 0, 0, .78); color: #fff; padding: .35rem 1.2rem; border-radius: .6rem; }
+.ved-sous { font-size: clamp(1.8rem, 5vh, 3.6rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ved-detail { font-size: 1.5rem; font-weight: 700; opacity: .9; }
+/* voie de départ (saisie) en grand sur le carré */
+.ved-voie { display: inline-flex; align-items: baseline; gap: .6rem; margin-top: .3rem; padding: .15rem 1rem; border-radius: .5rem; background: rgba(0, 0, 0, .78); color: #fff;
+  font-size: clamp(2rem, 5.5vh, 4rem); font-weight: 800; letter-spacing: .04em; line-height: 1.1; }
+.ved-voie small { font-size: .45em; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .8; }
+.ved-tuile.fait .ved-gros { background: #0E7A3E; }
+.ved-tuile.urgent .ved-gros { animation: clignRouge 1.1s steps(1, end) infinite; }
+/* plus de 2 carrés : textes un peu plus petits */
+.ved-tuiles[style*="--n:3"] .ved-code, .ved-tuiles[style*="--n:4"] .ved-code { font-size: clamp(3rem, 10vh, 7rem); }
+.ved-tuiles[style*="--n:4"] .ved-gros { font-size: clamp(1.6rem, 4.5vh, 3rem); }
+.ved-plus { flex: none; text-align: center; font-size: 1.3rem; font-weight: 700; color: var(--dim); }
+
+/* ---- rail + train animé (commun) ---- */
+.ved-rail { position: relative; width: 100%; height: 3.2rem; margin-top: .6rem; overflow: hidden; }
+.ved-rail::before { content: ""; position: absolute; left: 0; right: 0; bottom: .25rem; height: .3rem; border-radius: .2rem;
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .55) 0 1.2rem, rgba(0, 0, 0, .25) 1.2rem 1.6rem); }
+.ved-loco { position: absolute; bottom: .35rem; height: 2.7rem; width: auto; fill: rgba(0, 0, 0, .78); color: rgba(0, 0, 0, .78); }
+.ved-loco .vit { fill: rgba(255, 255, 255, .85); }
+/* départ : le train sort par la droite ; arrivée : il entre par la gauche et s'arrête au centre */
+.ved-rail.sort .ved-loco { animation: vedSort 3.2s cubic-bezier(.5, 0, .9, .6) infinite; }
+.ved-rail.entre .ved-loco { animation: vedEntreTrain 3.2s cubic-bezier(.1, .5, .4, 1) infinite; }
+.ved-rail.fini .ved-loco { animation: none; left: calc(50% - 4.7rem); }
+@keyframes vedSort { 0% { left: calc(50% - 4.7rem); } 15% { left: calc(50% - 4.7rem); } 100% { left: 110%; } }
+@keyframes vedEntreTrain { 0% { left: -12rem; } 80%, 100% { left: calc(50% - 4.7rem); } }
+
+/* ---- trains de ligne : bandes ---- */
+.ved-trains { justify-content: stretch; }
+.ved-bandes { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: repeat(var(--n, 1), minmax(0, 1fr)); gap: .6rem; }
+.ved-bande { position: relative; overflow: hidden; border-radius: .8rem; min-height: 0;
+  display: grid; grid-template-columns: 9rem minmax(10rem, auto) minmax(0, 1fr) minmax(16rem, auto) 8rem; align-items: center; gap: 1.2rem; padding: .6rem 1.4rem 2.6rem;
+  background: linear-gradient(90deg, #0B141D, color-mix(in srgb, var(--c) 28%, #0B141D)); border: .25rem solid var(--c);
+  box-shadow: 0 0 0 .3rem color-mix(in srgb, var(--c) 30%, transparent); animation: vedPoulsTrain 2.2s ease-in-out infinite; }
+@keyframes vedPoulsTrain { 50% { box-shadow: 0 0 0 .9rem color-mix(in srgb, var(--c) 6%, transparent); } }
+.ved-b-sens { display: flex; flex-direction: column; align-items: center; font-size: 2.6rem; line-height: 1; color: var(--c); }
+.ved-b-sens b { font-size: 1.3rem; letter-spacing: .12em; text-transform: uppercase; color: var(--encre); }
+.ved-b-id { display: flex; flex-direction: column; line-height: 1; }
+.ved-b-num { font-size: clamp(2.4rem, 6vh, 4.4rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ved-b-ef { font-size: 1.4rem; font-weight: 700; letter-spacing: .1em; color: var(--c); }
+.ved-b-ville { display: flex; flex-direction: column; font-size: clamp(1.8rem, 4.5vh, 3.2rem); font-weight: 800; line-height: 1.05; min-width: 0; overflow-wrap: anywhere; }
+.ved-b-ville small { font-size: 1rem; font-weight: 400; color: var(--dim); letter-spacing: .04em; }
+.ved-b-etat { display: flex; flex-direction: column; align-items: center; gap: .2rem; }
+.ved-b-etat b { font-size: clamp(1.6rem, 4vh, 2.8rem); text-transform: uppercase; letter-spacing: .05em; background: var(--ambre); color: #1a1200; padding: .2rem .9rem; border-radius: .45rem; }
+.ved-b-etat span { font-size: clamp(1.5rem, 3.6vh, 2.4rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ved-bande.fait .ved-b-etat b { background: var(--vert); color: #06210f; }
+.ved-bande.urgent .ved-b-etat b { animation: clignRouge 1.1s steps(1, end) infinite; }
+.ved-b-voie { display: flex; flex-direction: column; align-items: center; font-size: 2.6rem; font-weight: 800; line-height: 1; }
+.ved-b-voie small { font-size: .9rem; font-weight: 400; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+.ved-bande .ved-rail { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; height: 2.4rem; }
+.ved-bande .ved-loco { height: 2rem; fill: var(--c); color: var(--c); }
+.ved-bande .ved-loco .vit { fill: #0B141D; }
+.ved-bande .ved-rail::before { background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--c) 70%, transparent) 0 1.2rem, transparent 1.2rem 1.6rem); }
+
+/* fenêtre d'un groupe « au repos » (pas de navette proche) : colonne étroite, prochaine navette et coupons de demain */
+.nav.repos { opacity: .92; }
+.nav.repos .nav-tete h2 { font-size: 1.25rem; }
+.repos-info { padding: .6rem .9rem; font-size: 1.2rem; color: var(--encre); }
+.repos-info b { color: var(--c); }
+.repos-info small { color: var(--dim); }
+.nav.repos .rots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ved-tuile, .ved-bande, .ved-calque { animation: none; }
+  .ved-rail .ved-loco { animation: none !important; left: calc(50% - 4.7rem); }
+}
+
+/* Carrés en vedette : tout se dimensionne sur la taille du carré (unités de conteneur), rien n'est coupé
+   même à 3 ou 4 carrés, ou quand les trains prennent aussi de la place en bas. */
+.ved-tuile { container-type: size; padding: 3cqh 3cqw 2cqh; gap: .6cqh; }
+.ved-tuile .ved-groupe { font-size: min(1.4rem, 5cqh); top: 2cqh; left: 3cqw; }
+.ved-tuile .ved-code { font-size: min(13vh, 21cqh, 24cqw); }
+.ved-tuile .ved-sens { font-size: min(1.7rem, 5.5cqh, 5cqw); }
+.ved-tuile .ved-gros { font-size: min(4.6rem, 10cqh, 9cqw); margin-top: .5cqh; }
+.ved-tuile .ved-sous { font-size: min(3.6rem, 8cqh, 7cqw); line-height: 1.05; }
+.ved-tuile .ved-voie { font-size: min(4rem, 9cqh, 9cqw); margin-top: .5cqh; }
+.ved-tuile .ved-detail { font-size: min(1.5rem, 4.5cqh, 4.5cqw); }
+.ved-tuile .ved-rail { height: min(3.2rem, 9cqh); margin-top: .5cqh; flex: none; }
+.ved-tuile .ved-loco { height: 80%; }
+.ved-tuiles[style*="--n:3"] .ved-code, .ved-tuiles[style*="--n:4"] .ved-code { font-size: min(10vh, 18cqh, 24cqw); }
+.ved-tuiles[style*="--n:4"] .ved-gros { font-size: min(3rem, 9cqh, 9cqw); }
+
+/* ------------------------------------------------------------- travaux (avis externes) */
+.travaux { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: stretch; background: #2A1A05; color: #FFE7C2; border-top: .12rem solid #F59E0B; }
+.travaux.rouge { border-top-color: #E5251B; }
+.travaux-lib { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 1.15rem; letter-spacing: .12em; text-transform: uppercase; padding: 0 1.1rem; background: #F59E0B; color: #1a1200; }
+.travaux.rouge .travaux-lib { background: #E5251B; color: #fff; }
+.travaux-lib::before { content: "⚠"; font-size: 1.2em; letter-spacing: 0; }
+.travaux-fen { overflow: hidden; white-space: nowrap; display: flex; align-items: center; min-height: 2.5rem; }
+.travaux-txt { display: inline-flex; gap: 2.4rem; padding: .35rem 1rem; white-space: nowrap; }
+.travaux-txt.defile { will-change: transform; animation: defile var(--duree, 20s) linear infinite; padding-left: 0; }
+.tx { display: inline-flex; align-items: center; gap: .6rem; font-weight: 700; font-size: 1.45rem; }
+.tx i { width: 1rem; height: 1rem; border-radius: 50%; background: #F59E0B; box-shadow: 0 0 .6rem #F59E0B; flex: none; }
+.tx.rouge i { background: #FF3B30; box-shadow: 0 0 .7rem #FF3B30; animation: clignTx 1.2s steps(1, end) infinite; }
+.tx.rouge { color: #FFD0CC; }
+.tx em { font-style: normal; font-weight: 400; opacity: .85; }
+@keyframes clignTx { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .travaux-txt.defile { animation: none; white-space: normal; } .tx.rouge i { animation: none; } }
+
+/* ---------- alerte travaux en grand (5 s), style « alerte enlèvement » ---------- */
+.tx-alerte { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 3vh 3vw;
+  background: repeating-linear-gradient(-45deg, #1a1200 0 2.2rem, #F59E0B 2.2rem 4.4rem); animation: txaEntree .35s ease-out; }
+.tx-alerte.rouge { background: repeating-linear-gradient(-45deg, #1a0503 0 2.2rem, #E5251B 2.2rem 4.4rem); }
+.tx-alerte.sortie { animation: txaSortie .6s ease-in forwards; }
+.txa-cadre { width: min(92vw, 110rem); max-height: 94vh; overflow: hidden; background: #0B0F14; color: #fff; border: .6rem solid #F59E0B; border-radius: 1.4rem;
+  box-shadow: 0 0 0 .5rem #0B0F14, 0 2rem 6rem #000c; padding: 3vh 3vw 4vh; text-align: center; display: flex; flex-direction: column; gap: 1.6vh; }
+.tx-alerte.rouge .txa-cadre { border-color: #E5251B; animation: txaCadre 1s steps(1, end) infinite; }
+.txa-tete { align-self: center; display: inline-flex; gap: 1.2rem; align-items: center; padding: .6vh 2.6vw; border-radius: .6rem; background: #F59E0B; color: #1a1200;
+  font-weight: 800; letter-spacing: .2em; text-transform: uppercase; font-size: clamp(1.6rem, 3.4vw, 3.6rem); }
+.tx-alerte.rouge .txa-tete { background: #E5251B; color: #fff; }
+.txa-app { font-weight: 800; font-size: clamp(3rem, 9vw, 10rem); line-height: 1; letter-spacing: -.01em; }
+.txa-etat { align-self: center; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; font-size: clamp(1.6rem, 3.6vw, 4rem); color: #FDBA4D; }
+.tx-alerte.rouge .txa-etat { color: #FF6B5E; }
+.txa-texte { font-size: clamp(1.3rem, 2.6vw, 2.8rem); color: #E7EDF3; }
+.txa-plus { font-size: clamp(1.2rem, 2.2vw, 2.4rem); color: #FFE7C2; }
+.txa-plus b { padding: .1em .6em; border-radius: .4em; background: #F59E0B33; }
+@keyframes txaEntree { from { opacity: 0; transform: scale(1.06); } to { opacity: 1; transform: none; } }
+@keyframes txaSortie { to { opacity: 0; transform: scale(.96); } }
+@keyframes txaCadre { 50% { border-color: #fff; } }
+.tx .tx-cr { font-weight: 700; padding: .05em .55em; border-radius: .4em; background: #F59E0B33; color: #FFE7C2; }
+@media (prefers-reduced-motion: reduce) { .tx-alerte, .tx-alerte.rouge .txa-cadre { animation: none; } }
+
+/* ---------- groupe de navettes terminé pour la journée ---------- */
+.nav.fini-jour { opacity: 1; }
+.fini-badge { color: var(--ce, #fff) !important; font-weight: 800; }
+.fini { margin: .5rem .7rem .7rem; padding: .8rem .9rem .9rem; border-radius: .8rem; background: #45D68B14; border: .12rem solid #45D68B55; }
+.fini-tete { display: flex; align-items: center; gap: .7rem; font-weight: 700; font-size: 1.3rem; color: #CFF5DE; }
+.fini-ok { display: inline-grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; background: var(--vert); color: #06240f; font-size: 1.35rem; font-weight: 800; flex: none; }
+.fini-codes { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .7rem; }
+.fc { display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .65rem .2rem .3rem; border-radius: 999px; background: #0E2A1A; border: .1rem solid #45D68B66; font-weight: 700; font-size: 1.1rem; font-family: var(--mono, ui-monospace, monospace); }
+.fc i { display: inline-grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--vert); color: #06240f; font-style: normal; font-size: .85rem; }
+.fc.sup { background: #2a1210; border-color: #FF6B5E55; color: #f3b2ab; text-decoration: line-through; }
+.fc.sup i { background: var(--rouge); color: #fff; }

@@ -1,813 +1,131 @@
-# 🚄 Suivi Trains — Tableau de bord temps réel
+# Suivi des circulations
 
-Application web (HTML/CSS/JavaScript, sans framework lourd) pour suivre en
-temps réel plusieurs trains : théorique vs réel, écarts calculés
-automatiquement, cause principale du retard façon panneau d'aéroport,
-graphique d'évolution, et installation en PWA sur mobile.
+Application web de saisie et d'affichage des circulations d'un terminal ferroviaire. Elle remplace deux classeurs Excel :
 
-## Sommaire
+- **SAISIE** (`saisie.html`) : poste opérateur. Journal des mouvements, circulations du jour, préparation du lendemain, flash info, mails aux EF, clôture.
+- **ÉCRANS** (`visuel.html`) : affichage plein écran des TV, en lecture seule.
 
-1. [Arborescence du projet](#1-arborescence-du-projet)
-2. [Choix techniques](#2-choix-techniques)
-3. [Lancer le projet en local](#3-lancer-le-projet-en-local)
-4. [Créer le dépôt GitHub](#4-créer-le-dépôt-github)
-5. [Publier sur GitHub Pages](#5-publier-sur-github-pages)
-6. [Connecter Google Sheets](#6-connecter-google-sheets)
-7. [Installer la PWA sur smartphone](#7-installer-la-pwa-sur-smartphone)
-8. [Ajouter / modifier un train](#8-ajouter--modifier-un-train)
-9. [Modifier les 7 étapes](#9-modifier-les-7-étapes)
-10. [Cas particuliers gérés](#10-cas-particuliers-gérés)
-11. [Limites connues](#11-limites-connues)
+Les pages sont publiées par **GitHub Pages**. Les données (journées, planning, paramètres) sont gardées dans le **Google Drive** de l'utilisateur par un petit script **Google Apps Script** (`apps-script/Code.gs`), qui transmet aux écrans les seules informations autorisées à l'affichage.
 
+> Outil d'information d'exploitation : il ne remplace ni les procédures réglementaires de circulation, ni les installations de sécurité.
 
-## Onglet « Plans RFP Le Havre »
-
-Sous l'en-tête, deux onglets : **🚄 Suivi des trains** (le tableau de bord) et
-**🗺️ Plans RFP Le Havre**. Le second charge `plans/index.html`, l'Atlas des
-plans du Réseau Ferré Portuaire : plan général interactif avec les annexes
-placées dessus, recherche (PN, ADV, signaux, km…), vignettes de tous les
-plans et schémas, bibliothèque PDF versionnée et suivi des mises à jour.
-
-- Aucun document HAROPA n'est publié dans ce dépôt (il est public). Les PDF
-  sont importés depuis l'onglet (bouton « Importer des PDF ») : ils sont lus et
-  rangés uniquement dans le navigateur (IndexedDB), rien n'est envoyé sur
-  Internet. Une nouvelle édition d'un document est rattachée à la précédente
-  et ses plans modifiés sont signalés.
-- Chaque poste garde sa propre bibliothèque : importez les PDF sur chaque
-  appareil qui doit afficher les plans.
-- `plans/seed/` est ignoré par git : c'est là qu'irait une base pré-extraite
-  si un jour elle était hébergée ailleurs que sur un dépôt public.
-- Lien direct vers l'onglet : `…/index.html#plans-rfp`.
-
-### Affichage des plans et contacts
-
-- **Plans nets au zoom** : au-delà de la résolution de l'image, la zone
-  visible est redessinée depuis le PDF (vectoriel) à la résolution de
-  l'écran, sur le plan général comme dans la fiche d'un plan. Les plans qui
-  sont des images collées dans le PDF (ex. Port 2000, Zone maritime, ponts)
-  restent limités à la résolution d'origine.
-- **Étiquettes sur les côtés** : sur le plan général, chaque secteur a un
-  point à son emplacement exact et son étiquette rangée dans la marge, reliée
-  par un trait. Le bouton ⇆ repasse aux étiquettes posées sur le plan.
-- **Numéros utiles** (onglet PN, ouvrages & contacts) : chaque contact peut
-  être modifié (nom, fonction, téléphones, e-mail, adresse, note), supprimé
-  (restaurable dans « Supprimés ») ou ajouté à la main. Les contacts sont
-  aussi trouvés par la recherche générale.
-
-### Mises à jour d'un plan (ex. plan mural)
-
-- Une nouvelle édition est rattachée automatiquement à l'ancienne quand elle
-  porte la même référence (ex. DAO-EXP-S2A-N°1), ou à défaut un nom de
-  fichier équivalent (« Plan mural RFP.pdf » et « Plan mural RFP - maj
-  2026.pdf »). Elle devient la version en vigueur et ses changements sont
-  listés dans « Mises à jour ».
-- Sinon : Bibliothèque → « Modifier » sur la version → « Rattacher à » le bon
-  document (n° de version proposé automatiquement). On peut aussi y corriger
-  titre, n° et dates.
-- « Ne garder que la version en vigueur » archive d'un clic les anciennes
-  versions d'un document (elles restent consultables et réactivables).
-- **Plan de référence** : sur la fiche d'un plan, « Utiliser comme plan
-  général » ; ou « Changer » en haut du plan général. Le plan général affiche
-  toujours la version en vigueur de ce document : une mise à jour importée
-  le remplace automatiquement.
-- Les plans d'une seule page et les grands formats (A3 et plus) sont
-  reconnus comme plans.
-
-### Coffre chiffré des plans
-
-- À la première ouverture de l'onglet, on choisit un **mot de passe** (8
-  caractères minimum). Tout ce que l'onglet enregistre dans le navigateur
-  (PDF, images des plans, vignettes, index de recherche, fiches) est chiffré
-  en AES-GCM 256, avec une clé dérivée du mot de passe (PBKDF2-SHA-256,
-  600 000 itérations). La clé reste en mémoire et n'est jamais enregistrée.
-- L'onglet se **verrouille** tout seul après 10 min sans activité (réglable
-  dans Bibliothèque → Coffre chiffré : 5 à 60 min), ou avec le bouton
-  « Verrouiller ».
-- **Mot de passe oublié** : aucune récupération possible. La seule issue est
-  d'effacer le coffre puis de réimporter les PDF ou une base chiffrée.
-- **Partager les plans entre postes** : Bibliothèque → « Exporter la base
-  chiffrée » produit un fichier `.rfpvault` illisible sans mot de passe.
-  - soit on l'importe sur chaque poste (« Importer une base chiffrée ») ;
-  - soit on le dépose dans ce dépôt sous `plans/base.rfpvault` : chaque poste
-    qui déverrouille avec le même mot de passe le charge automatiquement, et
-    une nouvelle base publiée ajoute les nouvelles éditions. Avec un autre
-    mot de passe, un bandeau propose de la charger en saisissant le sien.
-- Le fichier `.rfpvault` peut être public : sans le mot de passe il est
-  inexploitable. Choisissez un mot de passe long et ne le mettez jamais dans
-  le dépôt.
+Aucune donnée de l'entreprise n'est dans ce dépôt : le planning, les voies, la base N° → EF et les destinataires des mails sont importés une fois depuis l'écran Connexion (fichier `donnees-initiales.json`, conservé hors du dépôt).
 
 ---
 
-## 1. Arborescence du projet
+## Installation (une seule fois)
 
-```
-/
-├── index.html                  Page principale (structure du dashboard)
-├── manifest.json                Manifeste PWA (installation mobile)
-├── service-worker.js            Cache hors-ligne (app shell)
-├── css/
-│   ├── style.css                Design system, thèmes clair/sombre, responsive
-│   ├── coupons.css              Écran de saisie des coupons navettes
-│   └── wagons.css               Convertisseur longueur ⇄ wagons 60'/80'
-├── js/
-│   ├── config.js                 Constantes (clés de stockage, seuils, valeurs par défaut)
-│   ├── storage.js                 Persistance localStorage + données de démo
-│   ├── time-utils.js              Parsing d'heures, calcul d'écarts, franchissement de minuit
-│   ├── delay-calc.js              Statut global, cause principale (logique métier pure)
-│   ├── sheets-sync.js             Récupération + fusion des horaires Google Sheets
-│   ├── splitflap.js               Composant panneau à palettes façon aéroport
-│   ├── charts.js                  Graphique théorique/réel en heure absolue (Chart.js)
-│   ├── card.js                    Génération/mise à jour du HTML d'une vignette
-│   ├── stopwatch.js               Chronomètre de pause indépendant (feu tricolore)
-│   ├── coupons.js                 Saisie des coupons navettes + export/import Excel
-│   ├── wagons.js                  Convertisseur longueur ⇄ wagons 60'/80' (types, longueurs, tonnages)
-│   └── app.js                     Orchestrateur : état, événements, modales
-├── apps-script/
-│   └── Code.gs                   Web App Google Apps Script (lecture seule, sans clé API)
-├── data/
-│   └── exemple-google-sheet.csv  Exemple de feuille à importer dans Google Sheets
-├── assets/
-│   └── icons/                    Icônes PWA (générées, voir tools/generate-icons.js)
-├── tools/
-│   ├── generate-icons.js         Script Node pour régénérer les icônes (aucune dépendance)
-│   ├── dev-server.js              Petit serveur statique pour tester en local sans rien installer
-│   └── build-demo.js              Assemble une démo mono-fichier (js/* fusionnés, sans Chart.js/PWA)
-│                                   pratique pour un aperçu rapide en dehors du dépôt
-└── README.md
-```
+### 1. Publier les pages (GitHub Pages)
 
-## 2. Choix techniques
+1. Sur GitHub, dépôt `suivi-circulations` › **Settings** › **Pages**.
+2. **Source** : *Deploy from a branch*, branche **main**, dossier **/ (root)**, puis **Save**.
+3. Une minute plus tard, le site répond à `https://lechatiti76-stack.github.io/suivi-circulations/`.
 
-- **Pas de framework** (React/Vue/etc.) : le besoin (vignettes, formulaires,
-  graphiques) ne le justifie pas et ça garde le projet 100 % statique,
-  donc compatible GitHub Pages sans étape de build.
-- **JavaScript en modules ES** (`type="module"`) : découpage clair
-  (stockage / calculs / rendu / réseau) sans outil de bundling.
-- **Chart.js** (chargé depuis un CDN, mis en cache par le Service Worker
-  pour l'usage hors-ligne) pour les graphiques d'évolution.
-- **localStorage** pour la persistance immédiate ; toute la couche d'accès
-  aux données passe par `js/storage.js`, qui peut être remplacé demain par
-  des appels à une API/BDD sans toucher au reste de l'application.
-- **Google Apps Script en Web App** pour les horaires théoriques : c'est la
-  façon standard de publier un Google Sheet en JSON en lecture seule
-  **sans jamais exposer de clé API côté navigateur** (Apps Script s'exécute
-  sous l'identité du propriétaire de la feuille).
-- **Logique de calcul des écarts séparée du DOM** (`delay-calc.js`,
-  `time-utils.js`) : testable indépendamment, gère le franchissement de
-  minuit et les étapes sans heure théorique.
+### 2. Créer le serveur Google (Apps Script)
 
-## 3. Lancer le projet en local
+1. Aller sur <https://script.google.com> › **Nouveau projet**. Le nommer « Suivi des circulations ».
+2. Remplacer le contenu de `Code.gs` par celui de [`apps-script/Code.gs`](apps-script/Code.gs).
+3. Ligne `const CLE = 'CHANGER-CE-MOT-DE-PASSE';` : mettre un mot de passe de votre choix (lettres et chiffres). Il sera demandé une fois sur le poste de saisie.
+4. **Paramètres du projet** (roue dentée) › fuseau horaire **(GMT+01:00) Paris**.
+5. **Déployer** › **Nouveau déploiement** › type **Application Web** :
+   - *Exécuter en tant que* : **Moi** ;
+   - *Qui a accès* : **Tout le monde**.
+6. **Déployer**, autoriser l'accès demandé (Drive, Sheets, mails), puis copier l'**URL de l'application Web** (elle se termine par `/exec`).
 
-Comme l'app utilise des modules ES (`import`/`export`), elle doit être
-servie via HTTP (pas en ouvrant `index.html` directement en `file://`).
-Le plus simple :
+Au premier appel, le script crée dans votre Drive le dossier **« Suivi des circulations - données »** (journées, planning, archives) et le classeur **« Suivi des circulations - registre »** (onglets Journal, Mails, Statistiques).
 
-```bash
-cd train-tracker
-node tools/dev-server.js 8080
-```
+### 3. Connecter la saisie
 
-(alternative sans rien installer, un simple serveur statique maison) ou,
-si vous avez déjà les outils correspondants :
+1. Ouvrir `https://lechatiti76-stack.github.io/suivi-circulations/saisie.html`.
+2. La fenêtre **Connexion** s'ouvre : coller l'URL `/exec`, la clé, puis **Tester la connexion**.
+3. **Données initiales** : choisir `donnees-initiales.json` puis **Importer**. La page se recharge avec le planning du jour.
+4. Recopier le **lien des écrans** affiché dans cette même fenêtre.
 
-```bash
-npx serve .
-# ou
-python -m http.server 8080
-```
+### 4. Les deux applications (ou raccourcis)
 
-Puis ouvrez `http://localhost:8080`.
+**Application sur le bureau (recommandé, comme le Suivi trains)** : dans la saisie, bouton **⬇ Installer l'application** (ou **Raccourcis ⬇** › « Installer l'application Saisie »). Pour le PC des TV : **Raccourcis ⬇** › « Ouvrir la page Écrans pour l'installer », puis **Installer l'application** sur cette page (à faire sur le PC des TV). Chaque application a son icône sur le bureau et dans le menu Démarrer, et s'ouvre sur une courte animation, des lettres qui tombent en cascade et forment le titre (« Passer » ou une touche pour l'écourter ; pas d'animation après une mise à jour automatique). L'application Écrans retient l'adresse du serveur ; F11 pour le plein écran si besoin.
 
-## 4. Créer le dépôt GitHub
+**Ou des raccourcis .bat** (bouton **Raccourcis ⬇**, déjà remplis avec l'adresse du serveur) :
 
-```bash
-cd train-tracker
-git init
-git add .
-git commit -m "Première version : suivi trains temps réel"
-git branch -M main
-git remote add origin https://github.com/<votre-utilisateur>/<nom-du-repo>.git
-git push -u origin main
-```
+| Poste | Fichier | Réglage |
+|---|---|---|
+| Poste de saisie | [`raccourcis/Saisie.bat`](raccourcis/Saisie.bat) | aucun |
+| PC des TV | [`raccourcis/Ecrans.bat`](raccourcis/Ecrans.bat) | remplacer `COLLER-ICI-L-ADRESSE-EXEC` par l'URL `/exec` |
 
-(Créez d'abord le dépôt vide sur github.com si ce n'est pas déjà fait,
-via "New repository".)
+Copier chaque fichier sur le bureau du poste concerné. `Ecrans.bat` ouvre la page en plein écran (Alt+F4 pour quitter). Pour un démarrage automatique, placer aussi le raccourci dans le dossier ouvert par Windows+R › `shell:startup`.
 
-## 5. Publier sur GitHub Pages
+---
 
-1. Sur GitHub, ouvrez **Settings → Pages** du dépôt.
-2. Dans "Build and deployment", choisissez **Source : Deploy from a branch**.
-3. Branche : `main`, dossier : `/ (root)`.
-4. Enregistrez. L'URL publique apparaît sous la forme
-   `https://<votre-utilisateur>.github.io/<nom-du-repo>/`.
-5. Le manifeste et le service worker utilisent des chemins **relatifs**
-   (`./...`), donc l'app fonctionne aussi bien à la racine d'un domaine que
-   dans un sous-dossier de type Pages — aucune adaptation nécessaire.
+## Utilisation
 
-## 6. Connecter Google Sheets
+- **N° train** : dès les premières lettres, une liste propose les numéros du jour (avec leur circulation), les mouvements internes et la base N° → EF (« loc » → locom, loco, locosup…) ; ↓ ↑ pour choisir, Entrée pour prendre. L'EF se remplit d'après la base N° → EF (Paramètres). Une EF corrigée à la main peut y être ajoutée d'un clic.
+- **Entrée** passe au champ suivant (voie, wagons, chargés/vides, situation, vers, commentaire) jusqu'à **Valider** ; un champ obligatoire vide bloque le passage. **Ctrl+Entrée** enregistre directement. La voie de destination est obligatoire pour les locomotives et manœuvres (réglable).
+- **Tableau de droite** : heure, HLR, wagons et voie de chaque navette ou train se modifient sur place et s'affichent sur les écrans. **Garder pour tous les lundis** (selon le jour) les reprend automatiquement les semaines suivantes. L'onglet **Demain** prépare le lendemain.
+- **Tableau de droite** : chaque groupe a sa couleur (TDF orange, TN bleu, ATL jaune, Naviland violet, Ferovergne vert…). Dans **Navettes** et **Trains de ligne**, on choisit le groupe (TDF, TN, ATL, ou l'EF du train, ou Tous) puis **Départs** ou **Arrivées** (ou Tous) : seules ces lignes s'affichent, et le badge de chaque bouton compte ce qui reste à faire (en rouge s'il y a un retard). Le choix est gardé sur le poste. Pas de HLR pour les arrivées. Onglets **Demain** et **après-demain** (ex. « Mercredi 28 ») : la préparation d'après-demain devient celle de demain le jour suivant, et les deux s'affichent sur les écrans sous « Prochaines navettes ».
+- **Arrivées de trains** : **FA** (arrivé au faisceau, pas encore chez nous), **Déjà là** (déjà chez nous), **En approche** (parti de FA vers chez nous ; délai du Suivi trains), **Arrivée** (chez nous). **Navettes** : **Partie** quand la navette quitte son terminal (les écrans suivent ses points de passage), puis **Arrivée**. **Départs** : **Parti**. **Non prévue** retire la circulation des écrans (Rétablir pour la remettre). **F2** : arrivé ou parti maintenant pour le numéro tapé.
+- **Journal des mouvements** : une Arrivée ou un Parti (saisi ici ou venu du Suivi trains) ajoute la ligne automatiquement (numéro, EF, voie et wagons prévus), en couleur ; « Annuler » la retire. Les boutons **Réel**, **Modifier** et **Suppr.** restent collés au bord droit du journal, même sur un petit écran.
+- **Plusieurs fenêtres de saisie** ouvertes en même temps (deux PC, ou l'application et un onglet) : chaque fenêtre relit la journée avant de republier l'affichage ; une fenêtre restée en arrière ne remet plus une navette « pas partie » sur les écrans et dans le Suivi trains.
+- **Planning** (aussi depuis Paramètres) : jours de circulation de chaque train et navette, et sous chaque ligne le **n° ou sillon par jour** (vide = n° habituel).
+- La saisie et les écrans se rechargent seuls quand une nouvelle version est publiée (pas pendant une saisie en cours).
+- **Suivi trains** (Paramètres) : avec l'adresse du classeur Google de l'application Suivi trains, la saisie le lit toutes les 10 secondes (délai complet jusqu'aux écrans : 10 à 20 secondes, serveur 2.3.0 ou plus récent). Navette validée (FL1…) → en route sur les écrans ; arrivée, tableau des départs (LF1…), arrivées fret et « Départ pour la ligne » → heure réelle ; étapes d'un train (mise en tête…) → déroulé du départ et état sur les écrans. Une correction faite dans la saisie reste tant que le Suivi trains n'envoie pas une nouvelle heure. Le classeur doit être dans le même compte Google que ce serveur (ou lui être partagé). Les durées de trajet et points de passage se règlent dans Paramètres. **Temps d'arrivée des trains de ligne** (Paramètres) : minutes entre « En approche » et l'arrivée, par train (BDX, VNX…), à régler comme dans le Suivi trains (vide = 180 min).
+- **Écrans** : sur les trains de ligne, le nom de l'EF est à sa couleur (Naviland violet clair, Ferovergne vert, les autres bleu clair). L'état des **départs et des arrivées de trains** s'affiche en lettres à volets sur fond noir, comme dans un aéroport (Prévu blanc, Dans 12 min jaune, en approche bleu, Retard rouge, Parti vert, Supprimé rouge…) ; les lettres tournent quand l'état change, un peu plus lentement pour les arrivées. Une heure prévue est affichée, l'heure réelle est dans l'état (« Parti 10:02 », « Arrivée 10:42 »). À **5 minutes ou moins**, l'état clignote en rouge. Les voies multiples (VR5+VF3) s'écrivent sur deux lignes ; une voie encore trop longue est resserrée ou défile sans repartir de zéro. Un train déclaré **⛔ calé** dans le Suivi trains s'affiche en priorité (« Calé à 08:41 », dernière étape en dessous). Les villes des trains de ligne (« En provenance de… / À destination de… ») se règlent dans Paramètres › Écrans. L'onglet **Demain** de la saisie a un texte libre par groupe de navettes, affiché sous « Prochaines navettes ».
+- **Dans l'autre sens**, le Suivi trains relit toutes les 20 secondes ce que reçoivent les écrans (adresse `/exec` à mettre dans ses Réglages, sans clé) : une navette marquée **Partie**, **Parti** ou **Arrivée** dans la saisie, ou une arrivée fret, y apparaît automatiquement.
+- **Mails** : livrés en mode **Simulation** (rien ne part, chaque mail est noté dans l'onglet Mails du registre). En mode Brouillon ou Automatique, ils partent du compte Google qui a déployé le script. Les adresses se règlent dans Paramètres › Mails : une ligne par EF pour les trains de ligne, une ligne par groupe pour les navettes, plus la copie cachée des trains et la copie des navettes.
+- **Statistiques** : LHTE (locom, loco), locosup et manœuvres NRS, chacun en HLP ou chargé, le matin, l'après-midi et sur la journée (coupure réglable dans Paramètres).
+- **Clôturer** : archives CSV dans Drive › archives › année, ligne ajoutée à l'onglet Statistiques du registre (les colonnes NRS sont ajoutées en fin de ligne, serveur 2.3.0).
 
-Aucune clé API n'est jamais placée dans le code : on passe par un petit
-script serveur (Google Apps Script). Ce Web App fait maintenant deux choses
-avec la même URL :
-- **lecture** (comme avant) : horaires théoriques depuis l'onglet `Horaires` ;
-- **écriture** (nouveau) : chaque heure réelle enregistrée/corrigée/
-  réinitialisée dans l'app est automatiquement envoyée vers un onglet
-  `Journal` séparé (heures de train), créé automatiquement, et un onglet
-  `Navettes` séparé (navettes internes, tableau rapide des départs
-  LF/LN/LA, et arrivées) — l'onglet `Horaires` n'est jamais modifié par ces
-  envois.
+## Écrans dynamiques (vedettes) et démonstration
 
-### 6.1. Préparer la feuille
+- **Navettes et trains en vedette**, seulement sur des événements réels (jamais sur l'heure théorique) :
+  - **arrivées** (navettes et trains) : quand elles sont **en route** (Partie / En approche) puis dans les 5 dernières minutes avant l'arrivée estimée, jusqu'à l'arrivée ;
+  - **départ d'un train** : « Départ imminent » dès que **Annoncé Bon au départ** est validé dans le Suivi trains ;
+  - **départ d'une navette** : « Départ imminent » dès le bouton **▲** de la saisie (sur la ligne de départ de la navette ; un second clic retire l'annonce) ;
+  - une fois **Parti**, « ✓ Partie » 10 secondes puis retour à l'écran principal.
+  Le carré de la navette (couleur du groupe) prend toute la partie haute, avec la **voie de départ saisie** en grand ; les trains ont une bande animée en bas. Plusieurs en même temps se partagent la place.
+- **2 ou 3 fenêtres** : un groupe sans navette dans les 3 prochaines heures passe en colonne étroite (prochaine navette du jour + Prochaines navettes de demain et après-demain). Le matin, TDF et TN en grand ; ATL revient en grand quand sa navette approche.
+- Réglages dans l'adresse de la page Écrans : `avant=5` (minutes avant l'arrivée estimée), `apres=1` (minutes après une arrivée), `apresDepart=10` (secondes après un départ), `garde=5` (secondes minimum d'affichage en grand d'une arrivée/départ validé avant le retour au tableau), `horizon=180` (minutes), `groupes=tous` (toujours 3 fenêtres), `vedette=0` (désactiver). Exemple : `visuel.html?source=…&avant=4&apres=2`.
+- **Démonstration** (sans serveur) : `https://lechatiti76-stack.github.io/suivi-circulations/visuel.html?demo=1` : une journée simulée qui tourne en boucle toutes les 7 minutes (départs simultanés LF1 + LN1, arrivées, train qui arrive pendant qu'un autre part, ATL qui passe de la petite colonne à la grande fenêtre).
 
-1. Créez un Google Sheet avec un onglet nommé **`Horaires`**.
-2. Première ligne = en-têtes : `Train | Étape | Heure théorique | Cause | Jours de circulation`
-3. Importez ou recopiez le contenu de [`data/exemple-google-sheet.csv`](data/exemple-google-sheet.csv)
-   pour voir un exemple fonctionnel (`Fichier → Importer` dans Google Sheets).
-4. Le libellé de la colonne **Étape** doit correspondre exactement aux
-   libellés configurés côté app (par défaut : `Départ FA / Titoir-Fosse`,
-   `Arrivée LHTE`, `Mise en tête`, `Annoncé Bon au départ`, `Retour du
-   régulateur`, `Ouverture du signal`, `Départ pour la ligne` — voir
-   [section 9](#9-modifier-les-7-étapes)).
-5. **Jours de circulation** : le planning est basé sur des jours de la
-   semaine récurrents, pas sur une date précise — un sillon n'a besoin
-   d'être saisi qu'une seule fois, pas rejoué chaque jour. Écrivez les jours
-   séparés par une virgule, en français, complets ou abrégés (3 lettres
-   suffisent) : `Mardi,Jeudi`, `Lundi,Mercredi,Vendredi`, ou `Tous les
-   jours` pour un service quotidien. Toutes les lignes d'un même sillon
-   (même numéro de train) doivent avoir les mêmes jours.
+## Coupons navettes (repris du Suivi trains)
 
-### 6.2. Déployer le Web App
+- Les coupons saisis dans le Suivi trains (bouton 🎫 Coupons) partent dans l'onglet **Coupons** de son classeur (adresse du Web App dans les Réglages du Suivi trains, `apps-script/Code.gs` du Suivi trains à redéployer).
+- La saisie les relit avec le reste toutes les 10 secondes (serveur 2.4.0) : bouton **🎫 Coupons** (aujourd'hui et demain, par site et par navette, totaux de wagons) et pastille « 🎫 2 · 22 wg » sous chaque départ de navette concerné. Lecture seule : les coupons se saisissent dans le Suivi trains.
 
-1. Dans le Google Sheet : **Extensions → Apps Script**.
-2. Supprimez le contenu par défaut et collez celui de
-   [`apps-script/Code.gs`](apps-script/Code.gs).
-3. Enregistrez le projet Apps Script (nommez-le par exemple "Suivi Trains API").
-4. Cliquez sur **Déployer → Nouveau déploiement**.
-5. Type : **Application Web**.
-6. "Exécuter en tant que" : **Moi**.
-7. "Qui a accès" : **Tout le monde** (l'écriture n'expose que le journal des
-   heures réelles, sans clé API ni donnée d'authentification ; si besoin
-   d'un accès plus restreint, changez cette option, mais l'app devra alors
-   être utilisée par des comptes Google autorisés).
-8. Cliquez sur **Déployer**, autorisez les permissions demandées, puis
-   copiez l'**URL du Web App** (se termine par `/exec`).
+## Voie, wagons et annonce depuis le Suivi trains
 
-**Important — mises à jour de `Code.gs`** : après toute modification de ce
-fichier (dans l'éditeur Apps Script), un simple enregistrement ne suffit
-pas. Il faut créer une **nouvelle version** du déploiement : **Déployer →
-Gérer les déploiements → ✎ (crayon) → Version : "Nouvelle version" →
-Déployer**. L'URL `/exec` ne change pas.
+- Dans le Suivi trains, chaque arrivée/départ de navette et chaque train (fenêtre Composition) a les champs **Voie** et **Wagons**. Ils remplissent la voie et le nombre de wagons du tableau de droite de la saisie (lecture toutes les 4 s). Une correction faite dans la saisie reste prioritaire tant que le Suivi trains ne change pas la valeur.
+- Le **▲** d'une case « Départs navettes » du Suivi trains annonce le départ : ▲ allumé dans la saisie et « Départ imminent » sur les écrans, avant la validation du départ.
+- Rafraîchissement : écrans toutes les 2 s ; délai saisie → écran d'environ 1 à 3 s (aller-retour Google).
 
-Optionnel : dans l'éditeur Apps Script, sélectionnez la fonction
-`setupSheets` dans le menu déroulant en haut puis cliquez sur **▶
-Exécuter** (autorisez les permissions demandées) pour créer les onglets
-`Journal` et `Navettes` à l'avance — sinon ils se créent tout seuls dès le
-premier envoi depuis l'app.
+## Travaux (avis envoyés par un autre service)
 
-**Si vous avez déjà déployé une version précédente de `Code.gs`** (avant
-l'onglet `Navettes`) : recollez le contenu à jour de
-[`apps-script/Code.gs`](apps-script/Code.gs) dans l'éditeur Apps Script,
-puis créez une **nouvelle version** du déploiement (voir l'avertissement en
-gras ci-dessus) — sans cette étape, les navettes/arrivées/quickboard ne
-seront jamais envoyées, même si l'app affiche l'envoi comme réussi côté
-Journal des trains.
+1. Saisie › **Paramètres › Travaux** : cliquez **Générer** (clé d'envoi), vérifiez la liste des appareils (`CODE | Libellé | alias`) et les phrases orange / rouge (`{appareil}` est remplacé par le libellé), puis **Enregistrer**.
+2. Donnez à l'autre service l'**Adresse d'envoi** affichée (`…/exec?travaux=CLÉ`). C'est vous qui donnez la clé ; il n'a rien à vous transmettre. Ce n'est pas le mot de passe de la saisie : vous pouvez la changer à tout moment (Générer + Enregistrer) pour couper l'accès.
+3. Il envoie une requête **POST** à cette adresse avec `{"appareil":"RMG4","couleur":"orange","message":"graissage"}` (message facultatif). Couleurs : `orange` = maintenance, `rouge` = hors service, `vert` (ou `fin`) = fin de l'avis.
+   - Depuis **Notion** : base « Appareils » avec une propriété titre (nom de l'appareil) et une propriété Sélection/Statut « Couleur » (orange / rouge / vert) ; automatisation « Quand Couleur change → Envoyer un webhook » vers l'adresse d'envoi, en cochant ces propriétés.
+4. Un **nouvel avis** s'affiche d'abord **en grand sur les écrans pendant 5 secondes** (« Alerte travaux », réglable avec `&alerteTravaux=8` dans l'adresse des écrans, `0` pour désactiver), puis reste en bandeau **Travaux** en bas des écrans (rouge en premier) et dans la saisie (bouton Retirer). Boutons d'essai dans Paramètres. Historique dans l'onglet **Travaux** du classeur.
+5. **Créneau** (facultatif) : champ `"creneau"` du message, ou propriété Notion **Créneau** / **Durée** / **Période** (texte, sélection ou date avec heure de début et de fin). Exemples : `Journée`, `Demi-journée matin`, `8h-12h`, `de 13h30 à 17h`, `jusqu'à 16h`. Il s'affiche à côté de la phrase ; avec une heure de fin (ou « Journée » = jusqu'à minuit), l'avis disparaît tout seul à cette heure. Exemple : `{"appareil":"RMG4","couleur":"orange","creneau":"8h-12h"}`.
 
-### 6.3. Renseigner l'URL dans l'application
+## Flash info
 
-1. Ouvrez l'application, cliquez sur **⚙ Réglages**.
-2. Collez l'URL dans "URL du Web App Google Apps Script".
-3. Cliquez sur **↻ Relire les horaires** pour vérifier la lecture, puis
-   **Enregistrer**.
-4. Le bouton **↥ Renvoyer aujourd'hui vers Sheets** envoie manuellement
-   toutes les heures déjà enregistrées aujourd'hui — utile pour rattraper un
-   envoi qui aurait échoué (pas de réseau au moment de la saisie, etc.), les
-   envois automatiques à chaque enregistrement suffisant sinon.
+- Bouton **Flash info** : phrases toutes prêtes (un clic), **complément** ajouté à la suite (ex. « Défaillance des installations de sécurité » + « ADV 5011 »), créneau **De / Jusqu'à** (boutons rapides 6h–13h30, 13h30–21h, 8h–12h, 1 h, 2 h…). Le flash ne passe sur les écrans que pendant le créneau ; « Indiquer le créneau dans le texte » ajoute « — de 8h à 12h ». « Afficher sur les écrans » est coché d'office. Aperçu en bas de la fenêtre.
+- La liste des phrases se modifie dans **Paramètres › Écrans et fichiers** (une par ligne).
 
-L'URL est stockée dans le navigateur de chaque utilisateur (localStorage).
-Pour qu'elle soit préconfigurée pour tout le monde sans passer par les
-Réglages, vous pouvez aussi la coder en dur dans
-`js/config.js` → `DEFAULT_SETTINGS.sheetsWebAppUrl` avant de publier.
+## Saisie rapide et jours préparés
 
-Si le Sheet est injoignable (pas de réseau, mauvaise URL, quota Apps
-Script dépassé...), l'application affiche un indicateur d'erreur discret
-dans l'en-tête et continue de fonctionner avec les données déjà en local —
-elle ne plante jamais. Un envoi vers le Journal qui échoue reste silencieux
-(pas de heurtoir dans l'usage quotidien) : rattrapez-le avec **↥ Renvoyer
-aujourd'hui vers Sheets**.
+- Champ **Wagons** : taper `h` écrit aussitôt **HLP**.
+- Onglets **Demain / Après-demain** : sans samedi ni dimanche (le vendredi : **Lundi** et **Mardi** ; une préparation faite le vendredi est reprise le lundi). Réglage dans **Paramètres › Exploitation**. Les écrans (Prochaines navettes) et les coupons « demain » suivent.
+- Écrans : un groupe dont **toutes les navettes du jour sont faites** passe 1 minute après en petite colonne « ✓ Terminé pour la journée » avec ses navettes cochées en vert (`&fini=30` pour régler le délai en secondes).
 
-**"↥ Renvoyer aujourd'hui vers Sheets" annonce des envois réussis mais rien
-n'apparaît dans l'onglet Journal ?** C'est presque toujours le signe que la
-**nouvelle version du déploiement** n'a pas été créée après avoir collé un
-`Code.gs` à jour dans l'éditeur Apps Script (voir l'avertissement en gras à
-l'étape 8 de la section 6.2 ci-dessus) : le Web App en ligne exécute alors
-encore l'ancien code, sans `doPost`, et répond par une page d'erreur HTML
-plutôt que par du JSON. Depuis cette mise à jour, l'application détecte ce
-cas précis et affiche un message explicite ("créez une NOUVELLE VERSION du
-déploiement...") au lieu de compter ça comme un envoi réussi. Pour corriger :
-dans l'éditeur Apps Script, **Déployer → Gérer les déploiements → ✎ →
-Version : "Nouvelle version" → Déployer**, puis réessayez.
+## Modifier l'application
 
-### 6.4. Remplissage automatique des 7 heures depuis "l'heure du sillon"
+- **Pages** (`*.html`, `*.js`, `*.css`) : modifier sur GitHub et valider ; le site est à jour une minute plus tard. Recharger les pages avec Ctrl+F5.
+- **Serveur** (`Code.gs`) : après modification dans Apps Script, **Déployer** › **Gérer les déploiements** › crayon › **Version : nouvelle version** › **Déployer**. L'URL `/exec` ne change pas.
+- **Tests** : `node tests/test-apps-script.js` teste le serveur sur un simulateur des services Google. `node tests/serveur-simule.js` lance une démonstration locale complète (pages + serveur simulé).
 
-Chaque vignette a un champ **"Heure du sillon (départ pour la ligne + 15
-min)"** juste sous son en-tête. C'est un calcul 100 % local (aucun appel
-réseau) qui évite de ressaisir les 7 horaires théoriques à la main :
+## Limites
 
-1. Tapez l'heure du sillon et cliquez sur **⚡ Remplir les 7 heures** (ou
-   appuyez sur Entrée).
-2. L'application calcule automatiquement l'heure théorique des 7 étapes à
-   partir de cette seule valeur, selon un enchaînement fixe :
-
-   | Étape                     | Décalage vs heure du sillon |
-   | ------------------------- | ---------------------------: |
-   | Départ FA / Titoir-Fosse  | -87 min |
-   | Arrivée LHTE               | -72 min |
-   | Mise en tête                | -67 min |
-   | Annoncé Bon au départ      | -22 min |
-   | Retour du régulateur        | -19 min |
-   | Ouverture du signal          | -17 min |
-   | Départ pour la ligne          | -15 min |
-
-   Valeurs vérifiées à partir de la séquence réelle (16:36 → 16:51 → 16:56
-   → 17:41 → 17:44 → 17:46 → 17:48 → 18:03 = sillon).
-
-3. Les heures **réelles déjà enregistrées ne sont jamais touchées** — seul
-   le théorique change, donc les écarts et le graphique se recalculent en
-   conséquence.
-4. **Cas particuliers** : rien n'empêche de corriger ensuite une étape à la
-   main via **"Modifier"** si un train a besoin d'un enchaînement différent
-   ce jour-là — le remplissage automatique est un point de départ, pas une
-   contrainte figée.
-
-**Si les horaires calculés ne correspondent pas à la réalité du terrain**,
-pas besoin de toucher au code : ouvrez **⚙ Réglages**, section "Décalages
-du bouton ⚡ Remplir les 7 heures" — un champ par étape, en minutes,
-directement modifiable et sauvegardé pour toutes les vignettes. Les
-décalages sont alignés par **position** sur les 7 étapes, pas par nom : si
-vous renommez une étape, gardez le même ordre. Le bouton **"↺
-Réinitialiser aux valeurs par défaut"** juste en dessous remet les 7
-champs aux valeurs ci-dessus (celles de l'application) — pensez à cliquer
-ensuite sur **"Enregistrer"** pour les appliquer.
-
-### 6.5. Lien avec le Suivi des circulations
-
-Les deux applications se tiennent à jour l'une l'autre, en moins d'une
-minute :
-
-- **Suivi trains → Suivi des circulations** : chaque départ, arrivée ou
-  effacement de navette, du tableau rapide des départs et des arrivées fret
-  part dans l'onglet "Navettes" du Sheet ; la saisie du suivi des
-  circulations le relit (adresse du Sheet dans ses Paramètres).
-- **Suivi des circulations → Suivi trains** : dans **⚙ Réglages**, collez
-  l'adresse `/exec` du serveur « Suivi des circulations » (lecture seule,
-  sans clé). Toutes les 20 secondes, les navettes marquées partie / parti /
-  arrivée dans la saisie et les arrivées fret (Vénissieux, SPCO, Bordeaux,
-  Vierzon, Clermont) sont reportées ici. Rien n'est renvoyé au Sheet pour
-  ces reports (la saisie les a déjà).
-- **Le dernier changement gagne** : une heure n'est reportée que si elle
-  est nouvelle ou a changé dans l'autre application ; une correction faite
-  ici reste donc tant que la saisie n'envoie pas une nouvelle heure.
-
-## 7. Installer la PWA sur smartphone
-
-### Android (Chrome)
-
-1. Ouvrez l'URL GitHub Pages de l'application dans Chrome.
-2. Un bouton **"Installer l'app"** apparaît dans l'en-tête dès que le
-   navigateur juge l'app installable (sinon : menu ⋮ → "Installer
-   l'application" / "Ajouter à l'écran d'accueil").
-
-### iPhone / iPad (Safari)
-
-iOS n'affiche pas de bouton d'installation automatique : il faut passer par
-le menu de partage.
-
-1. Ouvrez l'URL dans **Safari** (pas Chrome iOS).
-2. Appuyez sur l'icône Partager (carré avec une flèche).
-3. Choisissez **"Sur l'écran d'accueil"**.
-4. L'application s'ouvre ensuite en plein écran, comme une app native.
-
-## 8. Ajouter / modifier un train
-
-- **Ajouter** : bouton **"+ Ajouter un train"** en haut à droite → renseignez
-  le numéro, la date de circulation, et pour chaque étape le libellé,
-  l'heure théorique et une cause optionnelle. Le bouton **💡** à côté du
-  champ Cause suggère un texte à partir du libellé de l'étape (ex : "Arrivée
-  LHTE" → "arrivée tardif", "Mise en tête" → "mise en tête tardif") — c'est
-  une suggestion, pas une valeur imposée : le champ reste 100 % modifiable
-  avant ou après avoir cliqué.
-- **Un train qui circule sur plusieurs dates précises** : dans le formulaire
-  d'ajout, cliquez **"+ Ajouter une autre date de circulation"** autant de
-  fois que nécessaire. Une vignette indépendante est créée par date (chacune
-  garde ses propres heures réelles). Pour un train qui circule chaque
-  semaine les mêmes jours, préférez plutôt la synchronisation Google Sheets
-  avec la colonne "Jours de circulation" (section 6.1) — plus adapté à un
-  service récurrent.
-- **Modifier** : bouton **"Modifier"** sur la vignette du train. Les heures
-  réelles déjà enregistrées ne sont jamais touchées par ce formulaire —
-  seules les infos générales (numéro, date, libellés, heures théoriques,
-  causes) sont modifiées ici. Ne modifie qu'une seule vignette à la fois
-  (pas de "date multiple" en édition).
-- **Supprimer** : bouton **✕** sur la vignette (confirmation demandée).
-- **Réinitialiser toutes les heures** : bouton **"↺ Réinitialiser les
-  heures"** dans le pied de la vignette — efface en un clic les 7 heures
-  réelles enregistrées (confirmation demandée), sans toucher aux horaires
-  théoriques. Pour ne réinitialiser qu'une seule étape, utilisez plutôt
-  l'icône ↺ à côté de cette étape.
-- **Réorganiser** : boutons **◀ ▶** dans le pied de la vignette (fonctionne
-  partout, y compris tactile) ; sur ordinateur, on peut aussi glisser une
-  vignette par sa poignée **⠿**.
-- Par défaut, l'app crée 3 trains de démonstration au tout premier
-  lancement (une seule fois) pour montrer un tableau de bord déjà rempli.
-
-### 8.1. Voir tous les trains enregistrés (calendrier / vue globale)
-
-Le tableau de bord n'affiche que les trains **de la date du jour**. Pour
-voir tous les trains déjà enregistrés, quelle que soit leur date (passée
-ou à venir — par exemple un train ajouté pour lundi prochain), cliquez sur
-**"📅 Calendrier"** dans l'en-tête. Chaque date apparaît avec son nombre de
-trains ; cliquez dessus pour voir le détail (statut, cause principale,
-écart max) en lecture seule. Aucune donnée n'est jamais supprimée par le
-changement de date — cette vue permet justement de les retrouver.
-
-### 8.2. Chronomètre de pause
-
-Un chronomètre indépendant (pas lié à un train en particulier) est affiché
-en permanence sous l'en-tête, pour mesurer un temps de pause/arrêt :
-
-- **▶ Démarrer** lance le décompte, **⏸ Arrêter** le met en pause (un
-  nouveau **Démarrer** reprend où il s'était arrêté), **↺ Réinitialiser**
-  remet à zéro (confirmation demandée si un temps est en cours).
-- Un indicateur façon **feu tricolore** s'allume selon le temps écoulé :
-  **rouge** de 0 à 15 min, **orange** de 15 à 20 min, **vert** au-delà de
-  20 min.
-- L'état survit à un rechargement accidentel de la page (sauvegardé dans le
-  navigateur), mais se **remet automatiquement à zéro chaque jour** — pas
-  besoin de cliquer sur "Réinitialiser" en arrivant le matin, ni de le faire
-  manuellement en fin de journée. Ça fonctionne aussi bien après une
-  fermeture du navigateur (rechargement le lendemain) que si l'appareil
-  reste allumé et affiché toute la nuit (vérifié en direct, sans avoir à
-  recharger la page).
-
-### 8.3. Navettes internes
-
-Une rangée de vignettes cliquables pour les navettes internes est affichée
-sous le chronomètre, groupées par couleur de cadre :
-
-| Groupe | Lignes | Couleur | Arrivée = départ + |
-| ------ | ------ | ------- | ------------------: |
-| FL | FL1, FL2, FL3 | orange | 35 min |
-| NL | NL1, NL2 | bleu foncé | 35 min |
-| AL | AL1, AL2 | jaune | 35 min |
-
-Cliquez sur une navette pour ouvrir une fenêtre où saisir son **heure de
-départ du Terminal** — le bouton **"Maintenant"** capture directement
-l'heure actuelle en un clic. L'heure d'arrivée estimée se calcule et
-s'affiche immédiatement (et se met à jour en direct pendant la saisie),
-avec en dessous la liste des **passages intermédiaires** (calculés depuis
-l'heure de départ) :
-
-| Groupe | Passages |
-| ------ | -------- |
-| FL, NL | Départ FS (+2 min) · CV 1474 (+5) · Entrée GB (+15) · Sortie GB (+23) |
-| AL | Départ Maritime (+2) · Départ 4R (+5) · Pont rouge (+15) · Point X (+20) · passage FA (+25) |
-
-**Progression en temps réel** : dès que le départ est validé, la vignette
-n'affiche plus directement "en approche"/"arrivée" — elle traverse
-automatiquement les passages intermédiaires ci-dessus au fil du temps
-écoulé depuis le départ, puis clignote en rouge à l'approche de l'arrivée.
-Exemple concret (famille FL, départ validé à 10:19) :
-
-| Heure | Aspect de la vignette |
-| ----- | ---------------------- |
-| 10:19 – 10:20 | "Partie du Terminal" |
-| 10:21 | "Départ FS" (passage à +2 min) |
-| 10:24 | "CV 1474" (+5 min) |
-| 10:34 | "Entrée GB" (+15 min) |
-| 10:42 | "Sortie GB" (+23 min) |
-| à partir de 10:44 | cadre rouge **clignotant** + "⚠ Arrivée imminente" (10 min avant l'arrivée estimée à 10:54) |
-| à partir de 10:54 | grisée + "Arrivée effectuée" (reste cliquable pour saisir le prochain départ) |
-
-Recalculé en direct toutes les 15 secondes, sans avoir à recharger la page.
-
-Un bouton **"Effacer"** réinitialise cette navette manuellement à tout
-moment. En plus de ça, **toutes** les navettes (départ, arrivée manuelle,
-retard signalé) se **remettent à zéro automatiquement chaque jour** — le
-départ saisi hier n'a plus de sens aujourd'hui, pas besoin de cliquer sur
-"Effacer" navette par navette en arrivant. Comme le chronomètre de pause,
-ça fonctionne après une fermeture du navigateur ou en direct si l'appareil
-reste allumé pendant le changement de jour.
-
-**Réglages FL/NL/AL** : les horaires de FL, NL et AL sont identiques par
-défaut, mais s'ajustent **indépendamment** dans **⚙ Réglages → Navettes** —
-un bloc par famille avec : le décalage d'arrivée (départ + X min), le
-**seuil de clignotement** (nombre de minutes avant l'arrivée à partir
-duquel ça clignote — 10 min par défaut, comme dans l'exemple ci-dessus), et
-la liste des passages intermédiaires (ajout/suppression/renommage). Ça
-s'enregistre pour toutes les navettes de la famille (ex : régler FL
-s'applique à FL1, FL2 et FL3). Les valeurs par défaut restent définies dans
-`js/config.js` → `SHUTTLE_GROUPS` si vous préférez les changer côté code.
-
-**Ajouter une navette supplémentaire** : cliquez sur le bouton **"+
-Navette"** à la fin de la rangée. Trois préréglages rapides sont proposés —
-**FL** (orange), **NL** (bleu), **AL** (jaune) — il suffit d'indiquer le ou
-les nouveaux codes (ex : "FL4") : la couleur, le décalage d'arrivée et les
-passages intermédiaires de la famille sont repris automatiquement (y
-compris vos réglages personnalisés faits dans Réglages → Navettes). Ces
-codes ajoutés se retirent depuis **⚙ Réglages** (à côté des champs de la
-famille correspondante). Le choix **"Personnalisée"** garde l'ancien
-formulaire complet (nom, couleur, codes et passages saisis à la main) pour
-une navette qui n'appartient à aucune des trois familles — ces navettes-là
-se suppriment depuis **⚙ Réglages** (liste "Navettes ajoutées
-manuellement").
-
-**En cas de souci (retard, heure calculée qui ne correspond pas à la
-réalité)**, deux boutons dans la fenêtre de la navette permettent de
-corriger l'affichage sans recalculer quoi que ce soit :
-
-- **✓ Navette arrivée** : force l'état "grisée / Arrivée effectuée"
-  immédiatement, quelle que soit l'heure calculée. Utile si la navette est
-  arrivée plus tôt (ou plus tard) que prévu. Un second clic annule ce
-  forçage et rend la main au calcul automatique.
-- **⚠ Retard / souci** : ajoute un repère visuel rouge ("⚠ Retard signalé")
-  sur la vignette, cumulable avec n'importe quel état (y compris "grisée").
-  Ne modifie aucune heure — c'est un simple signal pour attirer l'attention.
-  Un second clic le retire.
-
-Ces deux réglages sont mémorisés par navette (localStorage) et remis à
-zéro par le bouton **"Effacer"**, ou automatiquement au changement de jour
-comme le reste des données de navette.
-
-### 8.4. Mise en page des vignettes
-
-Les vignettes sont affichées **en pleine largeur** (une par ligne, format
-paysage) plutôt qu'en grille de cartes verticales, pour que les 7 étapes
-tiennent sur une seule rangée, alignées : le libellé et l'heure théorique
-en haut de chaque colonne, le bouton (ou l'heure réelle enregistrée) en
-dessous. La cause principale et le résumé théorique/réel/écart sont
-affichés côte à côte juste en dessous, puis le graphique théorique/réel
-tout en bas de la vignette, avant les boutons d'action. Sur petit écran
-(mobile), la rangée des 7 étapes défile horizontalement au doigt.
-
-### 8.5. Trains à accès rapide
-
-Sous les navettes, un bouton apparaît pour chaque train listé dans **⚙
-Réglages → "Trains à accès rapide"** — utile pour des trains qui circulent
-certains jours mais pas d'autres, sans repasser par le formulaire complet.
-Par défaut :
-
-| Numéro | Opérateur | Destination |
-| ------ | --------- | ----------- |
-| 50238 | NAVILAND | Vénissieux |
-| 50276 | NAVILAND | Bordeaux |
-| 50274 | NAVILAND | SPCO |
-| 52006 | NAVILAND | Montoir |
-| 52232 | FERROVERGNE | Clermont-Ferrand |
-| 70630 | FERROVERGNE | Vierzon |
-
-L'opérateur et la destination s'affichent au-dessus du numéro sur chaque
-bouton :
-
-- **Bouton non rempli (contour)** : ce train n'a pas de vignette
-  aujourd'hui (ne circule pas). Cliquer dessus **ajoute** sa vignette pour
-  la date du jour, avec les libellés d'étapes par défaut.
-- **Bouton rempli (bleu)** : ce train circule aujourd'hui, sa vignette est
-  affichée. Cliquer dessus la **retire** (confirmation demandée si des
-  heures réelles ont déjà été enregistrées, pour éviter une perte de
-  données par erreur).
-
-La liste (numéro, opérateur, destination) est modifiable à tout moment dans
-**⚙ Réglages → Trains à accès rapide** : une ligne par train, avec
-ajout/suppression — pratique si les opérateurs ou destinations changent.
-
-### 8.6. Encadrement par opérateur
-
-Les boutons "Trains à accès rapide" ci-dessus ont un cadre coloré selon
-l'opérateur renseigné dans la ligne (insensible à la casse) :
-
-| Opérateur | Couleur du cadre |
-| --------- | ----------------- |
-| NAVILAND | violet |
-| FERROVERGNE | orange |
-
-C'est calculé automatiquement à partir du champ "Opérateur" — aucune
-configuration séparée n'est nécessaire, et ça s'applique aussi à un
-opérateur ajouté ensuite dans **⚙ Réglages → Trains à accès rapide**. Un
-opérateur différent (ou vide) garde le cadre neutre habituel. Les deux
-couleurs sont définies dans `js/config.js` → `QUICK_TRAIN_OPERATOR_COLORS`
-si vous voulez les changer.
-
-### 8.7. Destination affichée sur la vignette
-
-Le titre de chaque vignette (tableau des 7 étapes + graphique) affiche
-désormais la destination à côté du numéro de train, quand elle est connue —
-par exemple **"TRAIN 50238 — à destination de Vénissieux"**. La destination
-est reprise automatiquement de la liste "Trains à accès rapide" (section
-8.5) par numéro de train : rien à saisir en plus, et une mise à jour de la
-destination dans **⚙ Réglages** se répercute sur toutes les vignettes de ce
-train dès le prochain rafraîchissement de l'affichage.
-
-### 8.8. Arrivées (trains fret en provenance d'autres sites)
-
-Sous les navettes internes (section 8.3), une seconde rangée de vignettes
-suit exactement le même principe pour les **arrivées** de trains fret en
-provenance d'autres sites, avec 6 destinations intégrées :
-
-| Destination | Couleur |
-| ----------- | ------- |
-| Vénissieux | vert |
-| Saint-Pierre-des-Corps | indigo |
-| Bordeaux | rouge cerise |
-| Vierzon | bleu ciel |
-| Clermont-Ferrand | ocre |
-| Montoir | bleu sarcelle |
-
-Cliquez sur une vignette pour ouvrir une fenêtre où saisir **l'heure de
-départ (origine)** — bouton "Maintenant" inclus, comme pour les navettes.
-L'heure d'arrivée estimée se calcule à partir des **étapes** listées
-en-dessous (nom + minutes écoulées depuis le départ) : la **dernière étape
-de la liste définit l'heure d'arrivée**. Contrairement aux navettes internes
-(dont les passages sont réglés uniquement dans Réglages), les étapes d'une
-arrivée sont **modifiables directement depuis la vignette au clic** —
-pratique quand le trajet du jour ne suit pas exactement le trajet habituel.
-Ces modifications ponctuelles ne valent que pour la journée en cours ; le
-lendemain, la vignette repart des étapes par défaut réglées dans **⚙
-Réglages → Arrivées**.
-
-**Mini-rail animé** : chaque vignette affiche un petit rail avec un repère
-par étape (qui révèle son heure de passage une fois atteinte) et une icône
-de train qui avance en continu le long du trajet, calculée à partir du
-temps écoulé depuis le départ saisi — sans avoir à recharger la page
-(rafraîchi chaque seconde).
-
-Comme pour les navettes, une vignette clignote en rouge ("⚠ Arrivée
-imminente") à l'approche de l'heure d'arrivée estimée (réglable par
-destination), passe en grisé "Arrivée effectuée" une fois ce délai écoulé,
-et propose les mêmes actions rapides **✓ Arrivée effectuée** / **⚠ Retard ou
-souci** ainsi qu'un bouton **Effacer**. Toutes les arrivées se **remettent à
-zéro automatiquement chaque jour**, y compris les étapes modifiées
-ponctuellement au clic (les valeurs par défaut de Réglages, elles, restent
-inchangées).
-
-**Réglages par destination** : dans **⚙ Réglages → Arrivées**, chaque
-destination a son propre bloc (décalage d'arrivée par défaut, seuil de
-clignotement, étapes par défaut) — comme pour les familles FL/NL/AL des
-navettes. Le décalage par défaut (3h) est une estimation générique à ajuster
-selon la réalité du terrain pour chaque destination.
-
-**Ajouter une destination supplémentaire** : bouton **"+ Arrivée"** à la fin
-de la rangée — nom, couleur de cadre et étapes (dont la dernière définit
-l'arrivée), exactement comme une navette "Personnalisée". Ces arrivées
-ajoutées se suppriment depuis **⚙ Réglages** (liste "Arrivées ajoutées
-manuellement").
-
-### 8.9. Coupons navettes
-
-Le bouton **🎫 Coupons** de l'en-tête ouvre, en plein écran, la saisie des
-coupons navettes qui remplace la feuille « semaine » du classeur
-*Affectation des coupons*.
-
-- **Un écran par jour**, une carte par navette : LF1-LF3 (LHTTDF, orange),
-  LN1-LN2 (LHTTMS, bleu), LA1 (LHTATL, jaune). **+ navette** ajoute LF4,
-  LN3, LA2... si besoin.
-- **4 lignes par navette**, comme dans le classeur :
-  `C | N° | code site | date jjmm | Nb wgs` (ex. `02 LHTTMS 2210 18`). Une
-  5e ligne apparaît quand les 4 sont remplies.
-- **Saisie** : N° → `Tab` → date → `Tab` → wagons → `Entrée` (passe à la
-  ligne suivante). Raccourci : `2 18` dans N° puis `Entrée`, ou le N° puis
-  un clic sur un nombre de wagons. Une ligne remplie se corrige directement
-  (enregistrée en quittant la ligne) ; `Échap` annule une ligne en cours.
-- **Date du coupon** : proposée (jour ouvré précédent), jamais imposée — un
-  coupon du vendredi pour la navette du lundi est normal. Seule une date
-  illisible bloque ; un même numéro de coupon (même code et date) déjà
-  saisi est signalé avec le jour et la navette.
-- **Excel** : *Extraire le jour en Excel* (Récap du jour) ou *Exporter la
-  semaine* (onglet Semaine & Excel), au format exact du classeur (blocs par
-  jour, couleurs, lignes TOTAL en formules).
-- **PDF récap** : les coupons du jour figurent dans le PDF récap (📄 PDF récap
-  et 🌙 Journée finie), section « Coupons navettes » : une ligne par coupon,
-  total de wagons par site et pour la journée.
-- **Historique** : onglet Semaine & Excel → *Importer un classeur Excel*
-  (le classeur annuel ou un export de cet écran). Les journées déjà saisies
-  ne sont pas modifiées.
-
-- **Suivi des circulations** : si l'adresse du Web App est réglée (Réglages),
-  chaque journée de coupons est envoyée (2 s après la dernière saisie) dans
-  l'onglet **Coupons** du classeur ; la saisie du Suivi des circulations les
-  affiche (bouton 🎫 Coupons). Mettre à jour `apps-script/Code.gs` puis
-  redéployer (nouvelle version) pour activer cet envoi.
-
-Stockage : `localStorage` de l'appareil (clé `traintrack:coupons:v1`),
-comme le reste de l'app. La bibliothèque ExcelJS est chargée à la demande et
-mise en cache par le Service Worker.
-
-### 8.10. Convertisseur wagons 60' / 80'
-
-Le bouton **🚃 Wagons** de l'en-tête (à côté de 🎫 Coupons) ouvre, en plein
-écran, un convertisseur pour les wagons plats porte-conteneurs.
-
-- **Longueur → wagons** : on tape la longueur de voie, l'écran donne le
-  nombre de wagons 60' et 80' (entier = arrondi inférieur, et la valeur
-  décimale). Les longueurs des voies du plan Poste 50/54 sont en raccourcis.
-- **Wagons → longueur** (opération inverse) : on tape un nombre de wagons
-  (champ à côté de la longueur, bouton ⇄), l'écran donne la longueur
-  nécessaire en 60' et en 80'.
-- **Type de wagon** : menu déroulant par famille — Sgnss 60' (Touax,
-  Ermewa, Wascosa), Sggrss 80' articulé 6 essieux (Ermewa, Wascosa, VTG,
-  Eurowagon), Sggnss 80' 4 essieux (Ermewa, Đuro Đaković), Sggrrss 80'
-  8 essieux (Tatravagónka). La fiche affiche longueur hors tampons, tare,
-  charge utile et masse brute maxi (22,5 t/essieu).
-- **Rame** : charge utile, masse brute, tare, longueur hors tampons et nombre
-  de conteneurs 40' (60' = 1 × 40' + 1 × 20' ; 80' = 2 × 40').
-- **Longueur par wagon** : « Règle du plan » (28 m en 80', 21,4 m en 60',
-  marge comprise, modifiables) ou « Hors tampons » (longueur réelle du type).
-  Champ « À déduire » pour la locomotive ou une marge.
-
-Les fiches et leurs sources sont dans `js/wagons.js`. Seuls le type choisi et
-les règles sont mémorisés (`localStorage`, clé `traintrack:wagons:v1`).
-
-## 9. Modifier les 7 étapes
-
-- **Pour un train existant** : bouton "Modifier" sur sa vignette → chaque
-  étape a son propre champ "Libellé".
-- **Pour tous les nouveaux trains** : ⚙ **Réglages** → "Libellés par défaut
-  des 7 étapes". Ça ne change pas les trains déjà créés.
-- Si vous utilisez Google Sheets, pensez à renommer la colonne **Étape**
-  dans le Sheet pour qu'elle corresponde exactement aux nouveaux libellés
-  (la comparaison ignore la casse et les accents, mais pas les libellés
-  complètement différents).
-
-### 9.1. Étapes de préparation avant le départ (décalage automatique)
-
-Certaines étapes se déroulent **avant** le départ commercial (préparation
-du train, essais, formation...) et ont des horaires théoriques fixes par
-rapport à celui-ci, plutôt que des horaires qui viennent du Sheet. Pour ça,
-dans le formulaire "Modifier" de chaque étape (sauf la 1ʳᵉ, "Départ", qui
-sert de référence), un champ **"Décalage / Départ (min)"** est disponible :
-
-- Renseignez un nombre de minutes **négatif** pour une étape avant le
-  départ (ex : `-91` pour une étape 1h31 avant), ou **positif** pour une
-  étape après.
-- Dès que ce décalage est renseigné, l'heure théorique de cette étape est
-  **calculée automatiquement** à partir de celle du Départ — inutile de la
-  ressaisir, et le champ "Heure théorique" de cette étape est alors ignoré.
-- Le recalcul se refait à chaque fois que l'heure théorique du Départ
-  change : en la modifiant à la main, ou automatiquement via la recherche
-  de sillon (section 6.4) ou la synchronisation Google Sheets.
-- L'écart (retard/avance) de ces étapes de préparation se calcule et
-  s'affiche exactement comme pour les autres : heure réelle enregistrée
-  comparée à l'heure théorique (ici, dérivée du Départ).
-- Laissez le champ vide pour une étape dont l'heure théorique doit rester
-  saisie manuellement ou venir du Sheet (comportement par défaut, inchangé).
-
-## 10. Cas particuliers gérés
-
-- Aucune heure réelle enregistrée → statut **"EN ATTENTE"**, étape affichée
-  avec un bouton d'enregistrement.
-- Train à l'heure (écart < 1 min) → **"À L'HEURE"** (affichage neutre/vert).
-- Train en avance → écart négatif affiché distinctement (bleu).
-- Retards successifs → le graphique et la cause principale se
-  recalculent après chaque clic, en prenant toujours le plus gros écart.
-- Correction d'une heure → icône ✎ sur une étape déjà enregistrée.
-- Réinitialisation d'une heure → icône ↺ (confirmation demandée).
-- Changement de date en cours de journée → l'horloge vérifie la date
-  chaque seconde ; à minuit, le tableau de bord bascule automatiquement
-  sur les trains du nouveau jour, sans recharger la page. Les trains de la
-  veille restent consultables via **Historique**, jamais supprimés.
-- Franchissement de minuit sur un même trajet (ex : départ 23h50, arrivée
-  00h05) → pris en compte dans le calcul de l'écart (`time-utils.js`).
-- Étape sans heure théorique → l'heure réelle est quand même affichée,
-  simplement sans écart calculable ("—").
-- Google Sheet inaccessible ou mal configuré → indicateur d'erreur discret,
-  aucune donnée locale perdue, aucun plantage.
-- Recherche de sillon sans correspondance dans le Sheet (heure inconnue, ou
-  sillon qui ne circule pas ce jour de la semaine) → message explicite sous
-  le champ, rien n'est modifié sur la vignette.
-- Dernière étape qui n'est pas une arrivée (ex : "Départ pour la ligne")
-  → le statut global reprend automatiquement le libellé réel de cette
-  dernière étape plutôt qu'un mot "ARRIVÉ" figé.
-- Voie et nombre de wagons → champs **Voie** / **Wagons** dans la fenêtre
-  d'une navette (arrivée), d'une case « Départs navettes » (✎) et dans la
-  Composition d'un train (Voie de départ). Envoyés à l'onglet **Navettes**
-  du Sheet (lignes Info…) et repris par la saisie des circulations.
-- Annonce d'un départ navette → **▲** sur la case « Départs navettes »
-  (📣 + heure, la case clignote) ; second clic = retrait. Repris par la
-  saisie et les écrans (« Départ imminent »).
-
-## 11. Limites connues
-
-- Les données sont stockées **dans le navigateur de chaque utilisateur**
-  (localStorage) : deux personnes ouvrant l'app sur deux appareils ne
-  voient pas les mêmes heures réelles saisies. Pour une utilisation
-  multi-utilisateurs en temps réel, il faudra brancher une vraie base de
-  données/API à la place de `js/storage.js` (l'architecture est prévue pour
-  ça).
-- Le bouton "Email" ouvre le client mail par défaut avec un brouillon
-  pré-rempli (`mailto:`) — il n'envoie rien automatiquement, l'utilisateur
-  doit cliquer sur "Envoyer" dans son application mail. Un envoi
-  automatique côté serveur nécessiterait un vrai backend (ex : une
-  fonction cloud avec une API d'emailing) pour ne jamais exposer
-  d'identifiants dans le navigateur.
-- Le glisser-déposer natif (souris) fonctionne pour réorganiser les
-  vignettes ; sur tactile, utilisez les boutons ◀ ▶ (le drag-and-drop HTML5
-  n'est pas fiable sur mobile).
+- Les deux postes ont besoin d'Internet (github.io et script.google.com).
+- Un seul poste de saisie à la fois.
+- Données dans le compte Google qui a déployé le script : pour une utilisation définitive, prévoir un compte de l'entreprise.
+- Délai saisie → écrans : environ 5 à 10 secondes. Si le poste de saisie s'arrête, les écrans affichent « Liaison interrompue » au bout de 2 minutes et gardent les dernières données.

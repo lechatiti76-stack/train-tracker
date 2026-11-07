@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circulations du jour</title>
+<meta name="theme-color" content="#08121B">
+<link rel="manifest" href="manifest-ecrans.webmanifest">
+<link rel="icon" href="icones/ecrans-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icones/ecrans-192.png">
+<link rel="stylesheet" href="visuel.css">
+</head>
+<body>
+<div class="ecran sans-donnees" id="ecran">
+  <header class="tete">
+    <div class="titre" id="v-titre">Circulations du jour</div>
+    <div class="date" id="v-date"></div>
+    <div class="direct attente" id="v-direct"><i></i><span>Connexion…</span></div>
+    <div class="heure" id="v-heure">--:--</div>
+  </header>
+  <div class="alerte" id="v-alerte" hidden></div>
+  <main class="grille" id="v-grille">
+    <section class="navettes" id="v-navettes"></section>
+    <section class="trains" id="v-trains"></section>
+    <!-- vedettes : navette / train qui part ou arrive dans les prochaines minutes (voir visuel.js) -->
+    <div class="ved-calque ved-nav" id="v-ved-nav" hidden></div>
+    <div class="ved-calque ved-trains" id="v-ved-trains" hidden></div>
+  </main>
+  <!-- nouvel avis de travaux : en grand 5 s, puis dans le bandeau « Travaux » -->
+  <div class="tx-alerte" id="v-tx-alerte" hidden></div>
+  <div class="attente-donnees" id="v-attente">En attente des données du poste de saisie…</div>
+  <div class="travaux" id="v-travaux" hidden><span class="travaux-lib">Travaux</span><div class="travaux-fen" id="v-travaux-fen"><div class="travaux-txt" id="v-travaux-txt"></div></div></div>
+  <div class="flash" id="v-flash" hidden><span class="flash-lib">Flash info</span><div class="flash-fen" id="v-flash-fen"><div class="flash-txt" id="v-flash-txt"></div></div></div>
+</div>
+<div class="installer" id="v-installer" hidden>
+  <b>Application « Écrans » pour ce PC</b>
+  <span id="v-installer-texte">Installez-la : elle s'ouvrira depuis une icône du bureau, sur cet écran.</span>
+  <button type="button" id="v-installer-bouton">⬇ Installer l'application</button>
+</div>
+<script src="application.js" data-appli="ecrans"></script>
+<script src="commun.js"></script>
+<script src="visuel.js"></script>
+</body>
+</html>
