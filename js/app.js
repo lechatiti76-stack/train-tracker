@@ -14,7 +14,7 @@ import { createDelayChart, updateDelayChart } from './charts.js';
 import { trainCardTemplate, updateCardDynamicParts, trainNo, escapeHtml, formatCompositionSummary, formatSlotSummary } from './card.js';
 import { initStopwatch } from './stopwatch.js';
 import { saveArchivePdf, listArchivePdfs, getArchivePdf, deleteArchivePdf, pruneOldArchives } from './archives.js';
-import { openCoupons } from './coupons.js';
+import { openCoupons, loadExcelJS } from './coupons.js';
 
 let settings = loadSettings();
 // Applique les seuils de retard personnalisés (settings.delayThresholds,
@@ -5319,12 +5319,14 @@ function statsDiffLabel(diffMin) {
 }
 
 // Calcule tout le rapport (utilisé par l'écran ET par le PDF).
-function buildStatsReport() {
+function buildStatsReport(opts = {}) {
+  const catId = opts.category || statsState.category;
+  const selKeys = opts.selected || statsState.selected;
   const range = statsRange(statsState.period, statsState.ref);
-  const category = STATS_CATEGORIES.find((c) => c.id === statsState.category);
-  const allRows = collectStatsRows(statsState.category, range);
-  const groups = statsItemGroups(statsState.category, allRows);
-  const selected = new Set(statsState.selected);
+  const category = STATS_CATEGORIES.find((c) => c.id === catId);
+  const allRows = collectStatsRows(catId, range);
+  const groups = statsItemGroups(catId, allRows);
+  const selected = new Set(selKeys);
   const rows = selected.size ? allRows.filter((r) => selected.has(r.key)) : allRows;
   const buckets = statsBuckets(statsState.period, range).map((b) => {
     const inBucket = rows.filter((r) => (statsState.period === 'year' ? r.date.slice(0, 7) === b.key : r.date === b.key));
@@ -5342,7 +5344,7 @@ function buildStatsReport() {
     .sort((a, b) => (itemOrder.indexOf(a.key) - itemOrder.indexOf(b.key)) || a.label.localeCompare(b.label))
     .map((it) => ({ ...it, summary: summarizeStatsRows(it.rows) }));
   let stepStats = null;
-  if (statsState.category === 'trainDepartures' && rows.length) {
+  if (catId === 'trainDepartures' && rows.length) {
     const labels = rows[0].extra.stepLabels || [];
     stepStats = labels.map((label, i) => {
       const diffs = rows.map((r) => r.extra.stepDiffs?.[i]).filter((v) => v !== null && v !== undefined);
@@ -5358,7 +5360,8 @@ function buildStatsReport() {
   const selectionLabel = selected.size
     ? groups.flatMap((g) => g.items).filter((i) => selected.has(i.key)).map((i) => i.label).join(', ')
     : 'Tous';
-  return { range, category, groups, rows, buckets, byItem, stepStats, summary: summarizeStatsRows(rows), selectionLabel, period: statsState.period };
+  const timeRowsCut = rows.filter((r) => r.state !== 'cancelled' && (r.theo || r.real)).length > STATS_TIME_MAX;
+  return { range, category, groups, rows, buckets, byItem, stepStats, summary: summarizeStatsRows(rows), selectionLabel, period: statsState.period, timeRowsCut };
 }
 
 // ---- Écran ----
@@ -5409,6 +5412,14 @@ function statsBodyHTML(report) {
       </div>
       <div class="stats-chart-holder"><canvas id="statsChart" aria-label="Graphique des voyages par état"></canvas></div>
     </div>
+    <div class="stats-chart-card">
+      <div class="stats-chart-head">
+        <h3>${escapeHtml(category.label)} — horaires théorique / réel</h3>
+        <div class="stats-legend"><span><i class="lg-theo"></i>Théorique</span><span><i style="background:#16a34a"></i>Réel à l'heure / en avance</span><span><i style="background:#dc2626"></i>Réel en retard</span></div>
+      </div>
+      <div class="stats-chart-holder stats-chart-holder--time"><canvas id="statsTimeChart" aria-label="Heures théoriques et réelles voyage par voyage"></canvas></div>
+      ${report.timeRowsCut ? `<p class="help-text">Les ${STATS_TIME_MAX} derniers voyages de la période sont affichés : choisissez un voyage (ex. LF1) ou une semaine pour tout voir.</p>` : ''}
+    </div>
     <h3 class="stats-h3">Par voyage</h3>
     <div class="stats-table-wrap"><table class="stats-table">
       <thead><tr><th>Voyage</th><th>Voyages</th><th>En avance</th><th>À l'heure</th><th>En retard</th><th>Supprimés</th>${isTrains ? '<th>Calés</th>' : ''}${isTrainArr ? '<th>Stockés FA</th><th>FA → arrivée moy.</th>' : ''}<th>Écart moyen</th><th>Retard max</th><th>Ponctualité</th></tr></thead>
@@ -5453,7 +5464,73 @@ function statsBodyHTML(report) {
     <p class="help-text">Sélection : ${escapeHtml(report.selectionLabel)}.</p>`;
 }
 
+// ---- Courbe horaire : un point théorique et un point réel par voyage (ex. LF1 06:45 → 07:00) ----
+const STATS_TIME_MAX = 120;
+let statsTimeChart = null;
+function statsMinutes(hhmm) { const p = parseHHMM(hhmm); return p ? p.h * 60 + p.m : null; }
+function statsHHMM(v) { const t = Math.round(v); return `${pad2(Math.floor(t / 60) % 24)}:${pad2(((t % 60) + 60) % 60)}`; }
+function statsTimeRows(report) {
+  // ordre chronologique : jour, puis heure théorique (sinon réelle) — la courbe suit la journée
+  const rows = report.rows.filter((r) => r.state !== 'cancelled' && (r.theo || r.real))
+    .sort((a, b) => a.date.localeCompare(b.date) || (statsMinutes(a.theo || a.real) ?? 0) - (statsMinutes(b.theo || b.real) ?? 0));
+  return rows.slice(-STATS_TIME_MAX);
+}
+function renderStatsTimeChart(panel, report) {
+  if (statsTimeChart) { try { statsTimeChart.destroy(); } catch (e) { /* ignore */ } statsTimeChart = null; }
+  const canvas = panel.querySelector('#statsTimeChart');
+  if (!canvas || !window.Chart) return;
+  const rows = statsTimeRows(report);
+  const oneDay = new Set(rows.map((r) => r.date)).size <= 1;
+  const labels = rows.map((r) => (oneDay ? r.label : `${r.label} ${dateFromISO(r.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }).replace('.', '')}`));
+  const isLate = (r) => r && r.state === 'late';
+  // pas de trait entre le dernier voyage d'un jour et le premier du lendemain
+  const autreJour = (ctx) => rows[ctx.p0DataIndex] && rows[ctx.p1DataIndex] && rows[ctx.p0DataIndex].date !== rows[ctx.p1DataIndex].date;
+  const ptColor = (r) => (!r.real ? '#94a3b8' : isLate(r) ? '#dc2626' : '#16a34a');
+  const dark = computeIsDark();
+  const ink = dark ? '#cbd5e1' : '#5b6577';
+  const grid = dark ? 'rgba(148,163,184,0.15)' : 'rgba(15,42,95,0.08)';
+  const theoColor = dark ? '#8291ac' : '#94a3b8';
+  statsTimeChart = new window.Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Réel', data: rows.map((r) => statsMinutes(r.real)), spanGaps: true, tension: 0.15, borderWidth: 3, pointRadius: 5, pointHoverRadius: 7,
+          pointBackgroundColor: rows.map(ptColor), pointBorderColor: rows.map(ptColor),
+          // la courbe passe en rouge sur le voyage en retard, en vert sinon
+          segment: { borderColor: (ctx) => (autreJour(ctx) ? 'transparent' : isLate(rows[ctx.p1DataIndex]) ? '#dc2626' : '#16a34a') },
+          borderColor: '#16a34a',
+        },
+        {
+          label: 'Théorique', data: rows.map((r) => statsMinutes(r.theo)), spanGaps: true, tension: 0.15, borderWidth: 2, borderDash: [6, 4],
+          pointRadius: 3.5, borderColor: theoColor, pointBackgroundColor: theoColor, pointBorderColor: theoColor,
+          segment: { borderColor: (ctx) => (autreJour(ctx) ? 'transparent' : theoColor) },
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => (c.raw == null ? `${c.dataset.label} : —` : `${c.dataset.label} : ${statsHHMM(c.raw)}`),
+            footer: (items) => { const r = rows[items[0].dataIndex]; return r ? `${formatDateShortFR(r.date)} · ${STATS_STATE_LABELS[r.state] || ''}${r.diffMin != null ? ` (${statsDiffLabel(r.diffMin)})` : ''}` : ''; },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: ink, autoSkip: true, maxRotation: 60, minRotation: 0 } },
+        y: { grid: { color: grid }, ticks: { color: ink, callback: (v) => statsHHMM(v) }, title: { display: true, text: 'Heure', color: ink } },
+      },
+    },
+  });
+}
+
 function renderStatsChart(panel, report) {
+  renderStatsTimeChart(panel, report);
   if (statsChart) { try { statsChart.destroy(); } catch (e) { /* ignore */ } statsChart = null; }
   const canvas = panel.querySelector('#statsChart');
   if (!canvas || !window.Chart) return;
@@ -5524,6 +5601,23 @@ function statsControlsHTML(report) {
       <button type="button" class="btn btn-primary" data-stats-export>📄 Exporter PDF</button>
       <button type="button" class="btn btn-outline" data-stats-print>🖨 Imprimer</button>
       <button type="button" class="btn btn-outline" data-stats-save>💾 Enregistrer (Archives)</button>
+      <button type="button" class="btn btn-outline" data-stats-excel>📗 Exporter Excel</button>
+    </div>
+    <div class="stats-excel" data-stats-excel-panel hidden>
+      <strong>Export Excel — ${escapeHtml(report.range.label)}</strong>
+      <div class="stats-excel-row"><span>Catégories :</span>
+        ${STATS_CATEGORIES.map((c) => `<label><input type="checkbox" data-xl-cat="${c.id}" ${c.id === statsState.category ? 'checked' : ''}> ${escapeHtml(c.label)}</label>`).join('')}
+      </div>
+      <div class="stats-excel-row"><span>Portée :</span>
+        <label><input type="radio" name="xlPortee" value="global" ${selected.size ? '' : 'checked'}> Global (tous les voyages)</label>
+        <label><input type="radio" name="xlPortee" value="individuel" ${selected.size ? 'checked' : ''}> Individuel : voyages choisis ci-dessus (${escapeHtml(selected.size ? report.selectionLabel : 'aucun')})</label>
+      </div>
+      <div class="stats-excel-row"><span>Feuilles :</span>
+        <label><input type="checkbox" data-xl-part="synthese" checked> Synthèse</label>
+        <label><input type="checkbox" data-xl-part="voyages" checked> Par voyage</label>
+        <label><input type="checkbox" data-xl-part="detail" checked> Détail voyage par voyage</label>
+      </div>
+      <div class="stats-excel-row"><button type="button" class="btn btn-primary" data-stats-excel-go>⬇ Télécharger le fichier Excel</button></div>
     </div>`;
 }
 
@@ -5566,6 +5660,8 @@ function openStatsModal() {
           render();
           return;
         }
+        if (t.hasAttribute('data-stats-excel')) { const p = root.querySelector('[data-stats-excel-panel]'); p.hidden = !p.hidden; return; }
+        if (t.hasAttribute('data-stats-excel-go')) { exportStatsExcel(root); return; }
         if (t.hasAttribute('data-stats-export')) { exportStatsPdf(report, 'download'); return; }
         if (t.hasAttribute('data-stats-print')) { exportStatsPdf(report, 'print'); return; }
         if (t.hasAttribute('data-stats-save')) { exportStatsPdf(report, 'save'); }
@@ -5577,6 +5673,82 @@ function openStatsModal() {
       render();
     },
   });
+}
+
+// ---- Export Excel des statistiques (individuel ou global, catégories et feuilles cochées) ----
+async function exportStatsExcel(root) {
+  const cats = [...root.querySelectorAll('[data-xl-cat]:checked')].map((i) => i.dataset.xlCat);
+  const parts = new Set([...root.querySelectorAll('[data-xl-part]:checked')].map((i) => i.dataset.xlPart));
+  const individuel = root.querySelector('input[name="xlPortee"]:checked')?.value === 'individuel';
+  if (!cats.length) { showToast('Cochez au moins une catégorie', 'error'); return; }
+  if (!parts.size) { showToast('Cochez au moins une feuille', 'error'); return; }
+  if (individuel && !statsState.selected.length) { showToast('Individuel : choisissez d\'abord un ou plusieurs voyages (ex. LF1) dans la liste', 'error'); return; }
+  let ExcelJS;
+  try { ExcelJS = await loadExcelJS(); } catch (e) { showToast("Le module Excel n'a pas pu se charger (connexion ?). Réessayez une fois en ligne.", 'error'); return; }
+  // individuel : les voyages choisis valent pour la catégorie affichée ; les autres catégories cochées sont complètes
+  const reports = cats.map((c) => buildStatsReport({ category: c, selected: individuel && c === statsState.category ? statsState.selected : [] }));
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Suivi Trains';
+  const head = (ws, cols) => {
+    ws.columns = cols.map((c) => ({ header: c[0], key: c[1], width: c[2] || 14 }));
+    const r = ws.getRow(1); r.font = { bold: true, color: { argb: 'FFFFFFFF' } }; r.alignment = { vertical: 'middle' };
+    r.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2A5F' } }; });
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  };
+  const pct = (v) => (v == null ? null : v / 100);
+  const stateFill = (cell, state) => {
+    const c = { late: 'FFFDE2E1', early: 'FFDCFCE7', onTime: 'FFF1F5F9', cancelled: 'FFFEE2E2', stalled: 'FFEDE9FE' }[state];
+    if (c) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c } };
+  };
+  if (parts.has('synthese')) {
+    const ws = wb.addWorksheet('Synthèse');
+    head(ws, [['Catégorie', 'cat', 20], ['Sélection', 'sel', 26], ['Voyages', 'total', 10], ['Ponctualité', 'ponct', 12], ['En avance', 'early', 11], ["À l'heure", 'onTime', 11],
+      ['En retard', 'late', 11], ['Supprimés', 'cancelled', 11], ['Calés', 'stalled', 9], ['Écart moyen (min)', 'avg', 16], ['Retard moyen (min)', 'avgLate', 17], ['Retard max (min)', 'maxLate', 15]]);
+    reports.forEach((r) => {
+      const s = r.summary;
+      ws.addRow({ cat: r.category.label, sel: r.selectionLabel, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, stalled: s.stalled, avg: s.avgDiff, avgLate: s.avgLate, maxLate: s.maxLate });
+    });
+    ws.getColumn('ponct').numFmt = '0%';
+    ws.addRow([]); ws.addRow([`Période : ${reports[0].range.label} — exporté le ${new Date().toLocaleString('fr-FR')}`]);
+  }
+  reports.forEach((r) => {
+    const court = r.category.label.replace('navettes', 'nav.');
+    if (parts.has('voyages')) {
+      const ws = wb.addWorksheet(`${court} - voyages`.slice(0, 31));
+      head(ws, [['Voyage', 'v', 18], ['Voyages', 'total', 10], ['Ponctualité', 'ponct', 12], ['En avance', 'early', 11], ["À l'heure", 'onTime', 11], ['En retard', 'late', 11],
+        ['Supprimés', 'cancelled', 11], ['Écart moyen (min)', 'avg', 16], ['Retard max (min)', 'maxLate', 15]]);
+      r.byItem.forEach((it) => { const s = it.summary; ws.addRow({ v: it.label, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, avg: s.avgDiff, maxLate: s.maxLate }); });
+      ws.getColumn('ponct').numFmt = '0%';
+    }
+    if (parts.has('detail')) {
+      const ws = wb.addWorksheet(`${court} - détail`.slice(0, 31));
+      const arr = r.category.id.endsWith('Arrivals'), trains = r.category.id === 'trainDepartures';
+      const cols = [['Date', 'date', 12], ['Voyage', 'v', 18]];
+      if (arr) cols.push(['Départ origine', 'dep', 14]);
+      cols.push(['Théorique', 'theo', 11], ['Réel', 'real', 10], ['Écart (min)', 'diff', 11], ['État', 'etat', 20]);
+      if (r.category.id === 'trainArrivals') cols.push(['Stocké FA', 'fa', 11], ['FA → arrivée (min)', 'faMin', 17]);
+      if (trains) cols.push(['Destination', 'dest', 18], ['Cause principale', 'cause', 26], ['Machine', 'mach', 12], ['Caténaire', 'cat', 14], ['Mail', 'mail', 8]);
+      head(ws, cols);
+      r.rows.forEach((x) => {
+        const [yy, mm, dd] = x.date.split('-').map(Number);
+        // date en UTC : Excel l'affiche le bon jour quel que soit le fuseau
+        const row = ws.addRow({ date: new Date(Date.UTC(yy, mm - 1, dd)), v: x.label, dep: x.extra.departure || '', theo: x.theo || '', real: x.real || '', diff: x.diffMin, etat: STATS_STATE_LABELS[x.state] || x.state,
+          fa: x.extra.faTime || '', faMin: x.extra.faMin ?? null, dest: x.extra.destination || '', cause: x.extra.cause || '', mach: x.extra.machine || '', cat: x.extra.catenary || '', mail: x.extra.mail || '' });
+        stateFill(row.getCell('etat'), x.state);
+        if (x.state === 'late') row.getCell('diff').font = { bold: true, color: { argb: 'FFDC2626' } };
+      });
+      ws.getColumn('date').numFmt = 'dd/mm/yyyy';
+    }
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `stats-${individuel ? 'individuel' : 'global'}-${statsState.period}-${reports[0].range.from}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  showToast('Fichier Excel des statistiques téléchargé ✓');
 }
 
 function statsFileSlug(report) {

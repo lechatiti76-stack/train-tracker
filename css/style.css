@@ -2074,3 +2074,11 @@ html.theme-dark .c-early { color: #4ade80; }
 .train-vw-input:not(:placeholder-shown) { border-color: #f59e0b; background: #fffbeb; }
 .quick-train-vw { display: block; margin-top: 3px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; padding: 1px 6px; border-radius: 6px; background: rgba(245,158,11,.18); color: #92400e; }
 .quick-train-btn.btn-primary .quick-train-vw { background: rgba(255,255,255,.22); color: #fff; }
+
+/* Statistiques : courbe horaire théorique / réel et export Excel */
+.stats-chart-holder--time { height: 300px; }
+.stats-legend i.lg-theo { background: repeating-linear-gradient(90deg, #94a3b8 0 5px, transparent 5px 8px) !important; height: 3px !important; border-radius: 0 !important; width: 18px !important; align-self: center; }
+.stats-excel { margin: 10px 0 4px; padding: 12px 14px; border: 1.5px solid #16a34a55; border-radius: 12px; background: rgba(22,163,74,0.06); display: grid; gap: 8px; }
+.stats-excel-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: .92rem; }
+.stats-excel-row > span { font-weight: 700; min-width: 86px; color: var(--text-muted, #64748b); }
+.stats-excel-row label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }

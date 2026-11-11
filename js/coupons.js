@@ -371,7 +371,7 @@ function renderSemaine() {
 
 // ---------- Excel ----------
 let excelLoading = null;
-function loadExcelJS() {
+export function loadExcelJS() {
   if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
   if (excelLoading) return excelLoading;
   excelLoading = new Promise((res, rej) => {
