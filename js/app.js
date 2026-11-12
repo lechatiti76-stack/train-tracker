@@ -5360,7 +5360,7 @@ function buildStatsReport(opts = {}) {
   const selectionLabel = selected.size
     ? groups.flatMap((g) => g.items).filter((i) => selected.has(i.key)).map((i) => i.label).join(', ')
     : 'Tous';
-  const timeRowsCut = rows.filter((r) => r.state !== 'cancelled' && (r.theo || r.real)).length > STATS_TIME_MAX;
+  const timeRowsCut = new Set(rows.filter((r) => r.state !== 'cancelled' && (r.theo || r.real)).map((r) => r.key)).size > STATS_COURBE_MAX;
   return { range, category, groups, rows, buckets, byItem, stepStats, summary: summarizeStatsRows(rows), selectionLabel, period: statsState.period, timeRowsCut };
 }
 
@@ -5414,11 +5414,11 @@ function statsBodyHTML(report) {
     </div>
     <div class="stats-chart-card">
       <div class="stats-chart-head">
-        <h3>${escapeHtml(category.label)} — horaires théorique / réel</h3>
-        <div class="stats-legend"><span><i class="lg-theo"></i>Théorique</span><span><i style="background:#16a34a"></i>Réel à l'heure / en avance</span><span><i style="background:#dc2626"></i>Réel en retard</span></div>
+        <h3>${escapeHtml(category.label)} — horaire théorique et réel, jour par jour</h3>
+        <div class="stats-legend">${statsCourbeLegendeHTML(report)}</div>
       </div>
-      <div class="stats-chart-holder stats-chart-holder--time"><canvas id="statsTimeChart" aria-label="Heures théoriques et réelles voyage par voyage"></canvas></div>
-      ${report.timeRowsCut ? `<p class="help-text">Les ${STATS_TIME_MAX} derniers voyages de la période sont affichés : choisissez un voyage (ex. LF1) ou une semaine pour tout voir.</p>` : ''}
+      <div class="stats-chart-holder stats-chart-holder--time"><canvas id="statsTimeChart" aria-label="Heure théorique et heure réelle de chaque voyage, jour par jour"></canvas></div>
+      ${report.timeRowsCut ? `<p class="help-text">Les ${STATS_COURBE_MAX} premiers voyages sont tracés : choisissez quelques voyages (ex. LF1, LN1, LA1) pour un graphique plus lisible.</p>` : ''}
     </div>
     <h3 class="stats-h3">Par voyage</h3>
     <div class="stats-table-wrap"><table class="stats-table">
@@ -5464,69 +5464,133 @@ function statsBodyHTML(report) {
     <p class="help-text">Sélection : ${escapeHtml(report.selectionLabel)}.</p>`;
 }
 
-// ---- Courbe horaire : un point théorique et un point réel par voyage (ex. LF1 06:45 → 07:00) ----
-const STATS_TIME_MAX = 120;
+// ---- Courbes jour par jour : pour chaque voyage (ex. LF1), l'horaire théorique (ligne) et le réel (points + tracé) ----
+// Axe du bas : les jours de la période (lun. 9/11, mar. 10/11…). Un seul terminal : théorique en vert ; plusieurs
+// (TDF, TN, ATL cochés ensemble) : une couleur par terminal. Points réels : vert à l'heure / en avance, rouge en retard.
+const STATS_COURBE_MAX = 14;
+const STATS_FAMILLES = {
+  F: { id: 'TDF', color: '#ea580c' }, N: { id: 'TN', color: '#2563eb' }, A: { id: 'ATL', color: '#a16207' },
+};
 let statsTimeChart = null;
 function statsMinutes(hhmm) { const p = parseHHMM(hhmm); return p ? p.h * 60 + p.m : null; }
 function statsHHMM(v) { const t = Math.round(v); return `${pad2(Math.floor(t / 60) % 24)}:${pad2(((t % 60) + 60) % 60)}`; }
-function statsTimeRows(report) {
-  // ordre chronologique : jour, puis heure théorique (sinon réelle) — la courbe suit la journée
-  const rows = report.rows.filter((r) => r.state !== 'cancelled' && (r.theo || r.real))
-    .sort((a, b) => a.date.localeCompare(b.date) || (statsMinutes(a.theo || a.real) ?? 0) - (statsMinutes(b.theo || b.real) ?? 0));
-  return rows.slice(-STATS_TIME_MAX);
+/** Terminal d'une navette : LF1 / FL1 / réserve LF → TDF ; LN, NL → TN ; LA, AL → ATL. Trains : le voyage lui-même. */
+function statsFamille(cat, key, it) {
+  if (cat === 'shuttleDepartures' || cat === 'shuttleArrivals') {
+    const k = String(key).toUpperCase();
+    const lettre = cat === 'shuttleDepartures' ? k.charAt(1) : k.charAt(0);
+    if (STATS_FAMILLES[lettre]) return STATS_FAMILLES[lettre];
+  }
+  return { id: it ? it.label : key, color: (it && it.color) || '#1d4ed8' };
+}
+function statsJours(range) {
+  const out = []; const d = dateFromISO(range.from); const end = dateFromISO(range.to);
+  while (d <= end) { out.push(isoFromDate(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+function statsCourbeModele(report) {
+  const jours = statsJours(report.range);
+  const items = report.byItem.filter((it) => it.rows.some((r) => r.state !== 'cancelled' && (r.theo || r.real))).slice(0, STATS_COURBE_MAX);
+  const fams = [];
+  items.forEach((it) => { const f = statsFamille(report.category.id, it.key, it); it.famille = f; if (!fams.some((x) => x.id === f.id)) fams.push(f); });
+  const multi = new Set(items.map((it) => it.famille.id)).size > 1 && (report.category.id === 'shuttleDepartures' || report.category.id === 'shuttleArrivals');
+  const series = items.map((it) => {
+    const parJour = {}; it.rows.forEach((r) => { if (r.state !== 'cancelled') parJour[r.date] = r; });
+    const rows = jours.map((d) => parJour[d] || null);
+    return { it, rows, theoColor: multi ? it.famille.color : '#16a34a', realColor: multi ? it.famille.color : '#334155',
+      theo: rows.map((r) => (r ? statsMinutes(r.theo) : null)), real: rows.map((r) => (r ? statsMinutes(r.real) : null)) };
+  });
+  const labels = jours.map((d) => {
+    const dt = dateFromISO(d);
+    return report.period === 'week' ? `${dt.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '')} ${dt.getDate()}/${pad2(dt.getMonth() + 1)}` : `${dt.getDate()}/${pad2(dt.getMonth() + 1)}`;
+  });
+  return { jours, labels, series, fams, multi };
+}
+function statsCourbeLegendeHTML(report) {
+  const m = statsCourbeModele(report);
+  const fam = m.multi ? m.fams.map((f) => `<span><i style="background:${f.color}"></i>${escapeHtml(f.id)}</span>`).join('') : '<span><i style="background:#16a34a"></i>Horaire théorique</span>';
+  return `${fam}<span><i class="lg-point" style="background:#16a34a"></i>Réel à l'heure / en avance</span><span><i class="lg-point" style="background:#dc2626"></i>Réel en retard</span>`;
+}
+/** Configuration Chart.js des courbes (écran, ou image claire pour l'export PDF / Excel). */
+function statsCourbeConfig(report, { impression = false } = {}) {
+  const m = statsCourbeModele(report);
+  const dark = !impression && computeIsDark();
+  const ink = dark ? '#cbd5e1' : '#334155';
+  const grid = dark ? 'rgba(148,163,184,0.15)' : 'rgba(15,42,95,0.09)';
+  const datasets = [];
+  m.series.forEach((s) => {
+    const nom = s.it.label;
+    datasets.push({
+      label: `${nom} · théorique`, data: s.theo, borderColor: s.theoColor, backgroundColor: s.theoColor, borderWidth: impression ? 3 : 2.5,
+      pointRadius: impression ? 3 : 2.5, pointHoverRadius: 5, tension: 0, spanGaps: true, _rows: s.rows, _nom: nom,
+    });
+    const couleurs = s.rows.map((r) => (!r || !r.real ? '#94a3b8' : r.state === 'late' ? '#dc2626' : '#16a34a'));
+    datasets.push({
+      label: `${nom} · réel`, data: s.real, borderColor: s.realColor, backgroundColor: couleurs, borderWidth: impression ? 2 : 1.6, borderDash: [5, 4],
+      pointRadius: impression ? 7 : 6, pointHoverRadius: 8, pointBackgroundColor: couleurs, pointBorderColor: dark ? '#0b1220' : '#ffffff', pointBorderWidth: 1.5,
+      tension: 0.3, cubicInterpolationMode: 'monotone', spanGaps: true, _rows: s.rows, _nom: nom,
+    });
+  });
+  // nom du voyage écrit au bout de sa ligne théorique (LF1, LN1…)
+  const etiquettes = {
+    id: 'etiquettesVoyages',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      ctx.save(); ctx.font = `bold ${impression ? 15 : 11}px system-ui, sans-serif`; ctx.textBaseline = 'middle';
+      chart.data.datasets.forEach((ds, i) => {
+        if (i % 2 || chart.getDatasetMeta(i).hidden) return;
+        const pts = chart.getDatasetMeta(i).data; let last = -1;
+        ds.data.forEach((v, k) => { if (v != null) last = k; });
+        if (last < 0) return;
+        ctx.fillStyle = ds.borderColor; ctx.fillText(ds._nom, pts[last].x + 8, pts[last].y);
+      });
+      ctx.restore();
+    },
+  };
+  const fondBlanc = { id: 'fondBlanc', beforeDraw(chart) { if (!impression) return; const { ctx } = chart; ctx.save(); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, chart.width, chart.height); ctx.restore(); } };
+  return {
+    type: 'line',
+    data: { labels: m.labels, datasets },
+    plugins: [etiquettes, fondBlanc],
+    options: {
+      responsive: !impression, maintainAspectRatio: false, animation: false, devicePixelRatio: impression ? 1 : undefined,
+      layout: { padding: { right: 46, top: 8 } },
+      interaction: { mode: 'nearest', intersect: true },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const r = c.dataset._rows[c.dataIndex];
+              if (c.raw == null) return `${c.dataset.label} : —`;
+              return `${c.dataset.label} : ${statsHHMM(c.raw)}${r && c.datasetIndex % 2 && r.diffMin != null ? ` (${statsDiffLabel(r.diffMin)}, ${STATS_STATE_LABELS[r.state] || ''})` : ''}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: ink, autoSkip: true, maxRotation: 0, font: { size: impression ? 14 : 11 } } },
+        y: { grid: { color: grid }, ticks: { color: ink, callback: (v) => statsHHMM(v), font: { size: impression ? 14 : 11 } }, title: { display: true, text: 'Heure', color: ink, font: { size: impression ? 14 : 11 } } },
+      },
+    },
+  };
 }
 function renderStatsTimeChart(panel, report) {
   if (statsTimeChart) { try { statsTimeChart.destroy(); } catch (e) { /* ignore */ } statsTimeChart = null; }
   const canvas = panel.querySelector('#statsTimeChart');
   if (!canvas || !window.Chart) return;
-  const rows = statsTimeRows(report);
-  const oneDay = new Set(rows.map((r) => r.date)).size <= 1;
-  const labels = rows.map((r) => (oneDay ? r.label : `${r.label} ${dateFromISO(r.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }).replace('.', '')}`));
-  const isLate = (r) => r && r.state === 'late';
-  // pas de trait entre le dernier voyage d'un jour et le premier du lendemain
-  const autreJour = (ctx) => rows[ctx.p0DataIndex] && rows[ctx.p1DataIndex] && rows[ctx.p0DataIndex].date !== rows[ctx.p1DataIndex].date;
-  const ptColor = (r) => (!r.real ? '#94a3b8' : isLate(r) ? '#dc2626' : '#16a34a');
-  const dark = computeIsDark();
-  const ink = dark ? '#cbd5e1' : '#5b6577';
-  const grid = dark ? 'rgba(148,163,184,0.15)' : 'rgba(15,42,95,0.08)';
-  const theoColor = dark ? '#8291ac' : '#94a3b8';
-  statsTimeChart = new window.Chart(canvas, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Réel', data: rows.map((r) => statsMinutes(r.real)), spanGaps: true, tension: 0.15, borderWidth: 3, pointRadius: 5, pointHoverRadius: 7,
-          pointBackgroundColor: rows.map(ptColor), pointBorderColor: rows.map(ptColor),
-          // la courbe passe en rouge sur le voyage en retard, en vert sinon
-          segment: { borderColor: (ctx) => (autreJour(ctx) ? 'transparent' : isLate(rows[ctx.p1DataIndex]) ? '#dc2626' : '#16a34a') },
-          borderColor: '#16a34a',
-        },
-        {
-          label: 'Théorique', data: rows.map((r) => statsMinutes(r.theo)), spanGaps: true, tension: 0.15, borderWidth: 2, borderDash: [6, 4],
-          pointRadius: 3.5, borderColor: theoColor, pointBackgroundColor: theoColor, pointBorderColor: theoColor,
-          segment: { borderColor: (ctx) => (autreJour(ctx) ? 'transparent' : theoColor) },
-        },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (c) => (c.raw == null ? `${c.dataset.label} : —` : `${c.dataset.label} : ${statsHHMM(c.raw)}`),
-            footer: (items) => { const r = rows[items[0].dataIndex]; return r ? `${formatDateShortFR(r.date)} · ${STATS_STATE_LABELS[r.state] || ''}${r.diffMin != null ? ` (${statsDiffLabel(r.diffMin)})` : ''}` : ''; },
-          },
-        },
-      },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: ink, autoSkip: true, maxRotation: 60, minRotation: 0 } },
-        y: { grid: { color: grid }, ticks: { color: ink, callback: (v) => statsHHMM(v) }, title: { display: true, text: 'Heure', color: ink } },
-      },
-    },
-  });
+  statsTimeChart = new window.Chart(canvas, statsCourbeConfig(report));
+}
+/** Image PNG (fond blanc, 1600 × 640) des courbes, pour le PDF et l'Excel. */
+function statsCourbeImage(report, largeur = 1600, hauteur = 640) {
+  if (!window.Chart || !statsCourbeModele(report).series.length) return null;
+  const c = document.createElement('canvas'); c.width = largeur; c.height = hauteur;
+  c.style.cssText = `position:fixed;left:-99999px;top:0;width:${largeur}px;height:${hauteur}px`;
+  document.body.appendChild(c);
+  let url = null;
+  try { const ch = new window.Chart(c, statsCourbeConfig(report, { impression: true })); url = c.toDataURL('image/png'); ch.destroy(); } catch (e) { console.warn(e); }
+  c.remove();
+  return url;
 }
 
 function renderStatsChart(panel, report) {
@@ -5614,6 +5678,7 @@ function statsControlsHTML(report) {
       </div>
       <div class="stats-excel-row"><span>Feuilles :</span>
         <label><input type="checkbox" data-xl-part="synthese" checked> Synthèse</label>
+        <label><input type="checkbox" data-xl-part="graphiques" checked> Graphiques (courbes)</label>
         <label><input type="checkbox" data-xl-part="voyages" checked> Par voyage</label>
         <label><input type="checkbox" data-xl-part="detail" checked> Détail voyage par voyage</label>
       </div>
@@ -5685,67 +5750,175 @@ async function exportStatsExcel(root) {
   if (individuel && !statsState.selected.length) { showToast('Individuel : choisissez d\'abord un ou plusieurs voyages (ex. LF1) dans la liste', 'error'); return; }
   let ExcelJS;
   try { ExcelJS = await loadExcelJS(); } catch (e) { showToast("Le module Excel n'a pas pu se charger (connexion ?). Réessayez une fois en ligne.", 'error'); return; }
+  showToast('Préparation du fichier Excel…');
   // individuel : les voyages choisis valent pour la catégorie affichée ; les autres catégories cochées sont complètes
   const reports = cats.map((c) => buildStatsReport({ category: c, selected: individuel && c === statsState.category ? statsState.selected : [] }));
+  if (parts.has('graphiques')) reports.forEach(statsAjouterCourbe);
+  const range = reports[0].range;
+  const genere = `Généré le ${formatDateFR(todayISO())} à ${formatHHMM(new Date())}`;
+
+  // ---- charte : bleu nuit, bandeau de titre, en-têtes foncés, lignes alternées, bordures fines ----
+  const NUIT = 'FF0F2A5F', BLEU = 'FF1D4ED8', BANDE = 'FFF5F7FB', TRAIT = 'FFD7DCE6', GRIS = 'FF5B6577';
+  const fillc = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  const bord = { top: { style: 'thin', color: { argb: TRAIT } }, left: { style: 'thin', color: { argb: TRAIT } }, bottom: { style: 'thin', color: { argb: TRAIT } }, right: { style: 'thin', color: { argb: TRAIT } } };
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Suivi Trains';
-  const head = (ws, cols) => {
-    ws.columns = cols.map((c) => ({ header: c[0], key: c[1], width: c[2] || 14 }));
-    const r = ws.getRow(1); r.font = { bold: true, color: { argb: 'FFFFFFFF' } }; r.alignment = { vertical: 'middle' };
-    r.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2A5F' } }; });
-    ws.views = [{ state: 'frozen', ySplit: 1 }];
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  wb.creator = 'Suivi Trains — LHTE'; wb.created = new Date(); wb.title = `Statistiques ${range.label}`;
+  const feuille = (nom, largeurs, paysage = true) => {
+    const ws = wb.addWorksheet(nom.slice(0, 31), {
+      views: [{ showGridLines: false }],
+      pageSetup: { paperSize: 9, orientation: paysage ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
+      headerFooter: { oddFooter: `&L&8Suivi Trains — LHTE · ${range.label}&R&8Page &P / &N` },
+    });
+    ws.columns = largeurs.map((w) => ({ width: w }));
+    return ws;
+  };
+  // bandeau : titre (ligne 1), sous-titre (ligne 2), ligne vide (3)
+  const bandeau = (ws, titre, sousTitre, nbCol) => {
+    ws.mergeCells(1, 1, 1, nbCol); ws.mergeCells(2, 1, 2, nbCol);
+    const t = ws.getCell(1, 1); t.value = titre; t.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+    t.fill = fillc(NUIT); t.alignment = { vertical: 'middle', indent: 1 }; ws.getRow(1).height = 30;
+    const st = ws.getCell(2, 1); st.value = sousTitre; st.font = { size: 10, italic: true, color: { argb: GRIS } };
+    st.fill = fillc('FFEEF4FF'); st.alignment = { vertical: 'middle', indent: 1 }; ws.getRow(2).height = 18;
+    ws.getRow(3).height = 8;
+  };
+  // tableau avec en-tête à la ligne `ligne` ; colonnes : [titre, clé, alignement, format]
+  const tableau = (ws, ligne, cols, lignes, deco) => {
+    const h = ws.getRow(ligne);
+    cols.forEach((c, k) => {
+      const cell = h.getCell(k + 1); cell.value = c[0];
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 }; cell.fill = fillc(BLEU); cell.border = bord;
+      cell.alignment = { horizontal: k === 0 ? 'left' : 'center', vertical: 'middle', wrapText: true, indent: k === 0 ? 1 : 0 };
+    });
+    h.height = 30;
+    lignes.forEach((obj, n) => {
+      const r = ws.getRow(ligne + 1 + n);
+      cols.forEach((c, k) => {
+        const cell = r.getCell(k + 1); cell.value = obj[c[1]] ?? null; cell.border = bord;
+        cell.alignment = { horizontal: c[2] || (k === 0 ? 'left' : 'center'), vertical: 'middle', indent: k === 0 ? 1 : 0 };
+        if (c[3]) cell.numFmt = c[3];
+        if (n % 2) cell.fill = fillc(BANDE);
+      });
+      r.height = 18;
+      if (deco) deco(r, obj);
+    });
+    ws.views = [{ showGridLines: false, state: 'frozen', ySplit: ligne }];
+    ws.pageSetup.printTitlesRow = `${ligne}:${ligne}`;
+    if (lignes.length) ws.autoFilter = { from: { row: ligne, column: 1 }, to: { row: ligne + lignes.length, column: cols.length } };
+    return ligne + 1 + lignes.length;
+  };
+  const couleurPonct = (cell, v) => {
+    if (v == null) return;
+    const c = v >= 0.9 ? 'FF15803D' : v >= 0.75 ? 'FFD97706' : 'FFDC2626';
+    cell.font = { bold: true, color: { argb: c } };
   };
   const pct = (v) => (v == null ? null : v / 100);
-  const stateFill = (cell, state) => {
-    const c = { late: 'FFFDE2E1', early: 'FFDCFCE7', onTime: 'FFF1F5F9', cancelled: 'FFFEE2E2', stalled: 'FFEDE9FE' }[state];
-    if (c) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c } };
-  };
+  const ETATS_FOND = { late: 'FFFDE2E1', early: 'FFDCFCE7', onTime: 'FFF1F5F9', cancelled: 'FFFEE2E2', stalled: 'FFEDE9FE', departedFA: 'FFDCFCE7' };
+  const ETATS_ENCRE = { late: 'FFB91C1C', early: 'FF15803D', onTime: 'FF475569', cancelled: 'FFB91C1C', stalled: 'FF6D28D9', departedFA: 'FF15803D' };
+
   if (parts.has('synthese')) {
-    const ws = wb.addWorksheet('Synthèse');
-    head(ws, [['Catégorie', 'cat', 20], ['Sélection', 'sel', 26], ['Voyages', 'total', 10], ['Ponctualité', 'ponct', 12], ['En avance', 'early', 11], ["À l'heure", 'onTime', 11],
-      ['En retard', 'late', 11], ['Supprimés', 'cancelled', 11], ['Calés', 'stalled', 9], ['Écart moyen (min)', 'avg', 16], ['Retard moyen (min)', 'avgLate', 17], ['Retard max (min)', 'maxLate', 15]]);
+    const ws = feuille('Synthèse', [24, 26, 11, 13, 11, 11, 11, 11, 9, 14, 14, 14]);
+    bandeau(ws, `STATISTIQUES DE CIRCULATION — ${range.label.toUpperCase()}`, `${individuel ? 'Voyages choisis' : 'Tous les voyages'} · ${genere}`, 12);
+    // cartes de chiffres clés : une ligne par catégorie
+    let l = 4;
     reports.forEach((r) => {
       const s = r.summary;
-      ws.addRow({ cat: r.category.label, sel: r.selectionLabel, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, stalled: s.stalled, avg: s.avgDiff, avgLate: s.avgLate, maxLate: s.maxLate });
+      ws.mergeCells(l, 1, l, 12);
+      const c = ws.getCell(l, 1); c.value = r.category.label.toUpperCase();
+      c.font = { bold: true, size: 11, color: { argb: NUIT } }; c.border = { bottom: { style: 'medium', color: { argb: 'FF' + r.category.color.replace('#', '').toUpperCase() } } };
+      ws.getRow(l).height = 20; l += 1;
+      const cartes = [['Voyages', s.total, null], ['Ponctualité', pct(s.punctuality), '0%'], ['En avance', s.early, null], ["À l'heure", s.onTime, null], ['En retard', s.late, null],
+        ['Supprimés', s.cancelled, null], ['Retard moyen (min)', s.avgLate, null], ['Retard max (min)', s.maxLate, null]];
+      cartes.forEach(([lib, val, fmt], k) => {
+        const col = 1 + Math.floor(k * 12 / cartes.length);
+        const lc = ws.getCell(l, col); lc.value = lib; lc.font = { size: 8, bold: true, color: { argb: GRIS } }; lc.alignment = { horizontal: 'left' };
+        const vc = ws.getCell(l + 1, col); vc.value = val ?? '—'; if (fmt) vc.numFmt = fmt;
+        vc.font = { size: 18, bold: true, color: { argb: lib === 'En retard' || lib.startsWith('Retard') ? 'FFDC2626' : lib === 'En avance' ? 'FF15803D' : NUIT } };
+        if (lib === 'Ponctualité') couleurPonct(vc, pct(s.punctuality)), vc.font = { ...vc.font, size: 18 };
+      });
+      ws.getRow(l + 1).height = 28;
+      l += 3;
     });
-    ws.getColumn('ponct').numFmt = '0%';
-    ws.addRow([]); ws.addRow([`Période : ${reports[0].range.label} — exporté le ${new Date().toLocaleString('fr-FR')}`]);
+    l += 1;
+    tableau(ws, l, [['Catégorie', 'cat'], ['Sélection', 'sel', 'left'], ['Voyages', 'total'], ['Ponctualité', 'ponct', 'center', '0%'], ['En avance', 'early'], ["À l'heure", 'onTime'],
+      ['En retard', 'late'], ['Supprimés', 'cancelled'], ['Calés', 'stalled'], ['Écart moyen (min)', 'avg'], ['Retard moyen (min)', 'avgLate'], ['Retard max (min)', 'maxLate']],
+    reports.map((r) => { const s = r.summary; return { cat: r.category.label, sel: r.selectionLabel, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, stalled: s.stalled, avg: s.avgDiff, avgLate: s.avgLate, maxLate: s.maxLate }; }),
+    (row, o) => { couleurPonct(row.getCell(4), o.ponct); if (o.late) row.getCell(7).font = { bold: true, color: { argb: 'FFDC2626' } }; });
+    ws.views = [{ showGridLines: false }];
   }
+
+  if (parts.has('graphiques')) {
+    const ws = feuille('Graphiques', Array(16).fill(10));
+    bandeau(ws, `GRAPHIQUES — HORAIRE THÉORIQUE ET RÉEL, JOUR PAR JOUR`, `${range.label} · ligne = horaire théorique, points = heure réelle (vert : à l'heure / en avance, rouge : en retard) · ${genere}`, 16);
+    let l = 4;
+    reports.forEach((r) => {
+      ws.mergeCells(l, 1, l, 16);
+      const c = ws.getCell(l, 1); c.value = `${r.category.label} — ${r.selectionLabel}`; c.font = { bold: true, size: 12, color: { argb: NUIT } };
+      c.border = { bottom: { style: 'medium', color: { argb: 'FF' + r.category.color.replace('#', '').toUpperCase() } } };
+      l += 1;
+      if (!r.courbeImage) { ws.getCell(l, 1).value = 'Aucun voyage avec horaire sur la période.'; ws.getCell(l, 1).font = { italic: true, color: { argb: GRIS } }; l += 2; return; }
+      const id = wb.addImage({ base64: r.courbeImage, extension: 'png' });
+      ws.addImage(id, { tl: { col: 0, row: l }, ext: { width: 1120, height: 448 } });
+      l += 24;
+      ws.getCell(l, 1).value = (r.courbeCles || []).map((k) => (k[2] ? '● ' : '▬ ') + k[0]).join('     ');
+      ws.getCell(l, 1).font = { size: 9, color: { argb: GRIS } };
+      l += 2;
+      // données de la courbe : un jour par ligne, théorique / réel par voyage (pour refaire un graphique Excel)
+      const m = statsCourbeModele(r);
+      const cols = [['Jour', 'jour']];
+      m.series.forEach((sr, k) => { cols.push([`${sr.it.label} théorique`, 't' + k], [`${sr.it.label} réel`, 'r' + k]); });
+      const lignes = m.jours.map((d, n) => {
+        const o = { jour: m.labels[n] };
+        m.series.forEach((sr, k) => { o['t' + k] = sr.rows[n]?.theo || ''; o['r' + k] = sr.rows[n]?.real || ''; o['_e' + k] = sr.rows[n]?.state; });
+        return o;
+      });
+      const debut = l;
+      l = tableau(ws, l, cols, lignes, (row, o) => {
+        m.series.forEach((sr, k) => { if (o['_e' + k] === 'late') row.getCell(3 + k * 2).font = { bold: true, color: { argb: 'FFDC2626' } }; });
+      });
+      ws.views = [{ showGridLines: false }]; ws.autoFilter = undefined; void debut;
+      l += 2;
+    });
+  }
+
   reports.forEach((r) => {
     const court = r.category.label.replace('navettes', 'nav.');
     if (parts.has('voyages')) {
-      const ws = wb.addWorksheet(`${court} - voyages`.slice(0, 31));
-      head(ws, [['Voyage', 'v', 18], ['Voyages', 'total', 10], ['Ponctualité', 'ponct', 12], ['En avance', 'early', 11], ["À l'heure", 'onTime', 11], ['En retard', 'late', 11],
-        ['Supprimés', 'cancelled', 11], ['Écart moyen (min)', 'avg', 16], ['Retard max (min)', 'maxLate', 15]]);
-      r.byItem.forEach((it) => { const s = it.summary; ws.addRow({ v: it.label, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, avg: s.avgDiff, maxLate: s.maxLate }); });
-      ws.getColumn('ponct').numFmt = '0%';
+      const ws = feuille(`${court} - voyages`, [22, 11, 13, 11, 11, 11, 11, 15, 15], false);
+      bandeau(ws, `${r.category.label.toUpperCase()} — PAR VOYAGE`, `${range.label} · ${r.selectionLabel} · ${genere}`, 9);
+      tableau(ws, 4, [['Voyage', 'v'], ['Voyages', 'total'], ['Ponctualité', 'ponct', 'center', '0%'], ['En avance', 'early'], ["À l'heure", 'onTime'], ['En retard', 'late'],
+        ['Supprimés', 'cancelled'], ['Écart moyen (min)', 'avg'], ['Retard max (min)', 'maxLate']],
+      r.byItem.map((it) => { const s = it.summary; return { v: it.label, total: s.total, ponct: pct(s.punctuality), early: s.early, onTime: s.onTime, late: s.late, cancelled: s.cancelled, avg: s.avgDiff, maxLate: s.maxLate }; }),
+      (row, o) => { couleurPonct(row.getCell(3), o.ponct); row.getCell(1).font = { bold: true, color: { argb: NUIT } }; if (o.late) row.getCell(6).font = { bold: true, color: { argb: 'FFDC2626' } }; });
     }
     if (parts.has('detail')) {
-      const ws = wb.addWorksheet(`${court} - détail`.slice(0, 31));
-      const arr = r.category.id.endsWith('Arrivals'), trains = r.category.id === 'trainDepartures';
-      const cols = [['Date', 'date', 12], ['Voyage', 'v', 18]];
-      if (arr) cols.push(['Départ origine', 'dep', 14]);
-      cols.push(['Théorique', 'theo', 11], ['Réel', 'real', 10], ['Écart (min)', 'diff', 11], ['État', 'etat', 20]);
-      if (r.category.id === 'trainArrivals') cols.push(['Stocké FA', 'fa', 11], ['FA → arrivée (min)', 'faMin', 17]);
-      if (trains) cols.push(['Destination', 'dest', 18], ['Cause principale', 'cause', 26], ['Machine', 'mach', 12], ['Caténaire', 'cat', 14], ['Mail', 'mail', 8]);
-      head(ws, cols);
-      r.rows.forEach((x) => {
+      const arr = r.category.id.endsWith('Arrivals'), trains = r.category.id === 'trainDepartures', trArr = r.category.id === 'trainArrivals';
+      const cols = [['Date', 'date', 'center', 'ddd dd/mm/yyyy'], ['Voyage', 'v', 'left']];
+      if (arr) cols.push(['Départ origine', 'dep']);
+      cols.push(['Théorique', 'theo'], ['Réel', 'real'], ['Écart (min)', 'diff', 'center', '+0;-0;0'], ['État', 'etat']);
+      if (trArr) cols.push(['Stocké FA', 'fa'], ['FA → arrivée (min)', 'faMin']);
+      if (trains) cols.push(['Destination', 'dest', 'left'], ['Cause principale', 'cause', 'left'], ['Machine', 'mach'], ['Caténaire', 'cat'], ['Mail', 'mail']);
+      const larg = cols.map((c) => ({ date: 16, v: 20, dep: 13, theo: 11, real: 11, diff: 11, etat: 22, fa: 11, faMin: 16, dest: 20, cause: 30, mach: 12, cat: 14, mail: 8 }[c[1]] || 12));
+      const ws = feuille(`${court} - détail`, larg, cols.length > 7);
+      bandeau(ws, `${r.category.label.toUpperCase()} — DÉTAIL VOYAGE PAR VOYAGE`, `${range.label} · ${r.selectionLabel} · ${genere}`, cols.length);
+      tableau(ws, 4, cols, r.rows.map((x) => {
         const [yy, mm, dd] = x.date.split('-').map(Number);
         // date en UTC : Excel l'affiche le bon jour quel que soit le fuseau
-        const row = ws.addRow({ date: new Date(Date.UTC(yy, mm - 1, dd)), v: x.label, dep: x.extra.departure || '', theo: x.theo || '', real: x.real || '', diff: x.diffMin, etat: STATS_STATE_LABELS[x.state] || x.state,
-          fa: x.extra.faTime || '', faMin: x.extra.faMin ?? null, dest: x.extra.destination || '', cause: x.extra.cause || '', mach: x.extra.machine || '', cat: x.extra.catenary || '', mail: x.extra.mail || '' });
-        stateFill(row.getCell('etat'), x.state);
-        if (x.state === 'late') row.getCell('diff').font = { bold: true, color: { argb: 'FFDC2626' } };
+        return { date: new Date(Date.UTC(yy, mm - 1, dd)), v: x.label, dep: x.extra.departure || '', theo: x.theo || '', real: x.real || '', diff: x.diffMin, etat: STATS_STATE_LABELS[x.state] || x.state, _s: x.state,
+          fa: x.extra.faTime || '', faMin: x.extra.faMin ?? null, dest: x.extra.destination || '', cause: x.extra.cause || '', mach: x.extra.machine || '', cat: x.extra.catenary || '', mail: x.extra.mail || '' };
+      }), (row, o) => {
+        const ke = cols.findIndex((c) => c[1] === 'etat') + 1, kd = cols.findIndex((c) => c[1] === 'diff') + 1;
+        if (ETATS_FOND[o._s]) { row.getCell(ke).fill = fillc(ETATS_FOND[o._s]); row.getCell(ke).font = { bold: true, color: { argb: ETATS_ENCRE[o._s] } }; }
+        if (o._s === 'late') row.getCell(kd).font = { bold: true, color: { argb: 'FFDC2626' } };
+        if (o._s === 'early') row.getCell(kd).font = { color: { argb: 'FF15803D' } };
+        row.getCell(2).font = { bold: true, color: { argb: NUIT } };
       });
-      ws.getColumn('date').numFmt = 'dd/mm/yyyy';
     }
   });
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `stats-${individuel ? 'individuel' : 'global'}-${statsState.period}-${reports[0].range.from}.xlsx`;
+  a.download = `statistiques-${individuel ? 'individuel' : 'global'}-${statsState.period}-${range.from}.xlsx`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 30000);
   showToast('Fichier Excel des statistiques téléchargé ✓');
@@ -5756,7 +5929,17 @@ function statsFileSlug(report) {
   return `stats-${report.category.id}-${report.period}-${report.range.from}-${sel}`.toLowerCase();
 }
 
+/** Image et légende des courbes, ajoutées au rapport pour le PDF et l'Excel. */
+function statsAjouterCourbe(report) {
+  report.courbeImage = statsCourbeImage(report);
+  const m = statsCourbeModele(report);
+  report.courbeCles = (m.multi ? m.fams.map((f) => [f.id, f.color, false]) : [['Horaire théorique', '#16a34a', false]])
+    .concat([["Réel à l'heure / en avance", '#16a34a', true], ['Réel en retard', '#dc2626', true]]);
+  return report;
+}
+
 async function exportStatsPdf(report, mode) {
+  statsAjouterCourbe(report);
   const doc = buildStatsPdfDoc(report, { includeDetail: statsState.detail });
   if (!doc) {
     showToast('Génération PDF indisponible (bibliothèque non chargée — vérifiez la connexion réseau au premier chargement)', 'error');
@@ -5959,6 +6142,22 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
       lx += txt(st.label, lx, ly, { size: 7.5, color: C.text }) + 6;
     });
     y = ly + 6;
+
+    // Courbes jour par jour (image du graphique « horaire théorique et réel »)
+    if (report.courbeImage) {
+      const imgH = Math.min(78, CW * 0.4);
+      sectionTitle('Horaire théorique et réel, jour par jour', report.courbeLegende || '', imgH + 4);
+      doc.addImage(report.courbeImage, 'PNG', M, y, CW, imgH);
+      y += imgH + 3;
+      let lx2 = M + 2;
+      (report.courbeCles || []).forEach(([lib, coul, rond]) => {
+        fill(coul);
+        if (rond) doc.circle(lx2 + 1.6, y + 1, 1.6, 'F'); else doc.rect(lx2, y + 0.3, 3.4, 1.4, 'F');
+        lx2 += 5;
+        lx2 += txt(lib, lx2, y + 2, { size: 7.5, color: C.text }) + 6;
+      });
+      y += 7;
+    }
 
     // Tableau générique (reprise de l'en-tête après un saut de page)
     const table = (columns, rows) => {

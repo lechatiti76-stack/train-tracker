@@ -2082,3 +2082,5 @@ html.theme-dark .c-early { color: #4ade80; }
 .stats-excel-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: .92rem; }
 .stats-excel-row > span { font-weight: 700; min-width: 86px; color: var(--text-muted, #64748b); }
 .stats-excel-row label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.stats-legend i.lg-point { border-radius: 50% !important; }
+.stats-chart-holder--time { height: 360px; }
