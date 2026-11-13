@@ -5312,6 +5312,85 @@ function summarizeStatsRows(rows) {
   return s;
 }
 
+// ---- Synthèse exécutive : régularité (écart réel − théorique), seuils usuels de ponctualité ferroviaire ----
+// À l'heure : écart ≤ 5 min (avances comprises) ; puis retards > 5, > 15 et > 25 min, en part des circulations mesurées.
+const STATS_SEUILS = [5, 15, 25];
+function statsAnalyse(rows) {
+  const total = rows.length, supprimees = rows.filter((r) => r.state === 'cancelled').length;
+  const ecarts = rows.filter((r) => r.state !== 'cancelled' && r.diffMin !== null && r.diffMin !== undefined && Number.isFinite(r.diffMin)).map((r) => r.diffMin).sort((a, b) => a - b);
+  const n = ecarts.length, somme = ecarts.reduce((a, b) => a + b, 0), moyenne = n ? somme / n : null;
+  const retards = ecarts.filter((d) => d > STATS_SEUILS[0]);
+  const pc = (k) => (n ? (100 * k) / n : null);
+  const mediane = n ? (n % 2 ? ecarts[(n - 1) / 2] : (ecarts[n / 2 - 1] + ecarts[n / 2]) / 2) : null;
+  const ecartType = n > 1 ? Math.sqrt(ecarts.reduce((a, d) => a + (d - moyenne) ** 2, 0) / (n - 1)) : n ? 0 : null;
+  return {
+    total, supprimees, tauxSuppression: total ? (100 * supprimees) / total : null, mesurees: n,
+    aLHeure: ecarts.filter((d) => d <= STATS_SEUILS[0]).length, plus5: retards.length,
+    plus15: ecarts.filter((d) => d > STATS_SEUILS[1]).length, plus25: ecarts.filter((d) => d > STATS_SEUILS[2]).length,
+    get tauxALHeure() { return pc(this.aLHeure); }, get taux5() { return pc(this.plus5); }, get taux15() { return pc(this.plus15); }, get taux25() { return pc(this.plus25); },
+    // retard moyen global : avances comptées 0 ; écart moyen : avances comprises (négatives)
+    retardMoyen: n ? ecarts.reduce((a, d) => a + Math.max(0, d), 0) / n : null, ecartMoyen: moyenne,
+    retardMoyenRetards: retards.length ? retards.reduce((a, b) => a + b, 0) / retards.length : null,
+    mediane, ecartType, avanceMax: n && ecarts[0] < 0 ? ecarts[0] : null, retardMax: n && ecarts[n - 1] > 0 ? ecarts[n - 1] : null,
+  };
+}
+const fmtPct = (v) => (v === null || v === undefined ? '—' : `${v.toFixed(1).replace('.', ',')} %`);
+const fmtMin = (v, signe = false) => (v === null || v === undefined ? '—' : `${signe && v > 0 ? '+' : ''}${(Math.round(v * 10) / 10).toString().replace('.', ',')} min`);
+const couleurTaux = (v) => (v === null ? '#94a3b8' : v >= 90 ? '#15803d' : v >= 75 ? '#d97706' : '#dc2626');
+/** Phrases de l'analyste : ce qu'il faut retenir de la période. */
+function statsNarratif(report) {
+  const a = statsAnalyse(report.rows), cat = report.category.label.toLowerCase();
+  if (!a.total) return [];
+  const out = [`${a.total} circulation${a.total > 1 ? 's' : ''} (${cat}) sur ${report.range.label}${a.supprimees ? `, dont ${a.supprimees} supprimée${a.supprimees > 1 ? 's' : ''} (${fmtPct(a.tauxSuppression)})` : ', aucune suppression'} ; ${a.mesurees} mesurée${a.mesurees > 1 ? 's' : ''}.`];
+  if (a.mesurees) {
+    out.push(`Ponctualité à 5 min : ${fmtPct(a.tauxALHeure)}${a.tauxALHeure >= 90 ? ' — niveau satisfaisant' : a.tauxALHeure >= 75 ? ' — à surveiller' : ' — régularité dégradée'}. Retards au-delà de 15 min : ${fmtPct(a.taux15)}, au-delà de 25 min : ${fmtPct(a.taux25)}.`);
+    out.push(`Retard moyen ${fmtMin(a.retardMoyen)} (avances comptées à zéro) ; ${a.plus5 ? `${fmtMin(a.retardMoyenRetards)} en moyenne sur les ${a.plus5} circulation${a.plus5 > 1 ? 's' : ''} en retard` : 'aucune circulation en retard de plus de 5 min'}. Médiane ${fmtMin(a.mediane, true)}, écart-type ${fmtMin(a.ecartType)}.`);
+    const parV = report.byItem.map((it) => ({ it, a: statsAnalyse(it.rows) })).filter((x) => x.a.mesurees >= 2);
+    if (parV.length > 1) {
+      const pire = parV.slice().sort((x, y) => (x.a.tauxALHeure - y.a.tauxALHeure) || (y.a.retardMoyen - x.a.retardMoyen))[0];
+      const mieux = parV.slice().sort((x, y) => (y.a.tauxALHeure - x.a.tauxALHeure) || (x.a.retardMoyen - y.a.retardMoyen))[0];
+      if (pire.it.key !== mieux.it.key) out.push(`Le plus régulier : ${mieux.it.label} (${fmtPct(mieux.a.tauxALHeure)} à l'heure). Le moins régulier : ${pire.it.label} (${fmtPct(pire.a.tauxALHeure)}, retard moyen ${fmtMin(pire.a.retardMoyen)}, max ${fmtMin(pire.a.retardMax, true)}).`);
+    }
+    if (a.ecartType !== null && a.ecartType > 15) out.push(`Forte dispersion des écarts (écart-type ${fmtMin(a.ecartType)}) : quelques circulations très en retard pèsent sur la moyenne ; la médiane est plus représentative.`);
+  }
+  return out;
+}
+function statsSyntheseHTML(report) {
+  const a = statsAnalyse(report.rows);
+  if (!a.total) return '';
+  const cartes = [
+    ['CIRCULATIONS', String(a.total), 'var(--text)', `${a.mesurees} mesurées`],
+    ['SUPPRESSION', fmtPct(a.tauxSuppression), a.supprimees ? '#dc2626' : '#64748b', `${a.supprimees} supprimée${a.supprimees > 1 ? 's' : ''}`],
+    ["À L'HEURE ≤ 5 MIN", fmtPct(a.tauxALHeure), couleurTaux(a.tauxALHeure), `${a.aLHeure} / ${a.mesurees}`],
+    ['RETARD > 5 MIN', fmtPct(a.taux5), a.plus5 ? '#d97706' : '#15803d', String(a.plus5)],
+    ['RETARD > 15 MIN', fmtPct(a.taux15), a.plus15 ? '#dc2626' : '#15803d', String(a.plus15)],
+    ['RETARD > 25 MIN', fmtPct(a.taux25), a.plus25 ? '#991b1b' : '#15803d', String(a.plus25)],
+    ['RETARD MOYEN', fmtMin(a.retardMoyen), '#dc2626', 'avances = 0'],
+    ['MOY. DES RETARDS', fmtMin(a.retardMoyenRetards), '#dc2626', 'retards > 5 min'],
+    ['MÉDIANE', fmtMin(a.mediane, true), '#334155', 'écart réel − théorique'],
+    ['ÉCART-TYPE', fmtMin(a.ecartType), '#334155', 'dispersion'],
+    ['AVANCE MAX', fmtMin(a.avanceMax), '#15803d', ''],
+    ['RETARD MAX', fmtMin(a.retardMax, true), '#dc2626', ''],
+  ];
+  const m = a.mesurees || 1, seg = [['≤ 5 min', a.aLHeure, '#16a34a'], ['5 à 15', a.plus5 - a.plus15, '#f59e0b'], ['15 à 25', a.plus15 - a.plus25, '#ef4444'], ['> 25', a.plus25, '#7f1d1d']];
+  const parV = report.byItem.map((it) => ({ it, a: statsAnalyse(it.rows) }));
+  return `
+    <section class="stats-exec">
+      <h3 class="stats-h3">Synthèse exécutive — régularité</h3>
+      <div class="stats-exec-texte">${statsNarratif(report).map((p) => `<p>${escapeHtml(p)}</p>`).join('')}</div>
+      <div class="stats-exec-cartes">${cartes.map(([l, v, c, d]) => `<div class="stats-exec-carte" style="--kpi-color:${c}"><span>${escapeHtml(l)}</span><strong>${escapeHtml(v)}</strong>${d ? `<small>${escapeHtml(d)}</small>` : ''}</div>`).join('')}</div>
+      ${a.mesurees ? `<div class="stats-exec-barre" role="img" aria-label="Répartition des écarts">${seg.filter((x) => x[1] > 0).map(([l, k, c]) => `<span style="flex:${k};background:${c}" title="${escapeHtml(l)} : ${k}">${(100 * k) / m >= 8 ? `${escapeHtml(l)} · ${Math.round((100 * k) / m)} %` : ''}</span>`).join('')}</div>
+      <div class="stats-legend">${seg.map(([l, k, c]) => `<span><i style="background:${c}"></i>${escapeHtml(l)} (${k})</span>`).join('')}</div>` : ''}
+      <div class="stats-table-wrap"><table class="stats-table stats-exec-table">
+        <thead><tr><th>Navette / train</th><th>Circ.</th><th>Supp.</th><th>≤ 5 min</th><th>&gt; 5</th><th>&gt; 15</th><th>&gt; 25</th><th>Retard moy.</th><th>Moy. retards</th><th>Médiane</th><th>Écart-type</th><th>Avance max</th><th>Retard max</th></tr></thead>
+        <tbody>${parV.map(({ it, a: x }) => `<tr><td><span class="stats-dot" style="background:${escapeHtml(it.color)}"></span><strong>${escapeHtml(it.label)}</strong></td>
+          <td>${x.total}</td><td>${x.supprimees ? `${x.supprimees} <small>(${fmtPct(x.tauxSuppression)})</small>` : '0'}</td>
+          <td style="color:${couleurTaux(x.tauxALHeure)};font-weight:800">${fmtPct(x.tauxALHeure)}</td><td>${fmtPct(x.taux5)}</td><td class="${x.plus15 ? 'c-late' : ''}">${fmtPct(x.taux15)}</td><td class="${x.plus25 ? 'c-late' : ''}">${fmtPct(x.taux25)}</td>
+          <td>${fmtMin(x.retardMoyen)}</td><td>${fmtMin(x.retardMoyenRetards)}</td><td>${fmtMin(x.mediane, true)}</td><td>${fmtMin(x.ecartType)}</td><td class="c-early">${fmtMin(x.avanceMax)}</td><td class="c-late">${fmtMin(x.retardMax, true)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>`;
+}
+
 function statsDiffLabel(diffMin) {
   if (diffMin === null || diffMin === undefined) return '—';
   if (Math.abs(diffMin) < DELAY_THRESHOLDS.onTime) return '0 min';
@@ -5404,6 +5483,7 @@ function statsBodyHTML(report) {
 
   return `
     <div class="stats-kpis">${kpis.map((k) => `<div class="stats-kpi" style="--kpi-color:${k.color}"><span>${escapeHtml(k.label)}</span><strong>${escapeHtml(k.value)}</strong></div>`).join('')}</div>
+    ${statsSyntheseHTML(report)}
     ${s.total === 0 ? `<p class="stats-empty">Aucun voyage enregistré pour cette sélection sur cette période.${statsState.category === 'trainDepartures' ? '' : " L'historique des navettes et des arrivées est conservé jour par jour depuis cette version de l'application."}</p>` : `
     <div class="stats-chart-card">
       <div class="stats-chart-head">
@@ -5677,6 +5757,7 @@ function statsControlsHTML(report) {
         <label><input type="radio" name="xlPortee" value="individuel" ${selected.size ? 'checked' : ''}> Individuel : voyages choisis ci-dessus (${escapeHtml(selected.size ? report.selectionLabel : 'aucun')})</label>
       </div>
       <div class="stats-excel-row"><span>Feuilles :</span>
+        <label><input type="checkbox" data-xl-part="executive" checked> Synthèse exécutive (régularité)</label>
         <label><input type="checkbox" data-xl-part="synthese" checked> Synthèse</label>
         <label><input type="checkbox" data-xl-part="graphiques" checked> Graphiques (courbes)</label>
         <label><input type="checkbox" data-xl-part="voyages" checked> Par voyage</label>
@@ -5815,6 +5896,30 @@ async function exportStatsExcel(root) {
   const ETATS_FOND = { late: 'FFFDE2E1', early: 'FFDCFCE7', onTime: 'FFF1F5F9', cancelled: 'FFFEE2E2', stalled: 'FFEDE9FE', departedFA: 'FFDCFCE7' };
   const ETATS_ENCRE = { late: 'FFB91C1C', early: 'FF15803D', onTime: 'FF475569', cancelled: 'FFB91C1C', stalled: 'FF6D28D9', departedFA: 'FF15803D' };
 
+  if (parts.has('executive')) {
+    const ws = feuille('Synthèse exécutive', [26, 11, 11, 12, 11, 11, 11, 11, 13, 13, 12, 12, 12, 12]);
+    bandeau(ws, `SYNTHÈSE EXÉCUTIVE — RÉGULARITÉ — ${range.label.toUpperCase()}`, `Écart = heure réelle − heure théorique · à l'heure ≤ 5 min · ${genere}`, 14);
+    let l = 4;
+    const cols = [['Navette / train', 'nom'], ['Circulations', 'total'], ['Supprimées', 'supprimees'], ['Taux suppr.', 'tsup', null, '0.0%'], ['≤ 5 min', 't0', null, '0.0%'], ['> 5 min', 't5', null, '0.0%'],
+      ['> 15 min', 't15', null, '0.0%'], ['> 25 min', 't25', null, '0.0%'], ['Retard moyen (min)', 'rm', null, '0.0'], ['Moy. des retards (min)', 'rr', null, '0.0'], ['Médiane (min)', 'med', null, '0.0'],
+      ['Écart-type (min)', 'et', null, '0.0'], ['Avance max (min)', 'am', null, '0'], ['Retard max (min)', 'rx', null, '0']];
+    const ligneDe = (nom, a) => ({ nom, total: a.total, supprimees: a.supprimees, tsup: a.tauxSuppression == null ? null : a.tauxSuppression / 100, t0: a.tauxALHeure == null ? null : a.tauxALHeure / 100,
+      t5: a.taux5 == null ? null : a.taux5 / 100, t15: a.taux15 == null ? null : a.taux15 / 100, t25: a.taux25 == null ? null : a.taux25 / 100, rm: a.retardMoyen, rr: a.retardMoyenRetards,
+      med: a.mediane, et: a.ecartType, am: a.avanceMax, rx: a.retardMax });
+    ws.columns = cols.map((c, k) => ({ width: k === 0 ? 26 : 12 }));
+    reports.forEach((r) => {
+      ws.mergeCells(l, 1, l, cols.length);
+      const c = ws.getCell(l, 1); c.value = r.category.label.toUpperCase(); c.font = { bold: true, size: 11, color: { argb: NUIT } };
+      ws.getRow(l).height = 20; l += 1;
+      statsNarratif(r).forEach((ph) => { ws.mergeCells(l, 1, l, cols.length); const x = ws.getCell(l, 1); x.value = ph; x.alignment = { wrapText: true, vertical: 'top', indent: 1 }; x.font = { size: 10, color: { argb: 'FF1F2937' } }; ws.getRow(l).height = 30; l += 1; });
+      const lignes = [ligneDe('ENSEMBLE', statsAnalyse(r.rows))].concat(r.byItem.map((it) => ligneDe(it.label, statsAnalyse(it.rows))));
+      l = tableau(ws, l + 1, cols, lignes, (row, obj) => {
+        if (obj.nom === 'ENSEMBLE') row.eachCell((cell) => { cell.font = { bold: true }; cell.fill = fillc('FFEEF4FF'); });
+        couleurPonct(row.getCell(5), obj.t0);
+      }) + 2;
+    });
+    ws.views = [{ showGridLines: false }]; ws.autoFilter = null;
+  }
   if (parts.has('synthese')) {
     const ws = feuille('Synthèse', [24, 26, 11, 13, 11, 11, 11, 11, 9, 14, 14, 14]);
     bandeau(ws, `STATISTIQUES DE CIRCULATION — ${range.label.toUpperCase()}`, `${individuel ? 'Voyages choisis' : 'Tous les voyages'} · ${genere}`, 12);
@@ -6091,6 +6196,51 @@ function buildStatsPdfDoc(report, { includeDetail = true } = {}) {
     if (subtitle) txt(subtitle, M + CW - 4, baseline(y, 8.5, 7.5), { size: 7.5, color: C.muted, align: 'right' });
     y += 10.5;
   };
+
+  // Synthèse exécutive : analyse rédigée, seuils de ponctualité, dispersion, puis tableau par navette / train
+  const ax = statsAnalyse(report.rows);
+  if (ax.total) {
+    sectionTitle('Synthèse exécutive — régularité', 'écart = réel − théorique · à l\'heure ≤ 5 min', 40);
+    statsNarratif(report).forEach((ph) => {
+      font(8.8); const lignes = doc.splitTextToSize(pdfSafeText(ph), CW - 6);
+      ensure(lignes.length * 4.2 + 1);
+      lignes.forEach((ln) => { txt(ln, M + 3, y + 3, { size: 8.8, color: C.text }); y += 4.2; });
+      y += 1;
+    });
+    y += 2;
+    const tx = [['CIRCULATIONS', String(ax.total), C.ink], ['SUPPRESSION', fmtPct(ax.tauxSuppression), ax.supprimees ? C.red : C.muted], ["À L'HEURE ≤5", fmtPct(ax.tauxALHeure), couleurTaux(ax.tauxALHeure)],
+      ['> 5 MIN', fmtPct(ax.taux5), ax.plus5 ? C.amber : C.green], ['> 15 MIN', fmtPct(ax.taux15), ax.plus15 ? C.red : C.green], ['> 25 MIN', fmtPct(ax.taux25), ax.plus25 ? '#991b1b' : C.green],
+      ['RETARD MOYEN', fmtMin(ax.retardMoyen), C.red], ['MOY. RETARDS', fmtMin(ax.retardMoyenRetards), C.red], ['MÉDIANE', fmtMin(ax.mediane, true), '#334155'],
+      ['ÉCART-TYPE', fmtMin(ax.ecartType), '#334155'], ['AVANCE MAX', fmtMin(ax.avanceMax), C.green], ['RETARD MAX', fmtMin(ax.retardMax, true), C.red]];
+    const pr = 6, tw = (CW - gap * (pr - 1)) / pr;
+    ensure(34);
+    tx.forEach(([label, value, color], i) => {
+      const x = M + (i % pr) * (tw + gap), ty = y + Math.floor(i / pr) * 16;
+      box(x, ty, tw, 13.5, { fillColor: '#ffffff', stroke: C.border, r: 2 }); fill(color); doc.rect(x + 0.15, ty + 2.5, 1.1, 8.5, 'F');
+      txt(label, x + tw / 2, ty + 4.6, { size: 5.8, style: 'bold', color: C.muted, align: 'center', maxW: tw - 3 });
+      txt(value, x + tw / 2, ty + 10.6, { size: 10.5, style: 'bold', color, align: 'center', maxW: tw - 3 });
+    });
+    y += 33;
+    if (ax.mesurees) { // barre de répartition
+      ensure(10);
+      const seg = [['<= 5 min', ax.aLHeure, '#16a34a'], ['5 a 15', ax.plus5 - ax.plus15, '#f59e0b'], ['15 a 25', ax.plus15 - ax.plus25, '#ef4444'], ['> 25', ax.plus25, '#7f1d1d']];
+      let x = M; seg.forEach(([l, k, c]) => { if (!k) return; const w = (CW * k) / ax.mesurees; fill(c); doc.rect(x, y, w, 6, 'F'); if (w > 22) txt(`${l} · ${Math.round((100 * k) / ax.mesurees)} %`, x + w / 2, y + 4.1, { size: 7, style: 'bold', color: '#ffffff', align: 'center' }); x += w; });
+      y += 10;
+    }
+    // tableau par navette / train
+    const colsE = [['Navette / train', 0.2], ['Circ.', 0.06], ['Supp.', 0.06], ['<= 5', 0.07], ['> 5', 0.065], ['> 15', 0.065], ['> 25', 0.065], ['Ret. moy.', 0.075], ['Moy. ret.', 0.075], ['Médiane', 0.07], ['Écart-type', 0.075], ['Av. max', 0.065], ['Ret. max', 0.065]];
+    const xs = []; let acc = M; colsE.forEach(([, f]) => { xs.push(acc); acc += f * CW; });
+    const ligneE = (vals, opts = {}) => {
+      ensure(6.5); if (opts.fond) box(M, y, CW, 6.2, { fillColor: opts.fond, stroke: null, r: 0.8 });
+      vals.forEach((v, k) => txt(v, k === 0 ? xs[k] + 2 : xs[k] + (colsE[k][1] * CW) / 2, y + 4.2, { size: 7.4, style: opts.gras || k === 0 ? 'bold' : 'normal', color: opts.couleurs && opts.couleurs[k] ? opts.couleurs[k] : C.text, align: k === 0 ? 'left' : 'center', maxW: colsE[k][1] * CW - 2 }));
+      y += 6.4;
+    };
+    ligneE(colsE.map((c) => c[0]), { fond: C.bandBg, gras: true });
+    const valsDe = (nom, x) => [nom, String(x.total), String(x.supprimees), fmtPct(x.tauxALHeure), fmtPct(x.taux5), fmtPct(x.taux15), fmtPct(x.taux25), fmtMin(x.retardMoyen), fmtMin(x.retardMoyenRetards), fmtMin(x.mediane, true), fmtMin(x.ecartType), fmtMin(x.avanceMax), fmtMin(x.retardMax, true)];
+    ligneE(valsDe('Ensemble', ax), { fond: '#eef4ff', gras: true, couleurs: { 3: couleurTaux(ax.tauxALHeure) } });
+    report.byItem.forEach((it, i) => { const x = statsAnalyse(it.rows); ligneE(valsDe(it.label, x), { fond: i % 2 ? C.headBg : null, couleurs: { 3: couleurTaux(x.tauxALHeure), 6: x.plus25 ? C.red : null, 12: C.red, 11: C.green } }); });
+    y += 4;
+  }
 
   if (s.total === 0) {
     txt('Aucun voyage enregistré pour cette sélection sur cette période.', M + 2, y + 4, { size: 10, style: 'italic', color: C.muted });

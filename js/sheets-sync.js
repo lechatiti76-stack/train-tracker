@@ -206,12 +206,22 @@ async function postToSheet(webAppUrl, payload, { timeoutMs = 8000 } = {}) {
       return { ok: false, reason: 'bad_response' };
     }
     if (data && data.error) return { ok: false, reason: 'server_error', detail: data.error };
+    signalerSuivi(payload);
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: err.name === 'AbortError' ? 'timeout' : 'network_error' };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Saisie du suivi des circulations (même site) : prévenue dès qu'une étape, un départ ou une navette est écrit dans
+// le classeur, pour qu'elle le relise aussitôt (fenêtre « Suivi trains » de la saisie, ou autre onglet du même PC)
+// au lieu d'attendre sa lecture toutes les 10 s. Les écrans TV suivent la saisie.
+function signalerSuivi(payload) {
+  const msg = { type: 'suivi-trains:maj', action: payload && payload.action, train: payload && (payload.train || payload.code) || '' };
+  try { new BroadcastChannel('suivi-trains').postMessage(msg); } catch (e) { /* navigateur ancien */ }
+  try { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*'); } catch (e) { /* fenêtre d'un autre site */ }
 }
 
 // Composition (wagons/poids/longueur/traction) saisie via le bouton

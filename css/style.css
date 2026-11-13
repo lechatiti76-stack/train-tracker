@@ -2084,3 +2084,17 @@ html.theme-dark .c-early { color: #4ade80; }
 .stats-excel-row label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .stats-legend i.lg-point { border-radius: 50% !important; }
 .stats-chart-holder--time { height: 360px; }
+
+/* ---- Statistiques : synthèse exécutive ---- */
+.stats-exec { margin: 4px 0 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.stats-exec .stats-h3 { margin-top: 0; }
+.stats-exec-texte { border-left: 4px solid #1d4ed8; padding: 6px 12px; margin-bottom: 12px; background: rgba(29, 78, 216, .06); border-radius: 0 8px 8px 0; }
+.stats-exec-texte p { margin: 4px 0; font-size: 14px; line-height: 1.45; }
+.stats-exec-cartes { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.stats-exec-carte { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--kpi-color); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px; }
+.stats-exec-carte span { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: #64748b; }
+.stats-exec-carte strong { font-size: 20px; color: var(--kpi-color); font-variant-numeric: tabular-nums; }
+.stats-exec-carte small { font-size: 11px; color: #64748b; }
+.stats-exec-barre { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 4px 0 6px; }
+.stats-exec-barre span { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; }
+.stats-exec-table td, .stats-exec-table th { white-space: nowrap; }
