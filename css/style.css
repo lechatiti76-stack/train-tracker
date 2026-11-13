@@ -2098,3 +2098,4 @@ html.theme-dark .c-early { color: #4ade80; }
 .stats-exec-barre { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin: 4px 0 6px; }
 .stats-exec-barre span { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; }
 .stats-exec-table td, .stats-exec-table th { white-space: nowrap; }
+.stats-exec-table tr.stats-exec-ensemble td { background: rgba(29, 78, 216, .08); font-weight: 800; }
