@@ -24,6 +24,8 @@ const EXCELJS_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JC = ['dim', 'lun', 'mar', 'mer', 'jeu', 'ven', 'sam'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+// Nombres de wagons proposés sous chaque carte (mêmes valeurs que la saisie du Suivi des circulations)
+const WAGONS_PROPOSES = { LF: [9, 18, 27, 36], LN: [9, 18, 27, 36], LA: [9, 10, 13, 18, 19, 26, 27] };
 const famOf = (s) => FAMS.find((f) => s.startsWith(f.id));
 
 // ---------- Dates ----------
@@ -92,7 +94,7 @@ function rebuildIndex() {
   state.index = idx;
   for (const f of FAMS) {
     const top = Object.entries(freq[f.id] || {}).sort((a, b) => b[1] - a[1]).map((e) => +e[0]);
-    state.wagonTop[f.id] = [...new Set([...top, 9, 18, 27, 8])].slice(0, 4).sort((a, b) => a - b);
+    state.wagonTop[f.id] = (WAGONS_PROPOSES[f.id] || [...new Set([...top, 9, 18, 27, 8])].slice(0, 4)).slice().sort((a, b) => a - b);
   }
 }
 
@@ -137,6 +139,7 @@ function schedulePushCoupons(day) {
   pushTimers[day] = setTimeout(() => pushCoupons(day), 2000);
 }
 async function pushCoupons(day) {
+  delete pushTimers[day];
   let url = '';
   try { url = (loadSettings() || {}).sheetsWebAppUrl || ''; } catch (e) { url = ''; }
   if (!url) return;
@@ -147,6 +150,44 @@ async function pushCoupons(day) {
       body: JSON.stringify({ action: 'logCoupons', date: day, coupons: couponRows(day), misAJour: new Date().toISOString() }),
     });
   } catch (e) { /* hors ligne : renvoyé au prochain changement de la journée */ }
+}
+
+// Coupons saisis dans la saisie du Suivi des circulations : relus de l'onglet "Coupons" (?action=coupons)
+// à l'ouverture puis toutes les 15 s. La version la plus récente d'une journée l'emporte ; une journée
+// en cours de frappe ici, ou pas encore envoyée, n'est pas touchée.
+function docFromSheet(date, j, local) {
+  const nav = {};
+  (j.coupons || []).slice().sort((a, b) => a.ligne - b.ligne).forEach((c) => {
+    const w = /^\d{1,3}$/.test(String(c.wagons).trim()) ? +c.wagons : null; const n = String(c.numero || '').trim();
+    const line = { n: /^\d{1,3}$/.test(n) ? +n : n, dc: parseDC(c.dateCoupon) ?? (c.dateCoupon || null), w };
+    if (w == null && c.note) line.note = c.note;
+    (nav[c.navette] = nav[c.navette] || []).push(line);
+  });
+  const doc = { date, nav, maj: j.maj || new Date().toISOString(), source: 'saisie' };
+  if (local && local.keep) doc.keep = local.keep;
+  return doc;
+}
+let pullTimer = null;
+async function pullCoupons() {
+  let url = '';
+  try { url = (loadSettings() || {}).sheetsWebAppUrl || ''; } catch (e) { url = ''; }
+  if (!url || !state.root || state.root.hidden) return;
+  try {
+    const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'action=coupons&du=' + addDays(state.day, -10) + '&au=' + addDays(state.day, 10));
+    const data = await r.json(); if (!data || !data.jours) return;
+    let change = false;
+    for (const [date, j] of Object.entries(data.jours)) {
+      if (pushTimers[date] || Object.keys(state.rows).some((k) => k.startsWith(date + '|'))) continue;
+      const local = state.docs[date];
+      if (local && local.maj && j.maj && j.maj <= local.maj) continue;
+      if (!local && !(j.coupons || []).length) continue;
+      const doc = docFromSheet(date, j, local);
+      if (local && JSON.stringify(local.nav) === JSON.stringify(doc.nav)) { local.maj = doc.maj; continue; }
+      if (!Object.keys(doc.nav).length && !(doc.keep || []).length) delete state.docs[date]; else state.docs[date] = doc;
+      change = true;
+    }
+    if (change) { rebuildIndex(); persist(); render(); }
+  } catch (e) { /* hors ligne, ou Apps Script pas encore mis à jour : on garde les coupons de l'appareil */ }
 }
 
 function mutate(day, fn) {
@@ -307,11 +348,11 @@ function cardHTML(day, f, s, lines) {
     if (iss.length) rows += '<div class="cp-row-issues">' + iss.map((x) => '<span class="cp-issue ' + x.lvl + '">' + x.txt + '</span>').join('') + '</div>';
   }
   const ak = activeRow(s); const avd = rowVals(s, ak).d || defaultDCText(s);
-  const chipsD = [prevWorking(prevWorking(day)), prevWorking(day), day].map((d) => { const t = fmtDC(dcFromISO(d)); return '<button type="button" class="cp-chip cp-chip-d' + (avd === t ? ' on' : '') + '" data-setd="' + s + '|' + t + '" title="' + shortDay(d) + '"><small>' + JC[toDate(d).getDay()] + '</small> ' + t + '</button>'; }).join('');
+  const chipsD = [-3, -2, -1, 0, 1, 2, 3].map((k) => addDays(day, k)).map((d) => { const t = fmtDC(dcFromISO(d)); return '<button type="button" class="cp-chip cp-chip-d' + (avd === t ? ' on' : '') + (d === day ? ' jour' : '') + '" data-setd="' + s + '|' + t + '" title="' + shortDay(d) + (d === day ? ' (jour de la navette)' : '') + '"><small>' + JC[toDate(d).getDay()] + '</small><b>' + t + '</b></button>'; }).join('');
   const chipsW = (state.wagonTop[f.id] || [9, 18, 27]).map((w) => '<button type="button" class="cp-chip" data-setw="' + s + '|' + w + '" title="' + w + ' wagons">' + w + '</button>').join('');
   return '<div class="cp-card"><div class="cp-card-h"><span class="cp-shuttle">' + s + '</span><span class="cp-card-code">' + f.code + '</span><span class="cp-tot"><b>' + sumW(lines) + '</b><small>wagons</small></span></div>' +
     '<div class="cp-grid">' + rows + '</div>' +
-    '<div class="cp-chips"><span class="cp-lab">Date</span>' + chipsD + '</div><div class="cp-chips"><span class="cp-lab">Wgs</span>' + chipsW + '</div></div>';
+    '<div class="cp-chips cp-chips-d"><span class="cp-lab">Date</span>' + chipsD + '</div><div class="cp-chips"><span class="cp-lab">Wgs</span>' + chipsW + '</div></div>';
 }
 
 function renderAside(day) {
@@ -394,6 +435,8 @@ async function buildWorkbook(days, sheetName) {
   const widths = [2.66, 3.66, 7.66, 5.66, 10.89, 11.55];
   const cols = [{ width: 11.55 }]; for (let c = 1; c < 19; c++) cols.push({ width: widths[(c - 1) % 6] });
   ws.columns = cols;
+  // impression : toute la largeur (LF1 à LF3) sur une page A4 paysage
+  ws.pageSetup = { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
   const thin = { style: 'thin' }; const box = { top: thin, left: thin, bottom: thin, right: thin };
   const center = { horizontal: 'center', vertical: 'middle' };
   const orange = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
@@ -401,7 +444,7 @@ async function buildWorkbook(days, sheetName) {
   let r = 1;
   for (const day of days) {
     const [y, m, d] = day.split('-').map(Number);
-    const a = ws.getCell(r, 1); a.value = new Date(Date.UTC(y, m - 1, d)); a.numFmt = 'dddd\\ d\\ mmm\\ yyyy'; a.font = { bold: true, size: 11 }; a.alignment = center;
+    const a = ws.getCell(r, 1); a.value = new Date(Date.UTC(y, m - 1, d)); a.numFmt = '[$-40C]dddd\\ d\\ mmmm\\ yyyy'; /* en français */ a.font = { bold: true, size: 11 }; a.alignment = center;
     ws.mergeCells(r, 1, r, 18);
     r += 2;
     const doc = getDoc(day);
@@ -414,15 +457,16 @@ async function buildWorkbook(days, sheetName) {
           const b = 2 + 6 * k;
           const fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f.excelFill } };
           const hc = ws.getCell(r, b); hc.value = s; ws.mergeCells(r, b, r, b + 3);
-          hc.fill = fill; hc.font = { size: 12 }; hc.alignment = center; hc.border = box;
-          const nb = ws.getCell(r, b + 4); nb.value = 'Nb wgs'; nb.fill = fill; nb.font = { size: 12 }; nb.alignment = center; nb.border = box;
+          const hf = { size: 12, bold: true, color: { argb: f.excelFont || 'FF000000' } }; // texte blanc sur le bleu TN
+          hc.fill = fill; hc.font = hf; hc.alignment = center; hc.border = box;
+          const nb = ws.getCell(r, b + 4); nb.value = 'Nb wgs'; nb.fill = fill; nb.font = hf; nb.alignment = center; nb.border = box;
           const lines = doc.nav[s] || []; const refs = []; let sum = 0;
           for (let i = 0; i < n; i++) {
             const rr = r + 1 + 2 * i; const l = lines[i] || {};
             const vals = ['C', l.n ?? null, f.code, l.dc ?? null, (typeof l.w === 'number' ? l.w : (l.note || null))];
             vals.forEach((v, j) => {
               const c = ws.getCell(rr, b + j); c.value = v; c.border = box; c.alignment = center;
-              if (j === 1 || j === 3) { c.fill = orange; c.numFmt = '00'; }
+              if (j === 1 || j === 3) { c.fill = orange; c.numFmt = j === 3 ? '0000' : '00'; } // date jjmm : 0411, pas 411
             });
             refs.push(L(b + 4) + rr); if (typeof l.w === 'number') sum += l.w;
             if (i < n - 1) { ws.getRow(rr + 1).height = 3; ws.mergeCells(rr + 1, b, rr + 1, b + 4); }
@@ -598,7 +642,7 @@ const SHELL = `
   </div>
   <div class="cp-toast" id="cp-toast" hidden role="status"><span id="cp-toastMsg"></span><button type="button" id="cp-toastUndo" hidden>Annuler</button></div>`;
 
-function goDay(d) { commitPending(); state.day = d; state.active = {}; render(); }
+function goDay(d) { commitPending(); state.day = d; state.active = {}; render(); pullCoupons(); }
 function setView(v) { commitPending(); state.view = v; render(); }
 
 function bindEvents(root) {
@@ -708,12 +752,13 @@ export function openCoupons() {
   document.body.classList.add('coupons-open');
   render();
   if (window.matchMedia('(pointer: fine)').matches) focusCell('LF1', activeRow('LF1'), 'n');
+  pullCoupons(); clearInterval(pullTimer); pullTimer = setInterval(pullCoupons, 15000);
 }
 
 export function closeCoupons() {
   if (!state.root || state.root.hidden) return;
   commitPending();
-  state.root.hidden = true;
+  state.root.hidden = true; clearInterval(pullTimer);
   document.body.classList.remove('coupons-open');
   const btn = document.getElementById('btnCoupons'); if (btn) btn.focus();
 }

@@ -146,6 +146,14 @@ body.coupons-open { overflow: hidden; }
 .cp-toast[hidden] { display: none; }
 .cp-toast button { background: none; border: 0; color: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }
 
+/* dates proposées : de J-3 à J+3 sur une ligne */
+.cp-chips-d { display: grid; grid-template-columns: auto repeat(7, minmax(0, 1fr)); gap: 3px; }
+.cp-chip-d { display: flex; flex-direction: column; align-items: center; line-height: 1.05; padding: 3px 0; border-radius: 7px; min-width: 0; }
+.cp-chip-d small { font-size: 0.62rem; text-transform: capitalize; }
+.cp-chip-d b { font-size: 0.74rem; }
+.cp-chip-d.jour { border-color: var(--accent); border-style: dashed; }
+.cp-chip-d.jour.on { border-style: solid; }
+
 @media (max-width: 640px) {
   .cp-week-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cp-daytitle strong { font-size: 1.1rem; }
