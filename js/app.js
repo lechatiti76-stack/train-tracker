@@ -2467,6 +2467,19 @@ function circulationsKnows(v) {
   return Boolean(findArrivalGroup(v.code));
 }
 
+// Heure d'arrivée réelle saisie à la main (fenêtre d'une navette ou d'une arrivée fret) : 'HH:MM' de la journée affichée → ISO.
+function dateAtHHMM(dateISO, hhmm) {
+  const parsed = parseHHMM(hhmm); if (!parsed) return null;
+  const [y, m, d] = String(dateISO || todayISO()).split('-').map(Number);
+  return new Date(y, m - 1, d, parsed.h, parsed.m, 0, 0).toISOString();
+}
+const arrivedTimeValue = (rec) => (rec?.arrivedManually && rec?.arrivedAt ? formatHHMM(new Date(rec.arrivedAt)) : '');
+// Champ « Heure d'arrivée réelle » : corrige l'heure prise au clic (ex. navettes validées en retard dans la journée).
+function arrivedTimeFieldHTML(id, rec) {
+  return `<label class="arrived-time-row">Heure d'arrivée réelle <span class="help-text">(modifiable : corrigez-la si l'arrivée a été validée plus tard)</span>
+    <input type="time" id="${id}" value="${arrivedTimeValue(rec)}"></label>`;
+}
+
 // 'HH:MM' du jour → ISO, comme arrivedAt quand on clique « arrivée ».
 function todayAtHHMM(hhmm) {
   const parsed = parseHHMM(hhmm);
@@ -3177,6 +3190,7 @@ function openShuttleModal(code) {
           <button type="button" class="btn ${delayFlag ? 'btn-danger' : 'btn-outline'}" id="btnShuttleDelay" aria-pressed="${delayFlag}">⚠ Retard / souci</button>
         </div>
         <p class="help-text" data-role="shuttle-quick-status">${shuttleQuickStatusText(arrivedManually, delayFlag)}</p>
+        ${arrivedTimeFieldHTML('fShuttleArrivedAt', rec)}
 
         ${voieWagonsFieldsHTML(rec)}
         <div class="form-actions">
@@ -3236,6 +3250,7 @@ function openShuttleModal(code) {
         saveShuttles(shuttles);
         renderShuttlesBar();
         refreshQuickButtons();
+        panel.querySelector('#fShuttleArrivedAt').value = arrivedTimeValue(current);
         if (current.arrivedManually && current.arrivedAt) {
           const delta = computeShuttleArrivalDelta(code);
           pushShuttleLogIfConfigured('Navette', `${code}-arr`, `${code} (arrivée)`, computeShuttleArrival(code, current.departure), formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
@@ -3260,10 +3275,17 @@ function openShuttleModal(code) {
         const current = shuttles[code] || {};
         current.departure = input.value || null;
         applyVoieWagons(current, readVoieWagons(panel), 'InfoNavette', code, code);
+        // heure d'arrivée réelle corrigée à la main : enregistrée et envoyée au suivi des circulations
+        const arrVal = panel.querySelector('#fShuttleArrivedAt').value, arrChanged = arrVal !== arrivedTimeValue(current);
+        if (arrChanged) { current.arrivedManually = Boolean(arrVal); current.arrivedAt = arrVal ? dateAtHHMM(currentDate, arrVal) : null; }
         shuttles[code] = current;
         saveShuttles(shuttles);
         renderShuttlesBar();
         closeModal();
+        if (arrChanged) {
+          const delta = arrVal ? computeShuttleArrivalDelta(code) : null;
+          pushShuttleLogIfConfigured('Navette', `${code}-arr`, `${code} (arrivée)`, arrVal && current.departure ? computeShuttleArrival(code, current.departure) : null, arrVal || null, delta?.diffMin ?? null);
+        }
         if (current.departure) pushShuttleLogIfConfigured('Navette', code, `${code} (départ)`, computeShuttleArrival(code, current.departure), current.departure, null);
         showToast(`Navette ${code} mise à jour`);
       });
@@ -4028,6 +4050,7 @@ function openArrivalModal(id) {
           <button type="button" class="btn ${rec.faStored ? 'btn-primary' : 'btn-outline'}" id="btnArrivalFA" aria-pressed="${Boolean(rec.faStored)}">${rec.faStored ? '☑' : '☐'} Stocké à FA</button>
         </div>
         <p class="help-text" data-role="arrival-quick-status">${arrivalQuickStatusText(arrivedManually, delayFlag)}</p>
+        ${arrivedTimeFieldHTML('fArrivalArrivedAt', rec)}
 
         ${voieWagonsFieldsHTML(rec)}
         <div class="form-actions">
@@ -4098,6 +4121,7 @@ function openArrivalModal(id) {
         saveArrivals(arrivals);
         renderArrivalsBar();
         refreshQuickButtons();
+        panel.querySelector('#fArrivalArrivedAt').value = arrivedTimeValue(current);
         if (current.arrivedManually && current.arrivedAt) {
           const delta = computeArrivalArrivalDelta(id);
           pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, current.departure ? computeArrivalETA(id, current.departure) : null, formatHHMM(new Date(current.arrivedAt)), delta?.diffMin ?? null);
@@ -4130,10 +4154,16 @@ function openArrivalModal(id) {
         current.departure = input.value || null;
         current.stops = readFormStops();
         applyVoieWagons(current, readVoieWagons(panel), 'InfoArrivee', id, group.label);
+        const arrVal = panel.querySelector('#fArrivalArrivedAt').value, arrChanged = arrVal !== arrivedTimeValue(current);
+        if (arrChanged) { current.arrivedManually = Boolean(arrVal); current.arrivedAt = arrVal ? dateAtHHMM(currentDate, arrVal) : null; }
         arrivals[id] = current;
         saveArrivals(arrivals);
         renderArrivalsBar();
         closeModal();
+        if (arrChanged) {
+          const delta = arrVal ? computeArrivalArrivalDelta(id) : null;
+          pushShuttleLogIfConfigured('Arrivée', `${id}-arr`, `${group.label} (arrivée)`, arrVal && current.departure ? computeArrivalETA(id, current.departure) : null, arrVal || null, delta?.diffMin ?? null);
+        }
         if (current.departure) pushShuttleLogIfConfigured('Arrivée', id, `${group.label} (départ)`, computeArrivalETA(id, current.departure), current.departure, null);
         showToast(`${group.label} mise à jour`);
       });
