@@ -1094,16 +1094,16 @@ function buildTrainReportHTML(train, destination) {
     const realBg = e.kind === 'late' ? '#fef2f2' : (e.kind === 'onTime' || e.kind === 'early') ? '#f0fdf4' : '#ffffff';
     return `
       <tr style="background:${rowBg};">
-        <td width="18" style="padding:10px 0 10px 14px;border-bottom:1px solid #eef1f6;${F}font-size:16px;color:${dot};">●</td>
-        <td width="40" style="padding:8px 6px;border-bottom:1px solid #eef1f6;">
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="32" height="32" align="center" valign="middle" style="width:32px;height:32px;border-radius:16px;background:${iconBg};font-size:16px;line-height:32px;">${regulatorStepIcon(step.label)}</td></tr></table>
+        <td width="18" style="padding:5px 0 5px 12px;border-bottom:1px solid #eef1f6;${F}font-size:12px;color:${dot};">●</td>
+        <td width="30" style="padding:4px 4px;border-bottom:1px solid #eef1f6;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" align="center" valign="middle" style="width:22px;height:22px;border-radius:11px;background:${iconBg};font-size:12px;line-height:22px;">${regulatorStepIcon(step.label)}</td></tr></table>
         </td>
-        <td style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:13px;font-weight:${isLast ? 800 : 600};color:${labelColor};text-transform:uppercase;letter-spacing:.02em;">${escapeHtml(step.label)}</td>
-        <td align="center" style="padding:10px 8px;border-bottom:1px solid #eef1f6;${F}font-size:14px;color:${isLast && e.kind === 'late' ? '#dc2626' : '#64748b'};">${escapeHtml(step.theoretical || '--:--')}</td>
-        <td align="center" style="padding:8px;border-bottom:1px solid #eef1f6;">
-          <span style="display:inline-block;min-width:58px;padding:5px 10px;border:1px solid ${realBorder};border-radius:6px;background:${realBg};${F}font-size:15px;font-weight:800;color:${realColor};">${escapeHtml(real)}</span>
+        <td style="padding:5px 6px;border-bottom:1px solid #eef1f6;${F}font-size:11px;font-weight:${isLast ? 800 : 600};color:${labelColor};text-transform:uppercase;letter-spacing:.02em;">${escapeHtml(step.label)}</td>
+        <td align="center" style="padding:5px 6px;border-bottom:1px solid #eef1f6;${F}font-size:12px;color:${isLast && e.kind === 'late' ? '#dc2626' : '#64748b'};">${escapeHtml(step.theoretical || '--:--')}</td>
+        <td align="center" style="padding:4px 6px;border-bottom:1px solid #eef1f6;">
+          <span style="display:inline-block;min-width:46px;padding:2px 7px;border:1px solid ${realBorder};border-radius:5px;background:${realBg};${F}font-size:12px;font-weight:800;color:${realColor};">${escapeHtml(real)}</span>
         </td>
-        <td align="center" style="padding:8px 14px 8px 8px;border-bottom:1px solid #eef1f6;">${mailPill(e)}</td>
+        <td align="center" style="padding:4px 12px 4px 6px;border-bottom:1px solid #eef1f6;">${mailPill(e, 11)}</td>
       </tr>`;
   }).join('');
 
@@ -1167,31 +1167,7 @@ function buildTrainReportHTML(train, destination) {
   <tr>
     <td style="padding:0 18px 14px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${MAIL_BORDER};border-radius:10px;border-collapse:separate;">
-        <tr style="background:#f6f8fc;">
-          <td colspan="3" style="padding:10px 14px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};">📋 SÉQUENCE OPÉRATIONNELLE</td>
-          <td align="center" style="padding:10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">HEURE THÉORIQUE</td>
-          <td align="center" style="padding:10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">HEURE CONSTATÉE</td>
-          <td align="center" style="padding:10px 14px 10px 8px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:700;color:${MAIL_MUTED};">ÉCART</td>
-        </tr>
-        ${stepsRows}
-      </table>
-    </td>
-  </tr>
-  ${train.observation ? `
-  <tr>
-    <td style="padding:0 18px 14px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #fcd34d;border-radius:10px;border-collapse:separate;background:#fffbeb;">
-        <tr><td style="padding:10px 14px;">
-          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:#b45309;margin-bottom:4px;">📝 OBSERVATIONS</div>
-          <div style="${F}font-size:14px;line-height:1.55;color:#1f2937;">${escapeHtml(train.observation).replace(/\n/g, '<br>')}</div>
-        </td></tr>
-      </table>
-    </td>
-  </tr>` : ''}
-  <tr>
-    <td style="padding:0 18px 14px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td width="56%" valign="top" style="padding:12px 14px;border:1px solid ${MAIL_BORDER};border-radius:10px;">
+        <tr><td style="padding:12px 14px;">
           <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin-bottom:6px;">RÉSUMÉ CIRCULATION</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
             ${summaryRow('🚆', 'Train', escapeHtml(trainNo(train)))}
@@ -1214,19 +1190,32 @@ function buildTrainReportHTML(train, destination) {
       + summaryRow('✉', 'Mail reçu', `<span style="color:${info.mail.color};">${escapeHtml(info.mail.text)}</span>`);
   })()}
           </table>
-        </td>
-        <td width="12">&nbsp;</td>
-        <td valign="top" style="padding:12px 14px;border:1px solid ${MAIL_BORDER};border-radius:10px;">
-          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin-bottom:6px;">LÉGENDE</div>
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-            ${legendRow({ label: '-', fg: '#ffffff', bg: '#15803d' }, 'En avance')}
-            ${legendRow({ label: '0', fg: '#334155', bg: '#e2e8f0' }, "À l'heure")}
-            ${legendRow({ label: '+', fg: '#ffffff', bg: '#dc2626' }, 'En retard')}
-          </table>
-          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};margin:10px 0 4px;">INFORMATION</div>
-          <div style="${F}font-size:12px;line-height:1.5;color:${MAIL_MUTED};">Les écarts sont calculés par rapport à l'horaire théorique.<br>Heure affichée : HH:MM</div>
-        </td>
-      </tr></table>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+  ${train.observation ? `
+  <tr>
+    <td style="padding:0 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #fcd34d;border-radius:10px;border-collapse:separate;background:#fffbeb;">
+        <tr><td style="padding:10px 14px;">
+          <div style="${F}font-size:12px;font-weight:800;letter-spacing:.05em;color:#b45309;margin-bottom:4px;">📝 OBSERVATIONS</div>
+          <div style="${F}font-size:14px;line-height:1.55;color:#1f2937;">${escapeHtml(train.observation).replace(/\n/g, '<br>')}</div>
+        </td></tr>
+      </table>
+    </td>
+  </tr>` : ''}
+  <tr>
+    <td style="padding:0 18px 14px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${MAIL_BORDER};border-radius:10px;border-collapse:separate;">
+        <tr style="background:#f6f8fc;">
+          <td colspan="3" style="padding:7px 12px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:11px;font-weight:800;letter-spacing:.05em;color:${MAIL_ACCENT};">📋 SÉQUENCE OPÉRATIONNELLE</td>
+          <td align="center" style="padding:7px 6px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:10px;font-weight:700;color:${MAIL_MUTED};">HEURE THÉORIQUE</td>
+          <td align="center" style="padding:7px 6px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:10px;font-weight:700;color:${MAIL_MUTED};">HEURE CONSTATÉE</td>
+          <td align="center" style="padding:7px 12px 7px 6px;border-bottom:1px solid ${MAIL_BORDER};${F}font-size:10px;font-weight:700;color:${MAIL_MUTED};">ÉCART</td>
+        </tr>
+        ${stepsRows}
+      </table>
     </td>
   </tr>
   <tr>
